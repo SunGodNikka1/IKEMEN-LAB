@@ -70,8 +70,10 @@ coverage/
 *.dSYM.zip
 *.dSYM
 
-# App bundles (build output)
+# App bundles (build output) — macOS .app only; keep Windows IKEMENLab.App sources
 *.app/
+!windows/IKEMENLab.App/
+!windows/IKEMENLab.App/**
 
 # Provisioning profiles
 *.mobileprovision
@@ -123,3 +125,10 @@ font/
 dist/
 build/
 *.dmg
+
+# Windows WIN-1 build artifacts
+windows/**/bin/
+windows/**/obj/
+windows/publish/
+windows/_RealInstallSmoke/
+windows/_gen_tests.py

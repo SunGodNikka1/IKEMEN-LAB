@@ -1,0 +1,102 @@
+﻿<Window x:Class="IKEMENLab.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:IKEMENLab.App.ViewModels"
+        xmlns:views="clr-namespace:IKEMENLab.App.Views"
+        Title="IKEMEN Lab"
+        MinWidth="700" MinHeight="600"
+        Width="1180" Height="760"
+        Background="{DynamicResource BgDeepBrush}"
+        WindowStartupLocation="CenterScreen">
+    <Window.Resources>
+        <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
+            <views:DashboardView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:CharactersViewModel}">
+            <views:CharactersView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+            <views:SettingsView/>
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}">
+            <views:PlaceholderView/>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="220"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{DynamicResource BgPanelBrush}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="18,22,18,16">
+                    <TextBlock Text="IKEMEN Lab" FontSize="20" FontWeight="Bold"
+                               Foreground="{DynamicResource TextPrimaryBrush}"/>
+                    <TextBlock Text="Windows · WIN-1" Margin="0,4,0,0"
+                               Foreground="{DynamicResource TextMutedBrush}" FontSize="12"/>
+                </StackPanel>
+
+                <TextBlock DockPanel.Dock="Bottom" Margin="18,12"
+                           Text="{Binding StatusText}"
+                           Foreground="{DynamicResource TextMutedBrush}"
+                           FontSize="11" TextWrapping="Wrap"/>
+
+                <ListBox ItemsSource="{Binding NavItems}"
+                         SelectedValue="{Binding SelectedNav, Mode=TwoWay}"
+                         SelectedValuePath="Page"
+                         Background="Transparent"
+                         BorderThickness="0"
+                         Padding="0"
+                         Margin="0,8,0,0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Padding" Value="0"/>
+                            <Setter Property="Margin" Value="0"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
+                                                Margin="8,2" Padding="14,10" Cursor="Hand">
+                                            <ContentPresenter/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgElevatedBrush}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgElevatedBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel>
+                                <TextBlock Text="{Binding IconGlyph}" Width="22" Margin="0,0,10,0"
+                                           Foreground="{DynamicResource TextMutedBrush}"/>
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="{Binding Badge}"
+                                           FontSize="11"
+                                           Margin="8,0,0,0"
+                                           Foreground="{DynamicResource AccentBrush}"/>
+                                <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimaryBrush}"/>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Border>
+
+        <Grid Grid.Column="1" Background="{DynamicResource BgDeepBrush}">
+            <ContentControl Content="{Binding CurrentPage}"/>
+        </Grid>
+    </Grid>
+</Window>

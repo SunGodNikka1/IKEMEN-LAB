@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RootNamespace>IKEMENLab.App</RootNamespace>
+    <AssemblyName>IKEMENLab</AssemblyName>
+    <Product>IKEMEN Lab</Product>
+    <AssemblyTitle>IKEMEN Lab</AssemblyTitle>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IKEMENLab.Core\IKEMENLab.Core.csproj" />
+  </ItemGroup>
+
+</Project>

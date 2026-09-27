@@ -1,0 +1,33 @@
+<UserControl x:Class="IKEMENLab.App.Views.SettingsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <StackPanel Margin="28" MaxWidth="720" HorizontalAlignment="Left">
+        <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+        <TextBlock Text="WIN-1 stores only the selected IKEMEN root under LocalAppData. The game folder is never written."
+                   Margin="0,8,0,24" TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextMutedBrush}"/>
+
+        <TextBlock Text="IKEMEN GO root" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+        <DockPanel Margin="0,8,0,8">
+            <Button DockPanel.Dock="Right" Content="Browse…"
+                    Style="{StaticResource SecondaryButton}"
+                    Command="{Binding BrowseCommand}" Margin="8,0,0,0"/>
+            <TextBox Text="{Binding IkemenRoot, UpdateSourceTrigger=PropertyChanged}"
+                     IsReadOnly="True"
+                     Padding="12,10"
+                     Background="{DynamicResource BgElevatedBrush}"
+                     Foreground="{DynamicResource TextPrimaryBrush}"
+                     BorderBrush="{DynamicResource BorderBrush}"/>
+        </DockPanel>
+
+        <TextBlock Text="{Binding ValidationSummary}" TextWrapping="Wrap"
+                   Foreground="{DynamicResource AccentBrush}" Margin="0,4,0,20"/>
+
+        <TextBlock Text="App settings path" FontWeight="SemiBold"
+                   Foreground="{DynamicResource TextPrimaryBrush}"/>
+        <TextBlock Text="{Binding SettingsPath}" Margin="0,6,0,0" TextWrapping="Wrap"
+                   Foreground="{DynamicResource TextMutedBrush}"/>
+    </StackPanel>
+</UserControl>

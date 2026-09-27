@@ -1,0 +1,22 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Color x:Key="BgDeepColor">#FF09090B</Color>
+    <Color x:Key="BgPanelColor">#FF18181B</Color>
+    <Color x:Key="BgElevatedColor">#FF27272A</Color>
+    <Color x:Key="BorderColor">#FF3F3F46</Color>
+    <Color x:Key="TextPrimaryColor">#FFFAFAFA</Color>
+    <Color x:Key="TextMutedColor">#FFA1A1AA</Color>
+    <Color x:Key="AccentColor">#FF10B981</Color>
+    <Color x:Key="AccentHoverColor">#FF34D399</Color>
+    <Color x:Key="DangerColor">#FFF87171</Color>
+
+    <SolidColorBrush x:Key="BgDeepBrush" Color="{StaticResource BgDeepColor}"/>
+    <SolidColorBrush x:Key="BgPanelBrush" Color="{StaticResource BgPanelColor}"/>
+    <SolidColorBrush x:Key="BgElevatedBrush" Color="{StaticResource BgElevatedColor}"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}"/>
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="{StaticResource TextMutedColor}"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
+</ResourceDictionary>
