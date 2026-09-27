@@ -92,8 +92,11 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Border CornerRadius="3" Background="{DynamicResource ButtonSecondaryBrush}"/>
-                        <Border CornerRadius="3" HorizontalAlignment="Left" Background="{DynamicResource TextSecondary}"
-                                Width="{Binding GpuFillWidth}"/>
+                        <Border CornerRadius="3" Background="{DynamicResource TextSecondary}" RenderTransformOrigin="0,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="{Binding GpuFraction}"/>
+                            </Border.RenderTransform>
+                        </Border>
                         <DockPanel Grid.Row="1" Margin="0,6,0,0">
                             <TextBlock DockPanel.Dock="Right" Text="{Binding GpuPercentText}" FontSize="11"
                                        FontFamily="{StaticResource CaptionFont}" Foreground="{DynamicResource TextTertiary}"/>

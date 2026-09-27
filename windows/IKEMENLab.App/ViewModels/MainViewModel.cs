@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
+using IKEMENLab.App.Services;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.Services;
 using IKEMENLab.Core.Settings;
@@ -26,7 +27,7 @@ public sealed class MainViewModel : ObservableObject
         _settingsStore = settingsStore;
         _indexService = indexService;
 
-        Dashboard = new DashboardViewModel(launcher);
+        Dashboard = new DashboardViewModel(launcher, page => Navigate(page));
         Characters = new CharactersViewModel();
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         StagesPlaceholder = new PlaceholderViewModel
@@ -73,10 +74,17 @@ public sealed class MainViewModel : ObservableObject
     public PlaceholderViewModel ScreenpacksPlaceholder { get; }
     public PlaceholderViewModel CollectionsPlaceholder { get; }
 
-    // SYSTEM › GPU readout. Neutral until a real monitor feeds it (never a fabricated value).
-    public string GpuPercentText { get; private set; } = "—";
-    public double GpuFillWidth { get; private set; }
-    public string GpuToolTip { get; private set; } = "GPU memory readout unavailable";
+    // SYSTEM > GPU readout. Neutral until a real reading exists (never a fabricated value).
+    private string _gpuPercentText = "—";
+    private double _gpuFraction;
+    private string _gpuToolTip = "GPU memory readout unavailable";
+    private GpuMemoryMonitor? _gpuMonitor;
+    private System.Windows.Threading.DispatcherTimer? _gpuTimer;
+    private bool _gpuSampling;
+
+    public string GpuPercentText { get => _gpuPercentText; private set => SetProperty(ref _gpuPercentText, value); }
+    public double GpuFraction { get => _gpuFraction; private set => SetProperty(ref _gpuFraction, value); }
+    public string GpuToolTip { get => _gpuToolTip; private set => SetProperty(ref _gpuToolTip, value); }
 
     public ICommand NavigateCommand { get; }
     public ICommand RefreshCommand { get; }
@@ -119,6 +127,7 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task InitializeAsync()
     {
+        StartGpuMonitor();
         var settings = _settingsStore.Load();
         Settings.LoadFrom(settings, null);
         await RefreshAsync(settings.IkemenRoot);
@@ -175,6 +184,51 @@ public sealed class MainViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    private void StartGpuMonitor()
+    {
+        if (_gpuTimer is not null) return;
+        _gpuTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _gpuTimer.Tick += async (_, _) => await SampleGpuAsync();
+        _gpuTimer.Start();
+        _ = SampleGpuAsync();
+    }
+
+    private async Task SampleGpuAsync()
+    {
+        if (_gpuSampling) return;
+        _gpuSampling = true;
+        try
+        {
+            var reading = await Task.Run(() =>
+            {
+                _gpuMonitor ??= new GpuMemoryMonitor();
+                return _gpuMonitor.Read();
+            });
+
+            if (reading is null)
+            {
+                GpuPercentText = "—";
+                GpuFraction = 0;
+                GpuToolTip = "GPU memory readout unavailable";
+                if (_gpuMonitor is { IsAvailable: false }) _gpuTimer?.Stop();
+                return;
+            }
+
+            GpuFraction = reading.Fraction;
+            GpuPercentText = $"{Math.Round(reading.Fraction * 100):0}%";
+            GpuToolTip = $"{reading.AdapterName}\nDedicated memory: {reading.DedicatedUsedBytes / 1048576.0:N0} / {reading.DedicatedTotalBytes / 1048576.0:N0} MB (system-wide)";
+        }
+        catch (Exception)
+        {
+            GpuPercentText = "—";
+            GpuFraction = 0;
+        }
+        finally
+        {
+            _gpuSampling = false;
         }
     }
 

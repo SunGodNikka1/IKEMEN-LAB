@@ -92,7 +92,16 @@ public sealed class StageIndexer
             Id = relative,
             Name = StageNameExtractor.Extract(defPath),
             Author = string.IsNullOrWhiteSpace(parsed?.Author) ? "Unknown" : parsed!.Author!,
-            DefPath = relative
+            DefPath = relative,
+            InstalledAtUtc = SafeTime(() => File.GetCreationTimeUtc(defPath)),
+            ModifiedAtUtc = SafeTime(() => File.GetLastWriteTimeUtc(defPath))
         });
+    }
+
+    private static DateTime? SafeTime(Func<DateTime> read)
+    {
+        try { return read(); }
+        catch (IOException) { return null; }
+        catch (UnauthorizedAccessException) { return null; }
     }
 }
