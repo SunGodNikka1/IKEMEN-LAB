@@ -5,8 +5,13 @@
         xmlns:views="clr-namespace:IKEMENLab.App.Views"
         Title="IKEMEN Lab"
         MinWidth="700" MinHeight="600"
-        Width="1180" Height="760"
-        Background="{DynamicResource BgDeepBrush}"
+        Width="1280" Height="800"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        FontFamily="{StaticResource BodyFont}"
+        FontSize="13"
+        Foreground="{DynamicResource TextPrimary}"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <DataTemplate DataType="{x:Type vm:DashboardViewModel}">
@@ -21,6 +26,33 @@
         <DataTemplate DataType="{x:Type vm:PlaceholderViewModel}">
             <views:PlaceholderView/>
         </DataTemplate>
+
+        <!-- Sidebar row: icon · title · count badge (Mac NavButton) -->
+        <DataTemplate x:Key="NavRowTemplate" DataType="{x:Type vm:NavItem}">
+            <Button Style="{StaticResource SidebarNavButton}"
+                    Command="{Binding DataContext.NavigateCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding Page}"
+                    AutomationProperties.Name="{Binding Title}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{Binding IconGlyph}" FontFamily="{StaticResource IconFont}" FontSize="15"
+                               VerticalAlignment="Center" Margin="0,0,12,0"/>
+                    <TextBlock Grid.Column="1" Text="{Binding Title}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                    <Border Grid.Column="2" Height="20" CornerRadius="4" Padding="7,0"
+                            Background="{DynamicResource ButtonSecondaryBrush}"
+                            BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
+                            Visibility="{Binding HasBadge, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding Badge}" FontFamily="{StaticResource CaptionFont}" FontSize="11"
+                                   Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center"/>
+                    </Border>
+                </Grid>
+            </Button>
+        </DataTemplate>
     </Window.Resources>
 
     <Grid>
@@ -29,74 +61,59 @@
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" Background="{DynamicResource BgPanelBrush}"
-                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
+        <!-- ================= Sidebar ================= -->
+        <Border Grid.Column="0" Background="{DynamicResource SidebarBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,1,0">
             <DockPanel>
-                <StackPanel DockPanel.Dock="Top" Margin="18,22,18,16">
-                    <TextBlock Text="IKEMEN Lab" FontSize="20" FontWeight="Bold"
-                               Foreground="{DynamicResource TextPrimaryBrush}"/>
-                    <TextBlock Text="Windows · WIN-1" Margin="0,4,0,0"
-                               Foreground="{DynamicResource TextMutedBrush}" FontSize="12"/>
+                <!-- Logo / app name -->
+                <Border DockPanel.Dock="Top" Height="64" Margin="0,4,0,0"
+                        BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="24,0,0,0">
+                        <Border Width="24" Height="24" CornerRadius="6" Background="{DynamicResource ButtonPrimaryBrush}">
+                            <Viewbox Width="14" Height="14">
+                                <Path Data="{StaticResource FlaskGeometry}" Fill="{DynamicResource ButtonPrimaryTextBrush}"
+                                      Width="24" Height="24" Stretch="None"/>
+                            </Viewbox>
+                        </Border>
+                        <TextBlock Text="IKEMEN" Margin="8,0,0,0" FontSize="14" FontWeight="Medium"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextPrimary}"/>
+                        <TextBlock Text="Lab" Margin="4,0,0,0" FontSize="14"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource TextDisabled}"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- System + Settings pinned to bottom -->
+                <StackPanel DockPanel.Dock="Bottom" Margin="12,0,12,12">
+                    <TextBlock Text="S Y S T E M" FontSize="10" FontWeight="Medium" Margin="0,0,0,12"
+                               Foreground="{DynamicResource TextDisabled}"/>
+                    <Grid Margin="0,0,0,12" ToolTip="{Binding GpuToolTip}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="6"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Border CornerRadius="3" Background="{DynamicResource ButtonSecondaryBrush}"/>
+                        <Border CornerRadius="3" HorizontalAlignment="Left" Background="{DynamicResource TextSecondary}"
+                                Width="{Binding GpuFillWidth}"/>
+                        <DockPanel Grid.Row="1" Margin="0,6,0,0">
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding GpuPercentText}" FontSize="11"
+                                       FontFamily="{StaticResource CaptionFont}" Foreground="{DynamicResource TextTertiary}"/>
+                            <TextBlock Text="GPU" FontSize="11" FontFamily="{StaticResource CaptionFont}"
+                                       Foreground="{DynamicResource TextTertiary}"/>
+                        </DockPanel>
+                    </Grid>
+                    <ContentControl Content="{Binding SettingsNav}" ContentTemplate="{StaticResource NavRowTemplate}"
+                                    Focusable="False"/>
                 </StackPanel>
 
-                <TextBlock DockPanel.Dock="Bottom" Margin="18,12"
-                           Text="{Binding StatusText}"
-                           Foreground="{DynamicResource TextMutedBrush}"
-                           FontSize="11" TextWrapping="Wrap"/>
-
-                <ListBox ItemsSource="{Binding NavItems}"
-                         SelectedValue="{Binding SelectedNav, Mode=TwoWay}"
-                         SelectedValuePath="Page"
-                         Background="Transparent"
-                         BorderThickness="0"
-                         Padding="0"
-                         Margin="0,8,0,0"
-                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                    <ListBox.ItemContainerStyle>
-                        <Style TargetType="ListBoxItem">
-                            <Setter Property="Padding" Value="0"/>
-                            <Setter Property="Margin" Value="0"/>
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                            <Setter Property="Template">
-                                <Setter.Value>
-                                    <ControlTemplate TargetType="ListBoxItem">
-                                        <Border x:Name="Bd" Background="Transparent" CornerRadius="8"
-                                                Margin="8,2" Padding="14,10" Cursor="Hand">
-                                            <ContentPresenter/>
-                                        </Border>
-                                        <ControlTemplate.Triggers>
-                                            <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgElevatedBrush}"/>
-                                            </Trigger>
-                                            <Trigger Property="IsSelected" Value="True">
-                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource BgElevatedBrush}"/>
-                                            </Trigger>
-                                        </ControlTemplate.Triggers>
-                                    </ControlTemplate>
-                                </Setter.Value>
-                            </Setter>
-                        </Style>
-                    </ListBox.ItemContainerStyle>
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <DockPanel>
-                                <TextBlock Text="{Binding IconGlyph}" Width="22" Margin="0,0,10,0"
-                                           Foreground="{DynamicResource TextMutedBrush}"/>
-                                <TextBlock DockPanel.Dock="Right"
-                                           Text="{Binding Badge}"
-                                           FontSize="11"
-                                           Margin="8,0,0,0"
-                                           Foreground="{DynamicResource AccentBrush}"/>
-                                <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimaryBrush}"/>
-                            </DockPanel>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
+                <!-- Primary navigation -->
+                <ItemsControl ItemsSource="{Binding NavItems}" ItemTemplate="{StaticResource NavRowTemplate}"
+                              Margin="12,20,12,0" Focusable="False"/>
             </DockPanel>
         </Border>
 
-        <Grid Grid.Column="1" Background="{DynamicResource BgDeepBrush}">
-            <ContentControl Content="{Binding CurrentPage}"/>
+        <!-- ================= Page host ================= -->
+        <Grid Grid.Column="1" Background="{DynamicResource WindowBackgroundBrush}">
+            <ContentControl Content="{Binding CurrentPage}" Focusable="False"/>
         </Grid>
     </Grid>
 </Window>

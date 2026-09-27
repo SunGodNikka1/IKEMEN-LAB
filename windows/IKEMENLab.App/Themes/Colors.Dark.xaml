@@ -1,14 +1,28 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Tokens mirror IKEMEN Lab/Shared/UIHelpers.swift DesignColors (dark theme, the default). -->
+
+    <!-- Zinc palette -->
+    <Color x:Key="Zinc950Color">#FF09090B</Color>
+    <Color x:Key="Zinc900Color">#FF18181B</Color>
+    <Color x:Key="Zinc800Color">#FF27272A</Color>
+    <Color x:Key="Zinc700Color">#FF3F3F46</Color>
+    <Color x:Key="Zinc600Color">#FF52525B</Color>
+    <Color x:Key="Zinc500Color">#FF71717A</Color>
+    <Color x:Key="Zinc400Color">#FFA1A1AA</Color>
+    <Color x:Key="Zinc300Color">#FFD4D4D8</Color>
+    <Color x:Key="Zinc200Color">#FFE4E4E7</Color>
+
+    <!-- Legacy WIN-1 keys (kept so older views keep resolving) -->
     <Color x:Key="BgDeepColor">#FF09090B</Color>
-    <Color x:Key="BgPanelColor">#FF18181B</Color>
-    <Color x:Key="BgElevatedColor">#FF27272A</Color>
-    <Color x:Key="BorderColor">#FF3F3F46</Color>
-    <Color x:Key="TextPrimaryColor">#FFFAFAFA</Color>
+    <Color x:Key="BgPanelColor">#FF0C0C0E</Color>
+    <Color x:Key="BgElevatedColor">#FF18181B</Color>
+    <Color x:Key="BorderColor">#FF27272A</Color>
+    <Color x:Key="TextPrimaryColor">#FFFFFFFF</Color>
     <Color x:Key="TextMutedColor">#FFA1A1AA</Color>
     <Color x:Key="AccentColor">#FF10B981</Color>
     <Color x:Key="AccentHoverColor">#FF34D399</Color>
-    <Color x:Key="DangerColor">#FFF87171</Color>
+    <Color x:Key="DangerColor">#FFEF4444</Color>
 
     <SolidColorBrush x:Key="BgDeepBrush" Color="{StaticResource BgDeepColor}"/>
     <SolidColorBrush x:Key="BgPanelBrush" Color="{StaticResource BgPanelColor}"/>
@@ -19,4 +33,80 @@
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}"/>
     <SolidColorBrush x:Key="AccentHoverBrush" Color="{StaticResource AccentHoverColor}"/>
     <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}"/>
+
+    <!-- Backgrounds -->
+    <SolidColorBrush x:Key="WindowBackgroundBrush" Color="#FF09090B"/>
+    <SolidColorBrush x:Key="SidebarBackgroundBrush" Color="#FF09090B"/>
+    <SolidColorBrush x:Key="CardBackgroundBrush" Color="#3318181B"/>
+    <SolidColorBrush x:Key="CardBackgroundHoverBrush" Color="#6618181B"/>
+    <SolidColorBrush x:Key="CardSolidBrush" Color="#FF0F0F11"/>
+    <SolidColorBrush x:Key="PanelBackgroundBrush" Color="#FF0C0C0E"/>
+    <SolidColorBrush x:Key="InputBackgroundBrush" Color="#8018181B"/>
+    <SolidColorBrush x:Key="HoverBackgroundBrush" Color="#8018181B"/>
+    <SolidColorBrush x:Key="SelectedBackgroundBrush" Color="#FF18181B"/>
+    <SolidColorBrush x:Key="RowHoverBrush" Color="#0AFFFFFF"/>
+    <SolidColorBrush x:Key="RowSelectedBrush" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="PlaceholderBackgroundBrush" Color="#FF18181B"/>
+    <SolidColorBrush x:Key="OverlayHighlightBrush" Color="#0DFFFFFF"/>
+
+    <!-- Text -->
+    <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#FFA1A1AA"/>
+    <SolidColorBrush x:Key="TextTertiary" Color="#FF71717A"/>
+    <SolidColorBrush x:Key="TextDisabled" Color="#FF52525B"/>
+    <SolidColorBrush x:Key="TextHover" Color="#FFE4E4E7"/>
+
+    <!-- Borders -->
+    <SolidColorBrush x:Key="BorderSubtle" Color="#0DFFFFFF"/>
+    <SolidColorBrush x:Key="BorderHover" Color="#1AFFFFFF"/>
+    <SolidColorBrush x:Key="BorderStrong" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="BorderActive" Color="#FF3F3F46"/>
+    <SolidColorBrush x:Key="BorderDashed" Color="#FF27272A"/>
+
+    <!-- Buttons -->
+    <SolidColorBrush x:Key="ButtonPrimaryBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="ButtonPrimaryHoverBrush" Color="#FFE4E4E7"/>
+    <SolidColorBrush x:Key="ButtonPrimaryTextBrush" Color="#FF09090B"/>
+    <SolidColorBrush x:Key="ButtonSecondaryBrush" Color="#0DFFFFFF"/>
+    <SolidColorBrush x:Key="ButtonSecondaryHoverBrush" Color="#1AFFFFFF"/>
+
+    <!-- Semantic -->
+    <SolidColorBrush x:Key="PositiveBrush" Color="#FF10B981"/>
+    <SolidColorBrush x:Key="PositiveBackgroundBrush" Color="#1A10B981"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="#FFF59E0B"/>
+    <SolidColorBrush x:Key="WarningBackgroundBrush" Color="#1AF59E0B"/>
+    <SolidColorBrush x:Key="NegativeBrush" Color="#FFEF4444"/>
+    <SolidColorBrush x:Key="NegativeBackgroundBrush" Color="#26EF4444"/>
+    <SolidColorBrush x:Key="InfoBrush" Color="#FF3B82F6"/>
+    <SolidColorBrush x:Key="InfoHoverBrush" Color="#FF60A5FA"/>
+    <SolidColorBrush x:Key="InfoBackgroundBrush" Color="#1A3B82F6"/>
+
+    <!-- Content badges -->
+    <SolidColorBrush x:Key="BadgeCharacterBrush" Color="#FF3B82F6"/>
+    <SolidColorBrush x:Key="BadgeCharacterBackgroundBrush" Color="#1A3B82F6"/>
+    <SolidColorBrush x:Key="BadgeStageBrush" Color="#FF8B5CF6"/>
+    <SolidColorBrush x:Key="BadgeStageBackgroundBrush" Color="#1A8B5CF6"/>
+    <SolidColorBrush x:Key="BadgeNeutralBrush" Color="#FFA1A1AA"/>
+    <SolidColorBrush x:Key="BadgeNeutralBackgroundBrush" Color="#0DFFFFFF"/>
+
+    <!-- Toggles / segmented (the reference screenshots use blue for on-state) -->
+    <SolidColorBrush x:Key="ToggleOnBrush" Color="#FF3B82F6"/>
+    <SolidColorBrush x:Key="ToggleOffBrush" Color="#FF27272A"/>
+    <SolidColorBrush x:Key="ToggleKnobBrush" Color="#FFFFFFFF"/>
+
+    <!-- Scrollbar -->
+    <SolidColorBrush x:Key="ScrollThumbBrush" Color="#FF3F3F46"/>
+    <SolidColorBrush x:Key="ScrollThumbHoverBrush" Color="#FF52525B"/>
+
+    <!-- Attribute bars (inspector) -->
+    <SolidColorBrush x:Key="StatLifeBrush" Color="#FF10B981"/>
+    <SolidColorBrush x:Key="StatAttackBrush" Color="#FFEF4444"/>
+    <SolidColorBrush x:Key="StatDefenceBrush" Color="#FF3B82F6"/>
+    <SolidColorBrush x:Key="StatPowerBrush" Color="#FFF59E0B"/>
+    <SolidColorBrush x:Key="StatTrackBrush" Color="#FF27272A"/>
+
+    <SolidColorBrush x:Key="Zinc800Brush" Color="#FF27272A"/>
+    <SolidColorBrush x:Key="MenuBackgroundBrush" Color="#FF18181B"/>
+
+    <Color x:Key="TitleBarColor">#FF09090B</Color>
 </ResourceDictionary>

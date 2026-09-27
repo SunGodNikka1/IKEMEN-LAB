@@ -17,4 +17,12 @@
     <ProjectReference Include="..\IKEMENLab.Core\IKEMENLab.Core.csproj" />
   </ItemGroup>
 
+  <!-- Design fonts are shared with the macOS app (single source under IKEMEN Lab/Resources/Fonts). -->
+  <ItemGroup>
+    <Resource Include="..\..\IKEMEN Lab\Resources\Fonts\Inter-Regular.ttf" Link="Assets\Fonts\Inter-Regular.ttf" />
+    <Resource Include="..\..\IKEMEN Lab\Resources\Fonts\Manrope-Regular.ttf" Link="Assets\Fonts\Manrope-Regular.ttf" />
+    <Resource Include="..\..\IKEMEN Lab\Resources\Fonts\Manrope-Medium.ttf" Link="Assets\Fonts\Manrope-Medium.ttf" />
+    <Resource Include="..\..\IKEMEN Lab\Resources\Fonts\Montserrat-SemiBold.ttf" Link="Assets\Fonts\Montserrat-SemiBold.ttf" />
+  </ItemGroup>
+
 </Project>

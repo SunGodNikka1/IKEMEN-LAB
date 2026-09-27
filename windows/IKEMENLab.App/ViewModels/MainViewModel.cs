@@ -47,13 +47,12 @@ public sealed class MainViewModel : ObservableObject
 
         NavItems =
         [
-            new NavItem { Page = NavPage.Dashboard, Title = "Dashboard", IconGlyph = "⌂" },
-            new NavItem { Page = NavPage.Characters, Title = "Characters", IconGlyph = "♟" },
-            new NavItem { Page = NavPage.Stages, Title = "Stages", IconGlyph = "▤" },
-            new NavItem { Page = NavPage.Screenpacks, Title = "Screenpacks", IconGlyph = "▦" },
-            new NavItem { Page = NavPage.Collections, Title = "Collections", IconGlyph = "☰" },
-            new NavItem { Page = NavPage.Settings, Title = "Settings", IconGlyph = "⚙" }
+            new NavItem { Page = NavPage.Dashboard, Title = "Dashboard", IconGlyph = "\uF0E2" },
+            new NavItem { Page = NavPage.Characters, Title = "Characters", IconGlyph = "\uE77B", Badge = "0" },
+            new NavItem { Page = NavPage.Stages, Title = "Stages", IconGlyph = "\uE91B", Badge = "0" },
+            new NavItem { Page = NavPage.Screenpacks, Title = "Screenpacks", IconGlyph = "\uE81E" }
         ];
+        SettingsNav = new NavItem { Page = NavPage.Settings, Title = "Settings", IconGlyph = "\uE713" };
 
         NavigateCommand = new RelayCommand(p =>
         {
@@ -66,12 +65,18 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ObservableCollection<NavItem> NavItems { get; }
+    public NavItem SettingsNav { get; }
     public DashboardViewModel Dashboard { get; }
     public CharactersViewModel Characters { get; }
     public SettingsViewModel Settings { get; }
     public PlaceholderViewModel StagesPlaceholder { get; }
     public PlaceholderViewModel ScreenpacksPlaceholder { get; }
     public PlaceholderViewModel CollectionsPlaceholder { get; }
+
+    // SYSTEM › GPU readout. Neutral until a real monitor feeds it (never a fabricated value).
+    public string GpuPercentText { get; private set; } = "—";
+    public double GpuFillWidth { get; private set; }
+    public string GpuToolTip { get; private set; } = "GPU memory readout unavailable";
 
     public ICommand NavigateCommand { get; }
     public ICommand RefreshCommand { get; }
@@ -179,19 +184,22 @@ public sealed class MainViewModel : ObservableObject
         {
             item.Badge = item.Page switch
             {
-                NavPage.Characters => snapshot?.CharacterCount.ToString() ?? "0",
-                NavPage.Stages => snapshot?.StageCount.ToString() ?? "0",
+                NavPage.Characters => (snapshot?.CharacterCount ?? 0).ToString(),
+                NavPage.Stages => (snapshot?.StageCount ?? 0).ToString(),
                 _ => null
             };
         }
-
-        OnPropertyChanged(nameof(NavItems));
     }
 
     private void Navigate(NavPage page)
     {
         _selectedNav = page;
         OnPropertyChanged(nameof(SelectedNav));
+        foreach (var item in NavItems)
+        {
+            item.IsSelected = item.Page == page;
+        }
+        SettingsNav.IsSelected = page == NavPage.Settings;
         CurrentPage = page switch
         {
             NavPage.Dashboard => Dashboard,

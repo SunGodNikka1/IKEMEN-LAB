@@ -22,6 +22,16 @@ public partial class App : Application
         var folderPicker = new FolderPicker();
         var mainVm = new MainViewModel(settingsStore, indexService, launcher, folderPicker);
 
+        // Optional start page, e.g. "--page=Characters" (used for visual QA captures).
+        foreach (var arg in e.Args)
+        {
+            if (arg.StartsWith("--page=", StringComparison.OrdinalIgnoreCase) &&
+                Enum.TryParse<NavPage>(arg["--page=".Length..], ignoreCase: true, out var page))
+            {
+                mainVm.SelectedNav = page;
+            }
+        }
+
         var window = new MainWindow(mainVm);
         MainWindow = window;
         window.Show();
