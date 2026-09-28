@@ -148,7 +148,8 @@ public sealed class SafeMutationService : ISafeMutationService
         }
         catch (Exception ex)
         {
-            var failure = FileReplacer.Classify(ex, plan.TargetPath);
+            var isDirectory = plan.Kind is MutationKind.CreateDirectory or MutationKind.ReplaceDirectory;
+            var failure = FileReplacer.Classify(ex, plan.TargetPath, isDirectory);
             manifest.Status = MutationStatus.Failed;
             manifest.FailureKind = failure.Kind;
             manifest.Win32Error = failure.Win32Error;
@@ -159,9 +160,9 @@ public sealed class SafeMutationService : ISafeMutationService
                 var restored = TryEmergencyRestore(manifest);
                 if (restored)
                 {
-                    manifest.Error = failure.Message.Replace(
-                        "The file was not changed.", "The original file was restored from backup.",
-                        StringComparison.Ordinal);
+                    manifest.Error = failure.Message
+                        .Replace(FileReplacer.FileUnchanged, "The original file was restored from backup.", StringComparison.Ordinal)
+                        .Replace(FileReplacer.FolderUnchanged, "The original folder was restored from backup.", StringComparison.Ordinal);
                 }
             }
             catch (Exception restoreEx)
@@ -209,11 +210,7 @@ public sealed class SafeMutationService : ISafeMutationService
                     break;
 
                 case MutationKind.CreateDirectory:
-                    if (Directory.Exists(manifest.TargetPath))
-                    {
-                        Directory.Delete(manifest.TargetPath, recursive: true);
-                    }
-
+                    RemoveCreatedDirectory(manifest.TargetPath);
                     break;
 
                 case MutationKind.ReplaceDirectory:
@@ -228,7 +225,8 @@ public sealed class SafeMutationService : ISafeMutationService
         }
         catch (Exception ex)
         {
-            var failure = FileReplacer.Classify(ex, manifest.TargetPath);
+            var failure = FileReplacer.Classify(ex, manifest.TargetPath,
+                manifest.Kind is MutationKind.CreateDirectory or MutationKind.ReplaceDirectory);
             manifest.Status = MutationStatus.Failed;
             manifest.Error = "Rollback failed: " + failure.Message;
             manifest.ErrorDetail = failure.TechnicalDetail;
@@ -454,16 +452,79 @@ public sealed class SafeMutationService : ISafeMutationService
         IkemenPathGuard.EnsureNoReparseEscape(plan.IkemenRoot, plan.TargetPath);
         IkemenPathGuard.EnsureDistinctPaths(plan.SourcePath, plan.TargetPath);
 
-        var stagingRoot = Path.Combine(backupDir, "staging");
-        CopyDirectory(plan.SourcePath, stagingRoot);
-        manifest.StagingPath = stagingRoot;
+        var target = Path.TrimEndingDirectorySeparator(plan.TargetPath);
+        var staging = StageDirectoryBeside(plan.SourcePath, target, manifest);
         manifest.BeforeHash = null;
+        try
+        {
+            File.WriteAllText(Path.Combine(backupDir, "created-dir.txt"), target);
 
-        // Stage validated — move into place (copy then verify).
-        CopyDirectory(stagingRoot, plan.TargetPath);
-        manifest.AfterHash = IkemenPathGuard.Sha256DirectoryFingerprint(plan.TargetPath);
-        File.WriteAllText(Path.Combine(backupDir, "created-dir.txt"), plan.TargetPath);
-        manifest.BackupPath = backupDir;
+            // A same-parent rename: the folder appears complete or not at all, and fails (rather than
+            // merging) if something created the target meanwhile.
+            FileReplacer.MoveDirectory(staging, target, target);
+
+            // Only now does the target belong to this operation, so only now may a failure remove it.
+            manifest.BackupPath = backupDir;
+            VerifyDirectory(target, manifest);
+        }
+        finally
+        {
+            FileReplacer.TryDeleteDirectory(staging);
+        }
+    }
+
+    /// <summary>
+    /// Copies <paramref name="source"/> to a hidden staging folder next to <paramref name="target"/>
+    /// (same volume, so the final swap is a rename) and verifies the copy against the source.
+    /// </summary>
+    private static string StageDirectoryBeside(string source, string target, MutationManifest manifest)
+    {
+        var parent = Path.GetDirectoryName(target)!;
+        Directory.CreateDirectory(parent);
+        FileReplacer.SweepStaleStaging(parent, StaleStagingAge);
+
+        var staging = Path.Combine(parent, $".ikemenlab-{manifest.OperationId}.tmp");
+        manifest.StagingPath = staging;
+        manifest.ExpectedAfterHash = IkemenPathGuard.Sha256DirectoryFingerprint(source);
+        try
+        {
+            CopyDirectory(source, staging);
+            if (!string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(staging), manifest.ExpectedAfterHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    $"The staged copy of '{Path.GetFileName(target)}' did not match the source (the source may have " +
+                    $"changed while it was being copied). {FileReplacer.FolderUnchanged}");
+            }
+        }
+        catch
+        {
+            FileReplacer.TryDeleteDirectory(staging);
+            throw;
+        }
+
+        return staging;
+    }
+
+    private static void VerifyDirectory(string target, MutationManifest manifest)
+    {
+        manifest.AfterHash = IkemenPathGuard.Sha256DirectoryFingerprint(target);
+        if (!string.Equals(manifest.AfterHash, manifest.ExpectedAfterHash, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                $"'{Path.GetFileName(target)}' did not match the installed content after the swap.",
+                $"expected={manifest.ExpectedAfterHash} actual={manifest.AfterHash}");
+        }
+    }
+
+    private static void RemoveCreatedDirectory(string target)
+    {
+        if (!FileReplacer.TryDeleteDirectory(target))
+        {
+            throw new SafeMutationException(MutationFailureKind.InUse,
+                $"'{Path.GetFileName(Path.TrimEndingDirectorySeparator(target))}' could not be removed because a file " +
+                "inside it is in use. Close programs using it and try again.");
+        }
     }
 
     private void ExecuteReplaceDirectory(OperationPlan plan, string backupDir, MutationManifest manifest)
@@ -477,57 +538,74 @@ public sealed class SafeMutationService : ISafeMutationService
         IkemenPathGuard.EnsureNoReparseEscape(plan.IkemenRoot, plan.TargetPath);
         IkemenPathGuard.EnsureDistinctPaths(plan.SourcePath, plan.TargetPath);
 
+        var target = Path.TrimEndingDirectorySeparator(plan.TargetPath);
         var originalBackup = Path.Combine(backupDir, "original");
-        var stagingRoot = Path.Combine(backupDir, "staging");
-        CopyDirectory(plan.SourcePath, stagingRoot);
-        manifest.StagingPath = stagingRoot;
-
-        string? displaced = null;
-        if (Directory.Exists(plan.TargetPath))
-        {
-            manifest.BeforeHash = IkemenPathGuard.Sha256DirectoryFingerprint(plan.TargetPath);
-            CopyDirectory(plan.TargetPath, originalBackup);
-            manifest.BackupPath = originalBackup;
-
-            displaced = plan.TargetPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                        + $".__ikemenlab_old_{manifest.OperationId}";
-            Directory.Move(plan.TargetPath, displaced);
-        }
-        else
-        {
-            Directory.CreateDirectory(originalBackup);
-            File.WriteAllText(Path.Combine(backupDir, "did-not-exist.txt"), plan.TargetPath);
-            manifest.BackupPath = backupDir;
-        }
-
+        var staging = StageDirectoryBeside(plan.SourcePath, target, manifest);
+        var displaced = Path.Combine(Path.GetDirectoryName(target)!, $".ikemenlab-{manifest.OperationId}.old");
+        var committed = false;
         try
         {
-            CopyDirectory(stagingRoot, plan.TargetPath);
-            manifest.AfterHash = IkemenPathGuard.Sha256DirectoryFingerprint(plan.TargetPath);
-
-            if (displaced is not null && Directory.Exists(displaced))
+            if (!Directory.Exists(target))
             {
-                Directory.Delete(displaced, recursive: true);
+                Directory.CreateDirectory(originalBackup);
+                File.WriteAllText(Path.Combine(backupDir, "did-not-exist.txt"), target);
+                FileReplacer.MoveDirectory(staging, target, target);
+                manifest.BackupPath = backupDir;
+                committed = true;
+                VerifyDirectory(target, manifest);
+                return;
             }
+
+            // Verified app-owned backup first (Undo needs it); only then is the live folder touched.
+            manifest.BeforeHash = IkemenPathGuard.Sha256DirectoryFingerprint(target);
+            CopyDirectory(target, originalBackup);
+            if (!string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(originalBackup), manifest.BeforeHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    $"The backup of '{Path.GetFileName(target)}' could not be verified. {FileReplacer.FolderUnchanged}");
+            }
+
+            manifest.BackupPath = originalBackup;
+
+            // Two same-parent renames. If the first fails (a file inside is open) the folder is untouched;
+            // if the second fails the original is renamed straight back.
+            FileReplacer.MoveDirectory(target, displaced, target);
+            try
+            {
+                FileReplacer.MoveDirectory(staging, target, target);
+            }
+            catch
+            {
+                Directory.Move(displaced, target);
+                throw;
+            }
+
+            try
+            {
+                VerifyDirectory(target, manifest);
+            }
+            catch
+            {
+                // Put the untouched original back; the rejected copy is discarded.
+                var rejected = Path.Combine(Path.GetDirectoryName(target)!, $".ikemenlab-{manifest.OperationId}-rejected.tmp");
+                Directory.Move(target, rejected);
+                Directory.Move(displaced, target);
+                FileReplacer.TryDeleteDirectory(rejected);
+                throw;
+            }
+
+            committed = true;
         }
-        catch
+        finally
         {
-            // Restore displaced directory if the new tree failed.
-            if (Directory.Exists(plan.TargetPath))
+            FileReplacer.TryDeleteDirectory(staging);
+            if (committed && Directory.Exists(displaced) && !FileReplacer.TryDeleteDirectory(displaced))
             {
-                try { Directory.Delete(plan.TargetPath, recursive: true); } catch { /* best effort */ }
+                // Cleanup only: the new content is in place and a full backup exists. Leave the hidden
+                // displaced folder for the user rather than failing a completed install.
+                manifest.ErrorDetail = $"Could not remove the previous version at '{displaced}' (a file inside may be open).";
             }
-
-            if (displaced is not null && Directory.Exists(displaced))
-            {
-                Directory.Move(displaced, plan.TargetPath);
-            }
-            else if (Directory.Exists(originalBackup) && Directory.EnumerateFileSystemEntries(originalBackup).Any())
-            {
-                CopyDirectory(originalBackup, plan.TargetPath);
-            }
-
-            throw;
         }
     }
 
@@ -544,11 +622,11 @@ public sealed class SafeMutationService : ISafeMutationService
             case MutationKind.ReplaceFile:
                 return RestoreFileFromBackup(manifest, force: false);
             case MutationKind.CreateDirectory:
-                if (Directory.Exists(manifest.TargetPath)) Directory.Delete(manifest.TargetPath, true);
+                // BackupPath is only set once the target was created by this operation.
+                RemoveCreatedDirectory(manifest.TargetPath);
                 return false;
             case MutationKind.ReplaceDirectory:
-                RestoreDirectoryFromBackup(manifest);
-                return true;
+                return RestoreDirectoryFromBackup(manifest);
         }
 
         return false;
@@ -628,9 +706,24 @@ public sealed class SafeMutationService : ISafeMutationService
         return false;
     }
 
-    private static void RestoreDirectoryFromBackup(MutationManifest manifest)
+    /// <summary>
+    /// Restores a ReplaceDirectory target from its app-owned backup. A target that still matches the
+    /// original fingerprint is left untouched (the usual case when the swap itself was refused). The
+    /// backup is staged beside the target and renamed into place, so the live folder is never deleted
+    /// before a complete, verified replacement exists.
+    /// </summary>
+    private static bool RestoreDirectoryFromBackup(MutationManifest manifest)
     {
-        if (manifest.BackupPath is null) return;
+        if (manifest.BackupPath is null) return false;
+        var target = Path.TrimEndingDirectorySeparator(manifest.TargetPath);
+
+        var marker = Path.Combine(manifest.BackupPath, "did-not-exist.txt");
+        if (File.Exists(marker))
+        {
+            if (!Directory.Exists(target)) return false;
+            RemoveCreatedDirectory(target);
+            return true;
+        }
 
         var original = Path.Combine(manifest.BackupPath, "original");
         if (!Directory.Exists(original))
@@ -638,25 +731,53 @@ public sealed class SafeMutationService : ISafeMutationService
             original = manifest.BackupPath;
         }
 
-        var marker = Path.Combine(manifest.BackupPath, "did-not-exist.txt");
-        if (File.Exists(marker))
+        if (!Directory.Exists(original)) return false;
+
+        if (Directory.Exists(target) && manifest.BeforeHash is not null &&
+            string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(target), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
         {
-            if (Directory.Exists(manifest.TargetPath))
+            manifest.OriginalVerifiedIntact = true;
+            return false;
+        }
+
+        var parent = Path.GetDirectoryName(target)!;
+        Directory.CreateDirectory(parent);
+        var staging = Path.Combine(parent, $".ikemenlab-{manifest.OperationId}-restore.tmp");
+        var displaced = Path.Combine(parent, $".ikemenlab-{manifest.OperationId}-restore.old");
+        try
+        {
+            FileReplacer.TryDeleteDirectory(staging);
+            CopyDirectory(original, staging);
+            if (manifest.BeforeHash is not null &&
+                !string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(staging), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
             {
-                Directory.Delete(manifest.TargetPath, recursive: true);
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    "The backup copy did not match the original folder; nothing was restored.");
             }
 
-            return;
+            if (Directory.Exists(target))
+            {
+                FileReplacer.MoveDirectory(target, displaced, target);
+            }
+
+            try
+            {
+                FileReplacer.MoveDirectory(staging, target, target);
+            }
+            catch
+            {
+                if (Directory.Exists(displaced) && !Directory.Exists(target)) Directory.Move(displaced, target);
+                throw;
+            }
         }
-
-        if (!Directory.Exists(original)) return;
-
-        if (Directory.Exists(manifest.TargetPath))
+        finally
         {
-            Directory.Delete(manifest.TargetPath, recursive: true);
+            FileReplacer.TryDeleteDirectory(staging);
         }
 
-        CopyDirectory(original, manifest.TargetPath);
+        FileReplacer.TryDeleteDirectory(displaced);
+        manifest.OriginalVerifiedIntact = true;
+        return true;
     }
 
     private OperationPlan BuildPlan(

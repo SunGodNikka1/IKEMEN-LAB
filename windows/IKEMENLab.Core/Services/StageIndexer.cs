@@ -1,4 +1,5 @@
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.Mutations;
 using IKEMENLab.Core.Parsing;
 
 namespace IKEMENLab.Core.Services;
@@ -31,7 +32,7 @@ public sealed class StageIndexer
                     continue;
                 }
 
-                if (!Directory.Exists(item)) continue;
+                if (!Directory.Exists(item) || IkemenLabStaging.IsStagingName(item)) continue;
 
                 foreach (var def in Directory.EnumerateFiles(item, "*.def"))
                 {

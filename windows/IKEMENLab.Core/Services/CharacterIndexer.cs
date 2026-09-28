@@ -1,4 +1,5 @@
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.Mutations;
 using IKEMENLab.Core.Parsing;
 
 namespace IKEMENLab.Core.Services;
@@ -23,6 +24,7 @@ public sealed class CharacterIndexer
 
         foreach (var topFolder in Directory.EnumerateDirectories(charsRoot))
         {
+            if (IkemenLabStaging.IsStagingName(topFolder)) continue;
             try
             {
                 var entry = ResolveCharacter(rootPath, charsRoot, topFolder, nested: false);
