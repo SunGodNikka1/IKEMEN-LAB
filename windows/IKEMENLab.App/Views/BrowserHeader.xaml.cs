@@ -2,10 +2,11 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using IKEMENLab.App.ViewModels;
+using IKEMENLab.Core.Services;
 
 namespace IKEMENLab.App.Views;
 
-/// <summary>Breadcrumb · search · Grid/List segmented control shared by the browsers.</summary>
+/// <summary>Breadcrumb · search · sort · Grid/List segmented control shared by the browsers.</summary>
 public partial class BrowserHeader : UserControl
 {
     public static readonly DependencyProperty SectionProperty =
@@ -17,6 +18,13 @@ public partial class BrowserHeader : UserControl
     public static readonly DependencyProperty SearchTextProperty =
         DependencyProperty.Register(nameof(SearchText), typeof(string), typeof(BrowserHeader),
             new FrameworkPropertyMetadata(string.Empty, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+
+    public static readonly DependencyProperty SortModeProperty =
+        DependencyProperty.Register(nameof(SortMode), typeof(BrowserSortMode), typeof(BrowserHeader),
+            new FrameworkPropertyMetadata(BrowserSortMode.Default, FrameworkPropertyMetadataOptions.BindsTwoWayByDefault));
+
+    public static readonly DependencyProperty ShowSortProperty =
+        DependencyProperty.Register(nameof(ShowSort), typeof(bool), typeof(BrowserHeader), new PropertyMetadata(true));
 
     public static readonly DependencyProperty ViewModeProperty =
         DependencyProperty.Register(nameof(ViewMode), typeof(BrowserViewMode), typeof(BrowserHeader),
@@ -44,9 +52,13 @@ public partial class BrowserHeader : UserControl
 
     public string GroupKey { get; }
 
+    public IReadOnlyList<BrowserSortOption> SortOptions => DateAddedSort.Options;
+
     public string Section { get => (string)GetValue(SectionProperty); set => SetValue(SectionProperty, value); }
     public string CountText { get => (string)GetValue(CountTextProperty); set => SetValue(CountTextProperty, value); }
     public string SearchText { get => (string)GetValue(SearchTextProperty); set => SetValue(SearchTextProperty, value); }
+    public BrowserSortMode SortMode { get => (BrowserSortMode)GetValue(SortModeProperty); set => SetValue(SortModeProperty, value); }
+    public bool ShowSort { get => (bool)GetValue(ShowSortProperty); set => SetValue(ShowSortProperty, value); }
     public BrowserViewMode ViewMode { get => (BrowserViewMode)GetValue(ViewModeProperty); set => SetValue(ViewModeProperty, value); }
     public bool ShowViewToggle { get => (bool)GetValue(ShowViewToggleProperty); set => SetValue(ShowViewToggleProperty, value); }
     public ICommand? HomeCommand { get => (ICommand?)GetValue(HomeCommandProperty); set => SetValue(HomeCommandProperty, value); }

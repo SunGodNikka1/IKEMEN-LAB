@@ -8,6 +8,7 @@ using IKEMENLab.App.Services;
 using IKEMENLab.Core.Characters;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.SelectDef;
+using IKEMENLab.Core.Services;
 
 namespace IKEMENLab.App.ViewModels;
 
@@ -26,6 +27,7 @@ public sealed class CharactersViewModel : ObservableObject
     private readonly Func<Task> _refreshLibrary;
     private readonly List<CharacterRowViewModel> _all = [];
     private string _searchText = string.Empty;
+    private BrowserSortMode _sortMode = BrowserSortMode.Default;
     private BrowserViewMode _viewMode = BrowserViewMode.List;
     private CharacterRowViewModel? _selected;
     private CharacterInspectorViewModel? _inspector;
@@ -68,6 +70,17 @@ public sealed class CharactersViewModel : ObservableObject
             if (SetProperty(ref _searchText, value)) ApplyFilter();
         }
     }
+
+    public BrowserSortMode SortMode
+    {
+        get => _sortMode;
+        set
+        {
+            if (SetProperty(ref _sortMode, value)) ApplyFilter();
+        }
+    }
+
+    public IReadOnlyList<BrowserSortOption> SortOptions => DateAddedSort.Options;
 
     public BrowserViewMode ViewMode
     {
@@ -173,11 +186,15 @@ public sealed class CharactersViewModel : ObservableObject
     {
         var query = SearchText.Trim();
         var keep = Selected;
+        var filtered = _all.Where(row => query.Length == 0 || row.Matches(query));
+        var ordered = DateAddedSort.Apply(
+            filtered,
+            SortMode,
+            row => row.Entry.InstalledAtUtc,
+            row => row.DisplayName);
+
         Characters.Clear();
-        foreach (var row in _all)
-        {
-            if (query.Length == 0 || row.Matches(query)) Characters.Add(row);
-        }
+        foreach (var row in ordered) Characters.Add(row);
 
         if (keep is not null && !Characters.Contains(keep)) Selected = Characters.FirstOrDefault();
         OnPropertyChanged(nameof(VisibleCount));

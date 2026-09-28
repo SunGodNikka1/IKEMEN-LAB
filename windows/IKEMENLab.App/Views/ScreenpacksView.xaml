@@ -37,6 +37,7 @@
         <views:BrowserHeader Section="Screenpacks"
                              SearchText="{Binding SearchText, Mode=TwoWay}"
                              ViewMode="{Binding ViewMode, Mode=TwoWay}"
+                             ShowSort="False"
                              HomeCommand="{Binding GoHomeCommand}"
                              CountText="{Binding VisibleCount, StringFormat={}{0} found}"/>
 

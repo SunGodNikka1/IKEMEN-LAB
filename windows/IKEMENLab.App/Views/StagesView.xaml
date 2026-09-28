@@ -82,6 +82,7 @@
 
         <views:BrowserHeader Section="Stages"
                              SearchText="{Binding SearchText, Mode=TwoWay}"
+                             SortMode="{Binding SortMode, Mode=TwoWay}"
                              ViewMode="{Binding ViewMode, Mode=TwoWay}"
                              HomeCommand="{Binding GoHomeCommand}"
                              CountText="{Binding VisibleCount, StringFormat={}{0} shown}"/>
@@ -108,7 +109,8 @@
                             <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Preview}"/>
                         </Border>
 
-                        <StackPanel Grid.Column="1" Margin="16,0,12,0" VerticalAlignment="Center">
+                        <StackPanel Grid.Column="1" Margin="16,0,12,0" VerticalAlignment="Center"
+                                    ToolTip="{Binding DateAddedText}">
                             <TextBlock Text="{Binding Name}" Style="{StaticResource StageName}"/>
                             <TextBlock Text="{Binding PathText}" Style="{StaticResource MonoText}" Margin="0,3,0,0"/>
                             <TextBlock Text="{Binding Author}" FontSize="11" Margin="0,3,0,0"

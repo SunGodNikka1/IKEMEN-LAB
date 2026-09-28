@@ -23,6 +23,7 @@ public sealed class StageRowViewModel : ObservableObject
         Entry = entry;
         AgeText = entry.ModifiedAtUtc is { } modified ? RecentContent.FormatRelativeAge(modified, nowUtc) : "—";
         AgeToolTip = entry.ModifiedAtUtc is { } m ? "DEF modified " + m.ToLocalTime().ToString("g") : "Modification date unavailable";
+        DateAddedText = DateAddedSort.FormatAddedLabel(entry.InstalledAtUtc);
     }
 
     public StageEntry Entry { get; }
@@ -31,6 +32,9 @@ public sealed class StageRowViewModel : ObservableObject
     public string PathText => Entry.RootRelativeDefPath;
     public string AgeText { get; }
     public string AgeToolTip { get; }
+    /// <summary>"Added Sep 27, 2026" when InstalledAtUtc is known; otherwise null.</summary>
+    public string? DateAddedText { get; }
+    public bool HasDateAdded => DateAddedText is not null;
     public bool HasBgm => Entry.HasBgm;
     public bool BgmMissing => Entry.HasBgm && !Entry.BgmFound;
     public string BgmText => HasBgm ? "BGM" : "None";
@@ -130,6 +134,7 @@ public sealed class StagesViewModel : ObservableObject
     private readonly Func<Task> _refreshLibrary;
     private readonly List<StageRowViewModel> _all = [];
     private string _searchText = string.Empty;
+    private BrowserSortMode _sortMode = BrowserSortMode.Default;
     private BrowserViewMode _viewMode = BrowserViewMode.List;
     private StageRowViewModel? _selected;
     private string? _root;
@@ -167,6 +172,17 @@ public sealed class StagesViewModel : ObservableObject
             if (SetProperty(ref _searchText, value)) ApplyFilter();
         }
     }
+
+    public BrowserSortMode SortMode
+    {
+        get => _sortMode;
+        set
+        {
+            if (SetProperty(ref _sortMode, value)) ApplyFilter();
+        }
+    }
+
+    public IReadOnlyList<BrowserSortOption> SortOptions => DateAddedSort.Options;
 
     public BrowserViewMode ViewMode
     {
@@ -252,12 +268,18 @@ public sealed class StagesViewModel : ObservableObject
     private void ApplyFilter()
     {
         var q = SearchText.Trim();
-        Stages.Clear();
-        foreach (var row in _all)
-        {
-            if (q.Length == 0 || row.Matches(q)) Stages.Add(row);
-        }
+        var keep = Selected;
+        var filtered = _all.Where(row => q.Length == 0 || row.Matches(q));
+        var ordered = DateAddedSort.Apply(
+            filtered,
+            SortMode,
+            row => row.Entry.InstalledAtUtc,
+            row => row.Name);
 
+        Stages.Clear();
+        foreach (var row in ordered) Stages.Add(row);
+
+        if (keep is not null && !Stages.Contains(keep)) Selected = Stages.FirstOrDefault();
         OnPropertyChanged(nameof(VisibleCount));
         OnPropertyChanged(nameof(HasNoResults));
     }
