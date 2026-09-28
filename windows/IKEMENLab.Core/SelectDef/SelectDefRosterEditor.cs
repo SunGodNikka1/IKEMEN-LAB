@@ -24,12 +24,178 @@ public sealed class RosterEditResult
     public int? AffectedLineNumber { get; init; }
 }
 
+/// <summary>One [Characters] line of select.def that refers to a character package.</summary>
+/// <param name="LineNumber">1-based line number in the file as read.</param>
+/// <param name="Text">The line exactly as written (without its line terminator).</param>
+public sealed record RosterLineReference(int LineNumber, string Text, bool IsCommented, string? ResolvedDefPath);
+
+public sealed class RosterRemovalResult
+{
+    public required bool Success { get; init; }
+    public required string Content { get; init; }
+    public string? Error { get; init; }
+
+    /// <summary>The lines that were (or, on failure, would have been) removed, in file order.</summary>
+    public IReadOnlyList<RosterLineReference> Removed { get; init; } = [];
+
+    public bool Changed => Success && Removed.Count > 0;
+}
+
 /// <summary>
 /// Narrow line-level select.def edits. Never regenerates the whole document.
 /// Preserves comments, blank lines, parameters, and non-roster sections.
 /// </summary>
 public static class SelectDefRosterEditor
 {
+    /// <summary>
+    /// Every [Characters] line — uncommented or commented out — that belongs to the character package in
+    /// <paramref name="rootRelativeFolder"/> ("chars/Gaara"): lines that resolve (IKEMEN's own lookup
+    /// order) to a DEF inside that folder, and lines that resolve to nothing but name a DEF inside it.
+    /// Must be called while the folder still exists, because resolution checks which DEFs are on disk.
+    /// </summary>
+    public static IReadOnlyList<RosterLineReference> FindPackageReferences(
+        string content, string ikemenRoot, string rootRelativeFolder)
+    {
+        var lines = SplitLines(content).Select(s => content.Substring(s.Start, s.Length)).ToArray();
+        return FindPackageLines(lines, ikemenRoot, PackagePrefix(ikemenRoot, rootRelativeFolder))
+            .Select(m => new RosterLineReference(m.Index + 1, lines[m.Index], m.Entry.IsCommented, m.Entry.ResolvedDefPath))
+            .ToList();
+    }
+
+    /// <summary>
+    /// Removes the package's roster lines completely — no commented placeholder and no blank slot is left,
+    /// so every later character moves up one select-screen position. Every other byte is kept: comments,
+    /// blank lines, parameters, other sections, each line's own terminator and whether the file ends with
+    /// a newline.
+    /// </summary>
+    public static RosterRemovalResult RemovePackageEntries(string content, string ikemenRoot, string rootRelativeFolder)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return new RosterRemovalResult { Success = true, Content = content ?? string.Empty };
+        }
+
+        var prefix = PackagePrefix(ikemenRoot, rootRelativeFolder);
+        var spans = SplitLines(content);
+        var lines = spans.Select(s => content.Substring(s.Start, s.Length)).ToArray();
+        var matches = FindPackageLines(lines, ikemenRoot, prefix);
+        var removed = matches
+            .Select(m => new RosterLineReference(m.Index + 1, lines[m.Index], m.Entry.IsCommented, m.Entry.ResolvedDefPath))
+            .ToList();
+        if (matches.Count == 0)
+        {
+            return new RosterRemovalResult { Success = true, Content = content };
+        }
+
+        var drop = matches.Select(m => m.Index).ToHashSet();
+        var sb = new System.Text.StringBuilder(content.Length);
+        var lastKept = -1;
+        for (var i = 0; i < spans.Count; i++)
+        {
+            if (drop.Contains(i)) continue;
+            sb.Append(content, spans[i].Start, spans[i].Length + spans[i].TerminatorLength);
+            lastKept = i;
+        }
+
+        // The file's last line had no terminator and was removed: drop the terminator that now ends the
+        // file, so a file without a final newline stays without one.
+        if (drop.Contains(spans.Count - 1) && lastKept >= 0 && spans[lastKept].TerminatorLength > 0)
+        {
+            sb.Length -= spans[lastKept].TerminatorLength;
+        }
+
+        var updated = sb.ToString();
+
+        // Verify: exactly the removed lines are gone, every other entry is unchanged and in the same order,
+        // and nothing of the package is still listed.
+        try
+        {
+            var dropped = drop.Select(i => i + 1).ToHashSet();
+            var expected = SelectDefReader.Parse(content).Where(e => !dropped.Contains(e.LineNumber)).ToList();
+            var actual = SelectDefReader.Parse(updated);
+            var same = expected.Count == actual.Count && expected.Zip(actual).All(p =>
+                p.First.Section == p.Second.Section &&
+                p.First.Kind == p.Second.Kind &&
+                p.First.IsCommented == p.Second.IsCommented &&
+                string.Equals(p.First.RawName, p.Second.RawName, StringComparison.Ordinal));
+            if (!same)
+            {
+                return new RosterRemovalResult
+                {
+                    Success = false, Content = content, Removed = removed,
+                    Error = "Removing the roster entries would change other select.def entries; select.def was not changed."
+                };
+            }
+
+            var remaining = SplitLines(updated).Select(s => updated.Substring(s.Start, s.Length)).ToArray();
+            if (FindPackageLines(remaining, ikemenRoot, prefix).Count > 0)
+            {
+                return new RosterRemovalResult
+                {
+                    Success = false, Content = content, Removed = removed,
+                    Error = "select.def would still list this character after the edit; select.def was not changed."
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            return new RosterRemovalResult
+            {
+                Success = false, Content = content, Removed = removed,
+                Error = "Proposed select.def failed to parse: " + ex.Message
+            };
+        }
+
+        return new RosterRemovalResult { Success = true, Content = updated, Removed = removed };
+    }
+
+    private sealed record PackageLine(int Index, SelectDefEntry Entry);
+
+    private static string PackagePrefix(string root, string rootRelativeFolder)
+        => Path.TrimEndingDirectorySeparator(NormalizeKey(root, rootRelativeFolder)) + Path.DirectorySeparatorChar;
+
+    private static List<PackageLine> FindPackageLines(string[] lines, string root, string packagePrefix)
+    {
+        var found = new List<PackageLine>();
+        SelectDefSection? current = null;
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var trimmed = lines[i].Trim(' ', '\t', '﻿');
+            if (trimmed.Length == 0) continue;
+
+            if (trimmed.StartsWith('['))
+            {
+                var end = trimmed.IndexOf(']');
+                var name = (end > 1 ? trimmed[1..end] : trimmed[1..]).Trim().ToLowerInvariant();
+                current = name == "characters" ? SelectDefSection.Characters : null;
+                continue;
+            }
+
+            if (current != SelectDefSection.Characters) continue;
+
+            var isCommented = trimmed.StartsWith(';');
+            var body = isCommented ? trimmed.TrimStart(';').TrimStart(' ', '\t') : trimmed;
+            var comment = body.IndexOf(';');
+            if (comment >= 0) body = body[..comment];
+            var first = body.Split(',')[0].Trim(' ', '\t');
+            if (first.Length == 0) continue;
+
+            var entry = BuildChar(first, i + 1, isCommented);
+            if (entry.Kind != SelectDefEntryKind.Content) continue;
+            entry = SelectDefReader.Resolve(entry, root);
+
+            var belongs = entry.ResolvedDefPath is not null
+                ? IsUnder(NormalizeKey(root, entry.ResolvedDefPath), packagePrefix)
+                : !entry.IsInArchive && entry.CandidateDefPaths.Any(c => IsUnder(NormalizeKey(root, c), packagePrefix));
+            if (belongs) found.Add(new PackageLine(i, entry));
+        }
+
+        return found;
+    }
+
+    private static bool IsUnder(string fullPath, string prefixWithSeparator)
+        => fullPath.StartsWith(prefixWithSeparator, StringComparison.OrdinalIgnoreCase);
+
     public static RosterEditResult Toggle(
         string content,
         string ikemenRoot,

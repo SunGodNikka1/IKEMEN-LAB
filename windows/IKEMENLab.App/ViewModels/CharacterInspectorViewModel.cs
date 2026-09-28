@@ -16,7 +16,7 @@ public sealed record DefSegment(string Text, Brush Foreground, bool Bold);
 
 public sealed record DefLine(IReadOnlyList<DefSegment> Segments);
 
-/// <summary>Right-hand inspector for the selected character. Read-only except primary DEF choice.</summary>
+/// <summary>Right-hand inspector for the selected character. Read-only except primary DEF choice and Delete.</summary>
 public sealed class CharacterInspectorViewModel : ObservableObject
 {
     private static readonly Brush LifeBrush = Frozen(Colors.White);
@@ -37,10 +37,12 @@ public sealed class CharacterInspectorViewModel : ObservableObject
 
     public CharacterInspectorViewModel(
         CharacterRowViewModel row,
-        Func<CharacterRowViewModel?, string?, Task>? setPrimaryDef = null)
+        Func<CharacterRowViewModel?, string?, Task>? setPrimaryDef = null,
+        ICommand? deleteCommand = null)
     {
         Row = row;
         _setPrimaryDef = setPrimaryDef;
+        DeleteCommand = deleteCommand;
         _selectedDef = CurrentDefRelative();
         DefFileChoices = row.Entry.DefCandidates
             .Select(c =>
@@ -56,6 +58,19 @@ public sealed class CharacterInspectorViewModel : ObservableObject
     }
 
     public CharacterRowViewModel Row { get; }
+
+    /// <summary>Delete Character (the browser's command; parameter is <see cref="Row"/>).</summary>
+    public ICommand? DeleteCommand { get; }
+
+    public bool CanShowDelete => DeleteCommand is not null;
+
+    /// <summary>The package a delete removes: the character's top-level folder under chars/.</summary>
+    public string PackageFolder => "chars/" + IKEMENLab.Core.Library.ContentIdentity.TopFolder(Row.Entry.Id);
+
+    public string DeleteHint =>
+        $"Deletes {PackageFolder} and removes its select.def entries (the characters after it move up). " +
+        "A backup copy is kept in IKEMEN Lab's app data.";
+
     public string Name => Row.DisplayName;
     public string Author => Row.Author;
 

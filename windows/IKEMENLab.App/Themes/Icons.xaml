@@ -26,6 +26,7 @@
     <sys:String x:Key="Glyph.Monitor">&#xE7F4;</sys:String>
     <sys:String x:Key="Glyph.Chip">&#xE950;</sys:String>
     <sys:String x:Key="Glyph.Refresh">&#xE72C;</sys:String>
+    <sys:String x:Key="Glyph.Delete">&#xE74D;</sys:String>
     <sys:String x:Key="Glyph.Folder">&#xE8B7;</sys:String>
     <sys:String x:Key="Glyph.Home">&#xE80F;</sys:String>
     <sys:String x:Key="Glyph.ChevronRight">&#xE76C;</sys:String>

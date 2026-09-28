@@ -5,7 +5,8 @@ public enum MutationKind
     CreateFile,
     ReplaceFile,
     CreateDirectory,
-    ReplaceDirectory
+    ReplaceDirectory,
+    DeleteDirectory
 }
 
 public enum MutationStatus

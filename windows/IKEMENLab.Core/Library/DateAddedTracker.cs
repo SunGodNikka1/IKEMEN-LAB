@@ -180,6 +180,24 @@ public sealed class DateAddedTracker
         });
     }
 
+    /// <summary>
+    /// Retires the records of items IKEMEN Lab itself removed from the installation (e.g. Delete
+    /// Character), so a later reinstall is dated as a new addition. Call only after the removal succeeded.
+    /// </summary>
+    public void Forget(string root, IEnumerable<string> identities)
+    {
+        if (_store is null) return;
+        root = DateAddedStore.NormalizeRoot(root);
+        var ids = identities.Distinct(StringComparer.Ordinal).ToList();
+        if (ids.Count == 0) return;
+        _store.Update(root, doc =>
+        {
+            var changed = false;
+            foreach (var id in ids) changed |= doc.Items.Remove(id);
+            return (0, changed);
+        });
+    }
+
     private static DateAddedRecord NewRecord(string root, string id, DateAddedSource source, DateTime notBefore, DateTime now)
     {
         var estimate = Arrival(root, id) ?? now;

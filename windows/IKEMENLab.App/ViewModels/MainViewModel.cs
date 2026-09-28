@@ -20,6 +20,9 @@ public sealed class MainViewModel : ObservableObject
     private string _statusText = "Ready";
     private bool _isBusy;
     private LibrarySnapshot? _snapshot;
+    private int _refreshGeneration;
+    private int _activeRefreshes;
+    private string _lastRefreshedText = string.Empty;
 
     public MainViewModel(
         ISettingsStore settingsStore,
@@ -47,7 +50,8 @@ public sealed class MainViewModel : ObservableObject
             installer: installer,
             fullgame: new IKEMENLab.Core.Install.FullgameImporter(installer: installer, dateAdded: dateAdded),
             roster: roster);
-        Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster, primaryDefs);
+        var deletion = new IKEMENLab.Core.Characters.CharacterDeletionService(dateAdded: dateAdded, primaryDefs: primaryDefs);
+        Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster, primaryDefs, deletion);
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page), refresh, roster);
         Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page), refresh);
@@ -69,7 +73,9 @@ public sealed class MainViewModel : ObservableObject
             else if (p is string s && Enum.TryParse<NavPage>(s, out var parsed)) Navigate(parsed);
         });
 
-        RefreshCommand = new AsyncRelayCommand(async () => await RefreshAsync(null));
+        // Re-reads the selected installation from disk through the same index as startup; the current
+        // page stays open and browsers keep their selection when it still exists.
+        RefreshCommand = new AsyncRelayCommand(async () => await RefreshAsync(null), () => !IsBusy);
         Navigate(NavPage.Dashboard);
     }
 
@@ -125,14 +131,35 @@ public sealed class MainViewModel : ObservableObject
     public string StatusText
     {
         get => _statusText;
-        private set => SetProperty(ref _statusText, value);
+        private set
+        {
+            if (SetProperty(ref _statusText, value)) OnPropertyChanged(nameof(RefreshToolTip));
+        }
     }
 
     public bool IsBusy
     {
         get => _isBusy;
-        private set => SetProperty(ref _isBusy, value);
+        private set
+        {
+            if (!SetProperty(ref _isBusy, value)) return;
+            OnPropertyChanged(nameof(RefreshLabel));
+            CommandManager.InvalidateRequerySuggested();
+        }
     }
+
+    public string RefreshLabel => IsBusy ? "Refreshing\u2026" : "Refresh";
+
+    /// <summary>"Updated 3:04 PM" after the last completed refresh (or why it failed).</summary>
+    public string LastRefreshedText
+    {
+        get => _lastRefreshedText;
+        private set => SetProperty(ref _lastRefreshedText, value);
+    }
+
+    public string RefreshToolTip =>
+        "Reload characters, stages, select.def, config.ini and Date Added from disk (F5)." +
+        (string.IsNullOrEmpty(StatusText) ? string.Empty : "\n" + StatusText);
 
     public LibrarySnapshot? Snapshot
     {
@@ -150,6 +177,10 @@ public sealed class MainViewModel : ObservableObject
 
     public async Task RefreshAsync(string? rootOverride)
     {
+        // Refreshes can overlap (the Refresh button while a roster toggle refreshes); only the newest
+        // one is applied, so an older scan that finishes late never overwrites fresher results.
+        var generation = ++_refreshGeneration;
+        _activeRefreshes++;
         IsBusy = true;
         StatusText = "Indexing…";
         try
@@ -168,6 +199,8 @@ public sealed class MainViewModel : ObservableObject
             {
                 snapshot = await Task.Run(() => _indexService.Index(root));
             }
+
+            if (generation != _refreshGeneration) return;
 
             Snapshot = snapshot;
             Artwork.SetRoot(snapshot is { Installation.CanBrowse: true } ? snapshot.Installation.RootPath : null);
@@ -193,14 +226,20 @@ public sealed class MainViewModel : ObservableObject
                 StatusText =
                     $"{snapshot.CharacterCount} characters · {snapshot.StageCount} stages · read-only index";
             }
+
+            LastRefreshedText = snapshot is null
+                ? string.Empty
+                : "Updated " + DateTime.Now.ToString("h:mm tt", System.Globalization.CultureInfo.CurrentCulture);
         }
         catch (Exception ex)
         {
+            if (generation != _refreshGeneration) return;
             StatusText = "Index failed: " + ex.Message;
+            LastRefreshedText = "Refresh failed";
         }
         finally
         {
-            IsBusy = false;
+            if (--_activeRefreshes == 0) IsBusy = false;
         }
     }
 

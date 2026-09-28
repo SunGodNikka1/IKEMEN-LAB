@@ -186,6 +186,8 @@ public sealed class ScreenpacksViewModel : ObservableObject
 
     public void ApplySnapshot(LibrarySnapshot? snapshot)
     {
+        var previousRoot = _root;
+        var previousDef = _selected?.Entry.DefPath;
         _all.Clear();
         Screenpacks.Clear();
         ClearPreview();
@@ -198,6 +200,10 @@ public sealed class ScreenpacksViewModel : ObservableObject
         }
 
         ApplyFilter();
+        var sameInstallation = previousRoot is not null && _root is not null &&
+                               string.Equals(previousRoot, _root, StringComparison.OrdinalIgnoreCase);
+        Selected = BrowserSelection.AfterRefresh(
+            Screenpacks, r => r.Entry.DefPath, sameInstallation ? previousDef : null, selectFirstWhenNone: false);
         OnPropertyChanged(nameof(HasNone));
         InvalidateActivate();
         foreach (var row in _all) _ = LoadPreviewAsync(row);

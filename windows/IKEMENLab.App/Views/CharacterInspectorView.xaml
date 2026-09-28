@@ -207,6 +207,24 @@
                         </ItemsControl>
                     </ScrollViewer>
                 </Border>
+
+                <!-- ============ Delete ============ -->
+                <Border Margin="0,28,0,0" Padding="0,16,0,0" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,1,0,0"
+                        Visibility="{Binding CanShowDelete, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <Button Style="{StaticResource DangerButton}" HorizontalAlignment="Left"
+                                Command="{Binding DeleteCommand}" CommandParameter="{Binding Row}"
+                                AutomationProperties.Name="Delete Character">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{StaticResource Glyph.Delete}" FontFamily="{StaticResource IconFont}"
+                                           FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBlock Text="Delete Character…" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Button>
+                        <TextBlock Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextTertiary}" Text="{Binding DeleteHint}"/>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </StackPanel>
     </ScrollViewer>

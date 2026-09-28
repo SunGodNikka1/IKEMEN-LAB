@@ -65,6 +65,9 @@ public sealed class SafeMutationService : ISafeMutationService
         return BuildPlan(MutationKind.ReplaceDirectory, ikemenRoot, targetDirectory, sourceDirectory, contentLength: null);
     }
 
+    public OperationPlan PlanDeleteDirectory(string ikemenRoot, string targetDirectory)
+        => BuildPlan(MutationKind.DeleteDirectory, ikemenRoot, targetDirectory, sourcePath: null, contentLength: null);
+
     public MutationResult CreateFile(string ikemenRoot, string targetPath, byte[] content, bool dryRun = false)
         => Execute(PlanCreateFile(ikemenRoot, targetPath, content), content, dryRun);
 
@@ -77,6 +80,9 @@ public sealed class SafeMutationService : ISafeMutationService
 
     public MutationResult ReplaceDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory, bool dryRun = false)
         => Execute(PlanReplaceDirectory(ikemenRoot, targetDirectory, sourceDirectory), createFileContent: null, dryRun);
+
+    public MutationResult DeleteDirectory(string ikemenRoot, string targetDirectory, bool dryRun = false)
+        => Execute(PlanDeleteDirectory(ikemenRoot, targetDirectory), createFileContent: null, dryRun);
 
     public MutationResult Execute(OperationPlan plan, byte[]? createFileContent = null, bool dryRun = false)
         => Execute(plan, createFileContent, dryRun, expectedCurrentHash: null);
@@ -138,6 +144,9 @@ public sealed class SafeMutationService : ISafeMutationService
                 case MutationKind.ReplaceDirectory:
                     ExecuteReplaceDirectory(plan, backupDir, manifest);
                     break;
+                case MutationKind.DeleteDirectory:
+                    ExecuteDeleteDirectory(plan, backupDir, manifest);
+                    break;
                 default:
                     throw new InvalidOperationException($"Unsupported mutation kind: {plan.Kind}");
             }
@@ -148,7 +157,7 @@ public sealed class SafeMutationService : ISafeMutationService
         }
         catch (Exception ex)
         {
-            var isDirectory = plan.Kind is MutationKind.CreateDirectory or MutationKind.ReplaceDirectory;
+            var isDirectory = IsDirectoryKind(plan.Kind);
             var failure = FileReplacer.Classify(ex, plan.TargetPath, isDirectory);
             manifest.Status = MutationStatus.Failed;
             manifest.FailureKind = failure.Kind;
@@ -216,6 +225,10 @@ public sealed class SafeMutationService : ISafeMutationService
                 case MutationKind.ReplaceDirectory:
                     RestoreDirectoryFromBackup(manifest);
                     break;
+
+                case MutationKind.DeleteDirectory:
+                    RestoreDeletedDirectory(manifest);
+                    break;
             }
 
             manifest.Status = MutationStatus.RolledBack;
@@ -225,8 +238,7 @@ public sealed class SafeMutationService : ISafeMutationService
         }
         catch (Exception ex)
         {
-            var failure = FileReplacer.Classify(ex, manifest.TargetPath,
-                manifest.Kind is MutationKind.CreateDirectory or MutationKind.ReplaceDirectory);
+            var failure = FileReplacer.Classify(ex, manifest.TargetPath, IsDirectoryKind(manifest.Kind));
             manifest.Status = MutationStatus.Failed;
             manifest.Error = "Rollback failed: " + failure.Message;
             manifest.ErrorDetail = failure.TechnicalDetail;
@@ -609,6 +621,143 @@ public sealed class SafeMutationService : ISafeMutationService
         }
     }
 
+    /// <summary>
+    /// Removes a folder in three steps. A verified app-owned copy is made first (Undo/Rollback restores
+    /// from it). The folder is then renamed to a hidden sibling in one same-parent rename, so it is either
+    /// still fully in place or gone from the installation — never half-deleted. Only after that is the
+    /// hidden copy removed. If a program holds a file inside open, the rename fails and the folder is left
+    /// exactly as it was.
+    /// </summary>
+    private static void ExecuteDeleteDirectory(OperationPlan plan, string backupDir, MutationManifest manifest)
+    {
+        IkemenPathGuard.EnsureInsideRoot(plan.IkemenRoot, plan.TargetPath);
+        IkemenPathGuard.EnsureNoReparseEscape(plan.IkemenRoot, plan.TargetPath);
+
+        var target = Path.TrimEndingDirectorySeparator(plan.TargetPath);
+        var name = Path.GetFileName(target);
+        if (!Directory.Exists(target))
+        {
+            throw new SafeMutationException(MutationFailureKind.Conflict,
+                $"'{name}' no longer exists (it may have been removed outside IKEMEN Lab). Refresh and try again.");
+        }
+
+        if ((File.GetAttributes(target) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new SafeMutationException(MutationFailureKind.UnsafeTarget,
+                $"'{name}' is a link (junction or symbolic link); IKEMEN Lab will not delete it. {FileReplacer.FolderUnchanged}");
+        }
+
+        var parent = Path.GetDirectoryName(target)!;
+        FileReplacer.SweepStaleStaging(parent, StaleStagingAge);
+
+        var originalBackup = Path.Combine(backupDir, "original");
+        try
+        {
+            manifest.BeforeHash = IkemenPathGuard.Sha256DirectoryFingerprint(target);
+            CopyDirectory(target, originalBackup);
+            if (!string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(originalBackup), manifest.BeforeHash,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    $"The backup of '{name}' could not be verified (a file may have changed while it was copied). " +
+                    FileReplacer.FolderUnchanged);
+            }
+        }
+        catch
+        {
+            // Nothing in the installation was touched; do not keep a partial copy in app data.
+            FileReplacer.TryDeleteDirectory(originalBackup);
+            throw;
+        }
+
+        manifest.BackupPath = originalBackup;
+
+        var displaced = Path.Combine(parent, $".ikemenlab-{manifest.OperationId}.old");
+        manifest.StagingPath = displaced;
+
+        // The delete takes effect here, atomically.
+        FileReplacer.MoveDirectory(target, displaced, target);
+
+        if (!FileReplacer.TryDeleteDirectory(displaced))
+        {
+            // Cleanup only: the folder is already gone from the installation (library scans skip
+            // ".ikemenlab-*" names) and a verified backup exists.
+            manifest.ErrorDetail = $"'{name}' was removed, but its hidden copy '{displaced}' could not be fully deleted " +
+                                   "(a file inside may be open). Delete it manually once nothing is using it.";
+        }
+    }
+
+    /// <summary>
+    /// Puts a deleted folder back. A target that still holds the original content is left alone (the
+    /// usual case when the rename itself was refused); a different folder that now has the same name is
+    /// never overwritten. Uses this operation's hidden copy when it is still complete, otherwise the
+    /// verified backup, staged beside the target and renamed into place.
+    /// </summary>
+    private static bool RestoreDeletedDirectory(MutationManifest manifest)
+    {
+        if (manifest.BackupPath is null) return false;
+        var target = Path.TrimEndingDirectorySeparator(manifest.TargetPath);
+        var name = Path.GetFileName(target);
+
+        if (Directory.Exists(target))
+        {
+            if (manifest.BeforeHash is not null &&
+                string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(target), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
+            {
+                manifest.OriginalVerifiedIntact = true;
+                return false;
+            }
+
+            throw new SafeMutationException(MutationFailureKind.Conflict,
+                $"A different folder named '{name}' exists now, so the deleted folder was not restored over it. " +
+                $"The backup is at '{manifest.BackupPath}'.");
+        }
+
+        var parent = Path.GetDirectoryName(target)!;
+        Directory.CreateDirectory(parent);
+
+        if (manifest.StagingPath is { } hidden && Directory.Exists(hidden) && manifest.BeforeHash is not null &&
+            string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(hidden), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
+        {
+            FileReplacer.MoveDirectory(hidden, target, target);
+            manifest.OriginalVerifiedIntact = true;
+            return true;
+        }
+
+        if (!Directory.Exists(manifest.BackupPath))
+        {
+            throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                $"The backup of '{name}' is missing, so the folder could not be restored.");
+        }
+
+        var staging = Path.Combine(parent, $".ikemenlab-{manifest.OperationId}-restore.tmp");
+        try
+        {
+            FileReplacer.TryDeleteDirectory(staging);
+            CopyDirectory(manifest.BackupPath, staging);
+            if (manifest.BeforeHash is not null &&
+                !string.Equals(IkemenPathGuard.Sha256DirectoryFingerprint(staging), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    "The backup copy did not match the deleted folder; nothing was restored.");
+            }
+
+            FileReplacer.MoveDirectory(staging, target, target);
+        }
+        finally
+        {
+            FileReplacer.TryDeleteDirectory(staging);
+        }
+
+        // An incomplete hidden copy (its cleanup was interrupted) is this operation's own leftover.
+        if (manifest.StagingPath is { } leftover) FileReplacer.TryDeleteDirectory(leftover);
+        manifest.OriginalVerifiedIntact = true;
+        return true;
+    }
+
+    private static bool IsDirectoryKind(MutationKind kind)
+        => kind is MutationKind.CreateDirectory or MutationKind.ReplaceDirectory or MutationKind.DeleteDirectory;
+
     /// <summary>Returns true when the target had to be (and was) restored from backup.</summary>
     private static bool TryEmergencyRestore(MutationManifest manifest)
     {
@@ -616,6 +765,8 @@ public sealed class SafeMutationService : ISafeMutationService
 
         switch (manifest.Kind)
         {
+            case MutationKind.DeleteDirectory:
+                return RestoreDeletedDirectory(manifest);
             case MutationKind.CreateFile:
                 if (File.Exists(manifest.TargetPath)) File.Delete(manifest.TargetPath);
                 return false;
@@ -824,6 +975,12 @@ public sealed class SafeMutationService : ISafeMutationService
                 return Reject(kind, root, resolved, sourcePath, "ReplaceDirectory target is a file.");
             }
 
+            if (kind is MutationKind.DeleteDirectory && !existsDir)
+            {
+                return Reject(kind, root, resolved, sourcePath,
+                    existsFile ? "DeleteDirectory target is a file." : "DeleteDirectory target does not exist.");
+            }
+
             if (kind is MutationKind.CreateFile && contentLength is null)
             {
                 warnings.Add("CreateFile plan built without content length.");
@@ -839,7 +996,8 @@ public sealed class SafeMutationService : ISafeMutationService
                 TargetPath = resolved,
                 SourcePath = sourcePath is null ? null : Path.GetFullPath(sourcePath),
                 WouldOverwrite = wouldOverwrite && kind is MutationKind.ReplaceFile or MutationKind.ReplaceDirectory,
-                BackupRequired = wouldOverwrite && kind is MutationKind.ReplaceFile or MutationKind.ReplaceDirectory,
+                BackupRequired = wouldOverwrite &&
+                                 kind is MutationKind.ReplaceFile or MutationKind.ReplaceDirectory or MutationKind.DeleteDirectory,
                 IsValid = true,
                 AffectedPaths = affected,
                 Warnings = warnings

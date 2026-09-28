@@ -27,6 +27,7 @@ public sealed class CharactersViewModel : ObservableObject
     private readonly IRosterActivationService _roster;
     private readonly Func<Task> _refreshLibrary;
     private readonly PrimaryDefStore? _primaryDefs;
+    private readonly ICharacterDeletionService _deletion;
     private readonly List<CharacterRowViewModel> _all = [];
     private string _searchText = string.Empty;
     private BrowserSortMode _sortMode = BrowserSortMode.Default;
@@ -36,19 +37,22 @@ public sealed class CharactersViewModel : ObservableObject
     private string? _root;
     private bool _rosterAvailable;
     private CancellationTokenSource? _scan;
+    private bool _isDeleting;
 
     public CharactersViewModel(
         ArtworkLoader artwork,
         Action<NavPage> navigate,
         Func<Task> refreshLibrary,
         IRosterActivationService? roster = null,
-        PrimaryDefStore? primaryDefs = null)
+        PrimaryDefStore? primaryDefs = null,
+        ICharacterDeletionService? deletion = null)
     {
         _artwork = artwork;
         _navigate = navigate;
         _refreshLibrary = refreshLibrary;
         _roster = roster ?? new RosterActivationService();
         _primaryDefs = primaryDefs;
+        _deletion = deletion ?? new CharacterDeletionService(primaryDefs: primaryDefs);
         GoHomeCommand = new RelayCommand(() => _navigate(NavPage.Dashboard));
         OpenFolderCommand = new RelayCommand(p => OpenFolder(p as CharacterRowViewModel ?? Selected));
         CopyPathCommand = new RelayCommand(p => CopyPath(p as CharacterRowViewModel ?? Selected));
@@ -56,6 +60,9 @@ public sealed class CharactersViewModel : ObservableObject
         ToggleStatusCommand = new AsyncRelayCommand(
             p => ToggleStatusAsync(p as CharacterRowViewModel),
             p => p is CharacterRowViewModel row && row.CanToggleStatus);
+        DeleteCharacterCommand = new AsyncRelayCommand(
+            p => DeleteCharacterAsync(p as CharacterRowViewModel ?? Selected),
+            p => CanDelete(p as CharacterRowViewModel ?? Selected));
     }
 
     public ObservableCollection<CharacterRowViewModel> Characters { get; } = [];
@@ -65,6 +72,17 @@ public sealed class CharactersViewModel : ObservableObject
     public ICommand CopyPathCommand { get; }
     public ICommand ClearSearchCommand { get; }
     public ICommand ToggleStatusCommand { get; }
+    public ICommand DeleteCharacterCommand { get; }
+
+    /// <summary>True while a Delete Character operation is running (only one at a time).</summary>
+    public bool IsDeleting
+    {
+        get => _isDeleting;
+        private set
+        {
+            if (SetProperty(ref _isDeleting, value)) CommandManager.InvalidateRequerySuggested();
+        }
+    }
 
     public string SearchText
     {
@@ -126,12 +144,19 @@ public sealed class CharactersViewModel : ObservableObject
 
     public void ApplySnapshot(LibrarySnapshot? snapshot)
     {
+        // A rebuild creates new rows: remember the selection by id so a Refresh (or a toggle/delete that
+        // refreshes) keeps it while the character still exists, and clears it when it is gone.
+        var previousRoot = _root;
+        var previousId = _selected?.Entry.Id;
+
         _scan?.Cancel();
         _scan = new CancellationTokenSource();
         _all.Clear();
         Characters.Clear();
         Selected = null;
         _root = snapshot?.Installation.RootPath;
+        var sameInstallation = previousRoot is not null && _root is not null &&
+                               string.Equals(previousRoot, _root, StringComparison.OrdinalIgnoreCase);
         _rosterAvailable = snapshot is { Installation.CanBrowse: true, SelectDef.IsAvailable: true };
 
         if (snapshot is not null)
@@ -155,8 +180,79 @@ public sealed class CharactersViewModel : ObservableObject
             _ = ScanFeaturesAsync(snapshot.Installation.RootPath, _all.ToList(), _scan.Token);
         }
 
-        Selected = Characters.FirstOrDefault();
+        Selected = BrowserSelection.AfterRefresh(
+            Characters, r => r.Entry.Id,
+            sameInstallation ? previousId : null,
+            selectFirstWhenNone: !sameInstallation);
         CommandManager.InvalidateRequerySuggested();
+    }
+
+    private bool CanDelete(CharacterRowViewModel? row) => row is not null && _root is not null && !IsDeleting;
+
+    /// <summary>
+    /// Delete Character: shows what will be removed (folder and select.def lines), asks for confirmation,
+    /// deletes through <see cref="ICharacterDeletionService"/> and refreshes the library. The selection
+    /// moves to the neighbouring character. Also used by QA scripts.
+    /// </summary>
+    public async Task<CharacterDeletionResult?> DeleteCharacterAsync(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null || IsDeleting) return null;
+        var root = _root;
+        IsDeleting = true;
+        row.IsToggling = true;
+        try
+        {
+            var plan = await Task.Run(() => _deletion.Preview(root, row.Entry));
+            if (!plan.CanDelete)
+            {
+                UserDialogs.Warn(plan.Error ?? "This character cannot be deleted.", "Delete Character");
+                return null;
+            }
+
+            if (!UserDialogs.Confirm(plan.ConfirmationMessage(), "Delete Character")) return null;
+
+            var adjacent = BrowserSelection.AdjacentId(Characters, r => r.Entry.Id, row.Entry.Id);
+            var result = await Task.Run(() => _deletion.Delete(root, row.Entry));
+            if (result.Success)
+            {
+                // Take the row out right away and select its neighbour; the refresh below rebuilds the
+                // list (and the Dashboard) from disk and keeps that selection.
+                _all.Remove(row);
+                Characters.Remove(row);
+                Selected = adjacent is null
+                    ? null
+                    : Characters.FirstOrDefault(r => string.Equals(r.Entry.Id, adjacent, StringComparison.OrdinalIgnoreCase));
+                OnPropertyChanged(nameof(TotalCount));
+                OnPropertyChanged(nameof(VisibleCount));
+                OnPropertyChanged(nameof(HasNoCharacters));
+                OnPropertyChanged(nameof(HasNoResults));
+            }
+
+            // Refresh either way: after a failure it shows the installation exactly as it is now.
+            await _refreshLibrary();
+
+            if (!result.Success)
+            {
+                UserDialogs.Warn(result.Error ?? "The character could not be deleted.", "Delete Character");
+            }
+            else if (result.Warnings.Count > 0)
+            {
+                UserDialogs.Warn($"\"{plan.DisplayName}\" was deleted, with a note:\n\n" + string.Join("\n", result.Warnings),
+                    "Delete Character");
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            UserDialogs.Warn(ex.Message, "Delete Character");
+            return null;
+        }
+        finally
+        {
+            row.IsToggling = false;
+            IsDeleting = false;
+        }
     }
 
     /// <summary>Flips the row's select.def status (the switch's command; also used by QA scripts).</summary>
@@ -286,7 +382,7 @@ public sealed class CharactersViewModel : ObservableObject
             return;
         }
 
-        var inspector = new CharacterInspectorViewModel(row, SetPrimaryDefAsync) { Portrait = row.Thumbnail };
+        var inspector = new CharacterInspectorViewModel(row, SetPrimaryDefAsync, DeleteCharacterCommand) { Portrait = row.Thumbnail };
         Inspector = inspector;
         var root = _root;
 

@@ -4,13 +4,17 @@
              xmlns:vm="clr-namespace:IKEMENLab.App.ViewModels"
              xmlns:views="clr-namespace:IKEMENLab.App.Views">
     <UserControl.Resources>
-        <!-- "…" overflow menu shared by rows and cards (read-only actions only) -->
+        <!-- "…" overflow menu of a row -->
         <ContextMenu x:Key="RowMenu">
             <MenuItem Header="Show in Explorer"
                       Command="{Binding PlacementTarget.Tag.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                       CommandParameter="{Binding}"/>
             <MenuItem Header="Copy DEF path"
                       Command="{Binding PlacementTarget.Tag.CopyPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}"/>
+            <Separator/>
+            <MenuItem Header="Delete Character&#x2026;" Foreground="{DynamicResource NegativeBrush}"
+                      Command="{Binding PlacementTarget.Tag.DeleteCharacterCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
                       CommandParameter="{Binding}"/>
         </ContextMenu>
 

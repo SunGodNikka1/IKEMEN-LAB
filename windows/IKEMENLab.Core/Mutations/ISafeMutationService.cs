@@ -6,6 +6,7 @@ public interface ISafeMutationService
     OperationPlan PlanReplaceFile(string ikemenRoot, string targetPath, string sourceFilePath);
     OperationPlan PlanCreateDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory);
     OperationPlan PlanReplaceDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory);
+    OperationPlan PlanDeleteDirectory(string ikemenRoot, string targetDirectory);
 
     MutationResult CreateFile(string ikemenRoot, string targetPath, byte[] content, bool dryRun = false);
     /// <param name="expectedCurrentHash">
@@ -16,6 +17,12 @@ public interface ISafeMutationService
         string? expectedCurrentHash = null);
     MutationResult CreateDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory, bool dryRun = false);
     MutationResult ReplaceDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory, bool dryRun = false);
+
+    /// <summary>
+    /// Removes a folder from the installation. A verified copy is kept as the operation's backup first,
+    /// so <see cref="Rollback"/> can put the folder back exactly as it was.
+    /// </summary>
+    MutationResult DeleteDirectory(string ikemenRoot, string targetDirectory, bool dryRun = false);
 
     MutationResult Execute(OperationPlan plan, byte[]? createFileContent = null, bool dryRun = false);
     MutationResult Rollback(string operationId);

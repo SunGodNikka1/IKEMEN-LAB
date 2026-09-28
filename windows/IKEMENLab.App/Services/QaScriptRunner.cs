@@ -18,6 +18,8 @@ namespace IKEMENLab.App.Services;
 /// (which would steal focus from other windows, e.g. a running game). One command per line:
 /// wait-ready, refresh, page NAME, sort characters|stages default|latest|oldest,
 /// ui-sort default|latest|oldest [POPUP-PNG] (the visible Sort drop-down), toggle character|stage ID,
+/// select character|stage ID, delete character ID [cancel] (Delete Character with the confirmation
+/// answered yes, or no with "cancel"), refresh-button (the sidebar Refresh command),
 /// vsync on|off, volume N, collection-create NAME|id,id, activate-collection NAME,
 /// install [replace] PATH, hold PATH, release, dump PATH, snapshot PATH, sleep MS.
 /// Lines starting with '#' are ignored.
@@ -58,6 +60,22 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 break;
             case "refresh":
                 await main.RefreshAsync(null);
+                break;
+            case "refresh-button":
+                main.RefreshCommand.Execute(null);
+                await Task.Delay(200);
+                await WaitReadyAsync(TimeSpan.FromSeconds(60));
+                _log.Add($"  refresh: page={main.SelectedNav} status='{main.StatusText}' label='{main.LastRefreshedText}'");
+                break;
+            case "select":
+                Select(p[1], rest[p[1].Length..].Trim());
+                break;
+            case "delete":
+                // delete character ID [cancel]; the id may contain spaces ("Muzan V3").
+                var target = rest[p[1].Length..].Trim();
+                var cancel = target.EndsWith(" cancel", StringComparison.OrdinalIgnoreCase);
+                await DeleteAsync(cancel ? target[..^" cancel".Length].Trim() : target, cancel);
+                await WaitReadyAsync(TimeSpan.FromSeconds(60));
                 break;
             case "page":
                 main.SelectedNav = Enum.Parse<NavPage>(p[1], ignoreCase: true);
@@ -227,6 +245,41 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         foreach (var item in result.Items) _log.Add($"  install {item.Package.DisplayName}: {item.Outcome} {item.Error}");
     }
 
+    private void Select(string kind, string id)
+    {
+        if (kind.StartsWith("char", StringComparison.OrdinalIgnoreCase))
+        {
+            main.Characters.Selected = main.Characters.Characters.FirstOrDefault(r => r.Entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+                                       ?? throw new InvalidOperationException("No character row " + id);
+        }
+        else
+        {
+            main.Stages.Selected = main.Stages.Stages.FirstOrDefault(r => r.Entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+                                   ?? throw new InvalidOperationException("No stage row " + id);
+        }
+    }
+
+    /// <summary>delete character ID [cancel] — the same command as the row menu / inspector button.</summary>
+    private async Task DeleteAsync(string id, bool cancel)
+    {
+        var row = main.Characters.Characters.FirstOrDefault(r => r.Entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+                  ?? throw new InvalidOperationException("No character row " + id);
+        var previous = UserDialogs.QaConfirmAnswer;
+        UserDialogs.QaConfirmAnswer = !cancel;
+        try
+        {
+            var result = await main.Characters.DeleteCharacterAsync(row);
+            _log.Add(result is null
+                ? $"  delete {id}: not performed (cancelled or refused)"
+                : $"  delete {id}: success={result.Success} removedLines=[{string.Join(",", result.RemovedRosterEntries.Select(r => r.LineNumber))}] " +
+                  $"restored={result.SelectDefRestored} error='{result.Error}' selected='{main.Characters.Selected?.Entry.Id}'");
+        }
+        finally
+        {
+            UserDialogs.QaConfirmAnswer = previous;
+        }
+    }
+
     private async Task ToggleAsync(string kind, string id)
     {
         if (kind.StartsWith("char", StringComparison.OrdinalIgnoreCase))
@@ -248,6 +301,16 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         var state = new
         {
             root = main.Snapshot?.Installation.RootPath,
+            page = main.SelectedNav.ToString(),
+            selectedCharacter = main.Characters.Selected?.Entry.Id,
+            selectedStage = main.Stages.Selected?.Entry.Id,
+            dashboard = new
+            {
+                characters = main.Dashboard.CharacterCount,
+                stages = main.Dashboard.StageCount,
+                activeCharacters = main.Snapshot?.ActiveCharacterCount
+            },
+            lastRefreshed = main.LastRefreshedText,
             characterSort = main.Characters.SortMode.ToString(),
             characters = main.Characters.Characters.Select(r => new
             {

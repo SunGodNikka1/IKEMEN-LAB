@@ -243,11 +243,18 @@ public sealed class StagesViewModel : ObservableObject
 
     public void ApplySnapshot(LibrarySnapshot? snapshot)
     {
+        // Rows are rebuilt: keep the selected stage (by id) while it still exists, clear it when gone.
+        var previousRoot = _root;
+        var previousId = _selected?.Entry.Id;
+
         _loads?.Cancel();
         _loads = new CancellationTokenSource();
         _all.Clear();
         Stages.Clear();
+        Selected = null;
         _root = snapshot?.Installation.RootPath;
+        var sameInstallation = previousRoot is not null && _root is not null &&
+                               string.Equals(previousRoot, _root, StringComparison.OrdinalIgnoreCase);
         _rosterAvailable = snapshot is { Installation.CanBrowse: true, SelectDef.IsAvailable: true };
         var now = DateTime.UtcNow;
         if (snapshot is not null)
@@ -263,6 +270,8 @@ public sealed class StagesViewModel : ObservableObject
         }
 
         ApplyFilter();
+        Selected = BrowserSelection.AfterRefresh(
+            Stages, r => r.Entry.Id, sameInstallation ? previousId : null, selectFirstWhenNone: false);
         OnPropertyChanged(nameof(HasNoStages));
         if (snapshot is { Installation.CanBrowse: true }) _ = LoadPreviewsAsync(_all.ToList(), _loads.Token);
         CommandManager.InvalidateRequerySuggested();
