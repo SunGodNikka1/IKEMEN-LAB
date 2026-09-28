@@ -1,5 +1,6 @@
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.Parsing;
+using IKEMENLab.Core.Screenpacks;
 using IKEMENLab.Core.SelectDef;
 
 namespace IKEMENLab.Core.Validation;
@@ -51,6 +52,16 @@ public static class ContentValidator
             if (result.ErrorCount + result.WarningCount > 0) results.Add(result);
         }
 
+        foreach (var screenpack in snapshot.Screenpacks)
+        {
+            ct.ThrowIfCancellationRequested();
+            var result = ValidateScreenpack(root, screenpack);
+            if (result.ErrorCount + result.WarningCount > 0) results.Add(result);
+        }
+
+        var motif = ValidateActiveMotif(root, snapshot);
+        if (motif.Issues.Count > 0) results.Add(motif);
+
         if (snapshot.SelectDef is { IsAvailable: true } selectDef)
         {
             var roster = ValidateSelectDef(root, selectDef);
@@ -58,6 +69,82 @@ public static class ContentValidator
         }
 
         return results;
+    }
+
+    public static ValidationResult ValidateScreenpack(string root, ScreenpackEntry screenpack)
+    {
+        var issues = new List<ValidationIssue>();
+        var defFull = Path.Combine(root, screenpack.DefPath.Replace('/', Path.DirectorySeparatorChar));
+        var defName = Path.GetFileName(screenpack.DefPath);
+        if (!File.Exists(defFull))
+        {
+            issues.Add(new ValidationIssue(ValidationSeverity.Error, "system.def is missing", defName,
+                "Reinstall or repair this screenpack under data/"));
+            return new ValidationResult(screenpack.Name, "screenpack", screenpack.DefPath, issues);
+        }
+
+        var parsed = DefParser.ParseFile(defFull);
+        if (parsed is null)
+        {
+            issues.Add(new ValidationIssue(ValidationSeverity.Error, "Cannot read system.def", defName,
+                "Check file encoding"));
+            return new ValidationResult(screenpack.Name, "screenpack", screenpack.DefPath, issues);
+        }
+
+        var folder = Path.GetDirectoryName(defFull)!;
+        foreach (var key in new[] { "spr", "fight", "select", "system" })
+        {
+            var reference = parsed.Value(key, "files");
+            if (string.IsNullOrWhiteSpace(reference)) continue;
+            if (ScreenpackIndexer.ResolveMotifFile(root, folder, reference) is null)
+            {
+                issues.Add(new ValidationIssue(ValidationSeverity.Warning,
+                    $"[Files] {key} not found: '{reference}'", defName,
+                    "Place the asset next to system.def or under data/"));
+            }
+        }
+
+        if (screenpack.Components == ScreenpackComponents.None)
+        {
+            issues.Add(new ValidationIssue(ValidationSeverity.Warning,
+                "No standard screenpack UI sections detected", defName,
+                "Expected Title/Select/VS/Option sections or fight/select files"));
+        }
+
+        return new ValidationResult(screenpack.Name, "screenpack", screenpack.DefPath, issues);
+    }
+
+    public static ValidationResult ValidateActiveMotif(string root, LibrarySnapshot snapshot)
+    {
+        var issues = new List<ValidationIssue>();
+        var motif = snapshot.Config.Motif;
+        if (string.IsNullOrWhiteSpace(motif))
+        {
+            if (snapshot.Config.Exists)
+            {
+                issues.Add(new ValidationIssue(ValidationSeverity.Warning,
+                    "No Motif key in save/config", "config.ini",
+                    "Set Motif = data/<screenpack>/system.def"));
+            }
+
+            return new ValidationResult("Active Motif", "config", "save/config.ini", issues);
+        }
+
+        var full = Path.GetFullPath(Path.Combine(root, SelectDefReader.NormalizeSeparators(motif)
+            .Replace('/', Path.DirectorySeparatorChar)));
+        if (!File.Exists(full))
+        {
+            issues.Add(new ValidationIssue(ValidationSeverity.Error,
+                $"Active Motif points to missing file: '{motif}'", "config.ini",
+                "Activate a valid screenpack or repair the Motif path"));
+        }
+        else if (!snapshot.Screenpacks.Any(s => s.IsActive))
+        {
+            issues.Add(new ValidationIssue(ValidationSeverity.Warning,
+                $"Active Motif '{motif}' is not among indexed data/ screenpacks", "config.ini"));
+        }
+
+        return new ValidationResult("Active Motif", "config", "save/config.ini", issues);
     }
 
     public static ValidationResult ValidateCharacter(string root, CharacterEntry character)
