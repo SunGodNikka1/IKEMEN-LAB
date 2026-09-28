@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Services;
+using IKEMENLab.Core.Collections;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.SelectDef;
 using IKEMENLab.Core.Services;
@@ -31,6 +32,7 @@ public sealed class MainViewModel : ObservableObject
         Artwork = new ArtworkLoader();
         var refresh = async () => await RefreshAsync(null);
         var roster = new RosterActivationService();
+        var collectionActivation = new CollectionActivationService();
         Dashboard = new DashboardViewModel(
             launcher,
             Artwork,
@@ -40,7 +42,7 @@ public sealed class MainViewModel : ObservableObject
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page), refresh, roster);
         Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page));
-        Collections = new CollectionsViewModel(Artwork);
+        Collections = new CollectionsViewModel(Artwork, refresh, activation: collectionActivation);
 
         NavItems =
         [

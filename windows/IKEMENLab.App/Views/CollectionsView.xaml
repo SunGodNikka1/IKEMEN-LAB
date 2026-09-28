@@ -32,6 +32,14 @@
                 <StackPanel>
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Style="{StaticResource SecondaryButton}" Command="{Binding BeginActivateCommand}"
+                                    Margin="0,0,8,0" ToolTip="Activate this collection as the live character roster"
+                                    AutomationProperties.Name="Activate collection">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Style="{StaticResource IconText}" Text="&#xE8FB;" Margin="0,0,8,0"/>
+                                    <TextBlock Text="Activate" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Button>
                             <Button Style="{StaticResource GhostIconButton}" Command="{Binding EditCommand}" ToolTip="Edit collection" AutomationProperties.Name="Edit collection">
                                 <TextBlock Style="{StaticResource IconText}" Text="&#xE70F;"/>
                             </Button>
@@ -42,9 +50,32 @@
                         <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center"/>
                     </DockPanel>
                     <TextBlock Text="{Binding Metadata}" Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="{Binding RosterStatusText}" Style="{StaticResource BodyText}" Margin="0,4,0,0"/>
                     <TextBlock Text="{Binding LibraryPath}" Style="{StaticResource MonoText}" ToolTip="{Binding LibraryPath}" Margin="0,6,0,0"/>
                     <TextBlock Text="{Binding RuleSummary}" Style="{StaticResource BodyText}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="{Binding StatusText}" Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                               Visibility="{Binding StatusText, Converter={StaticResource HasValueToVis}}"/>
                 </StackPanel>
+                <Border Grid.Row="1" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,1" Padding="0,12" Margin="0,10,0,0"
+                        Visibility="{Binding IsPreviewing, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="Activate collection — preview" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                        <TextBlock Text="{Binding Preview.CollectionName}" Style="{StaticResource BodyText}" Margin="0,6,0,0"/>
+                        <TextBlock Text="{Binding PreviewSummary}" Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                        <TextBlock Text="{Binding PreviewWarning}" Style="{StaticResource BodyText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Visibility="{Binding PreviewWarning, Converter={StaticResource HasValueToVis}}"/>
+                        <Button Content="{Binding PreviewExpandLabel}" Command="{Binding TogglePreviewDetailsCommand}"
+                                Style="{StaticResource GhostIconButton}" HorizontalAlignment="Left" Margin="0,4,0,0"
+                                AutomationProperties.Name="Toggle preview details"/>
+                        <TextBlock Text="{Binding PreviewDetails}" Style="{StaticResource MonoText}" TextWrapping="Wrap" Margin="0,6,0,0"
+                                   Visibility="{Binding PreviewExpanded, Converter={StaticResource BoolToVis}}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                            <Button Content="Activate" Command="{Binding ConfirmActivateCommand}" Style="{StaticResource PrimaryButton}"
+                                    IsEnabled="{Binding CanConfirmActivate}" AutomationProperties.Name="Confirm activate collection"/>
+                            <Button Content="Cancel" Command="{Binding CancelPreviewCommand}" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
                 <Border Grid.Row="1" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,1" Padding="0,12" Margin="0,10,0,0"
                         Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}}">
                     <ScrollViewer MaxHeight="290" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
