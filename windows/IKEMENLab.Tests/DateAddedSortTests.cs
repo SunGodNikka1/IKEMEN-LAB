@@ -1,3 +1,4 @@
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Services;
 using Xunit;
 
@@ -128,6 +129,19 @@ public sealed class DateAddedSortTests
         Assert.NotNull(label);
         Assert.StartsWith("Added ", label);
         Assert.Contains("2026", label);
+    }
+
+    [Fact]
+    public void Column_form_marks_estimates_and_never_invents_a_date()
+    {
+        var utc = new DateTime(2026, 9, 20, 12, 0, 0, DateTimeKind.Utc);
+        var local = utc.ToLocalTime().ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+        Assert.Null(DateAddedSort.FormatAddedShort(null, DateAddedSource.Installed));
+        Assert.Equal(local, DateAddedSort.FormatAddedShort(utc, DateAddedSource.Installed));
+        Assert.Equal(local, DateAddedSort.FormatAddedShort(utc, DateAddedSource.FirstSeen));
+        Assert.Equal("Est. " + local, DateAddedSort.FormatAddedShort(utc, DateAddedSource.LegacyEstimate));
+        Assert.Equal("Estimated added " + local, DateAddedSort.FormatAddedLabel(utc, DateAddedSource.LegacyEstimate));
     }
 
     [Fact]

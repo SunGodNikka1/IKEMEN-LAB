@@ -72,4 +72,12 @@ public static class DateAddedSort
         var date = local.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
         return source == DateAddedSource.LegacyEstimate ? "Estimated added " + date : "Added " + date;
     }
+
+    /// <summary>Compact column form: "Sep 27, 2026", or "Est. Sep 27, 2026" for a legacy estimate.</summary>
+    public static string? FormatAddedShort(DateTime? installedAtUtc, DateAddedSource? source = null)
+    {
+        if (installedAtUtc is not { } utc) return null;
+        var date = utc.ToLocalTime().ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        return source == DateAddedSource.LegacyEstimate ? "Est. " + date : date;
+    }
 }

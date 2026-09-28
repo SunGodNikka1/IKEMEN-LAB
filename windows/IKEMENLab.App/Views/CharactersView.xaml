@@ -56,7 +56,7 @@
                             <ColumnDefinition Width="*" MinWidth="140"/>
                             <ColumnDefinition Width="140"/>
                             <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="92"/>
+                            <ColumnDefinition Width="112"/>
                             <ColumnDefinition Width="46"/>
                             <ColumnDefinition Width="32"/>
                         </Grid.ColumnDefinitions>
@@ -82,7 +82,8 @@
                             <TextBlock Text="{Binding FeaturesText}" Style="{StaticResource PillText}"/>
                         </Border>
 
-                        <TextBlock Grid.Column="4" Text="{Binding DateText}" FontSize="12" VerticalAlignment="Center"
+                        <TextBlock Grid.Column="4" Text="{Binding DateColumnText}" ToolTip="{Binding DateColumnToolTip}"
+                                   FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
                                    FontFamily="{StaticResource CaptionFont}" Foreground="{DynamicResource TextTertiary}"/>
 
                         <Border Grid.Column="5" Background="Transparent" ToolTip="{Binding StatusToolTip}"

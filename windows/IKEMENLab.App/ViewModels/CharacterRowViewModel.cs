@@ -22,7 +22,34 @@ public sealed class CharacterRowViewModel : ObservableObject
         var date = VersionDateFormatter.Format(entry.VersionDate);
         DateText = string.IsNullOrEmpty(date) ? "—" : date;
         DateAddedText = IKEMENLab.Core.Services.DateAddedSort.FormatAddedLabel(entry.DateAddedUtc, entry.DateAddedSource);
+        _dateAddedShort = IKEMENLab.Core.Services.DateAddedSort.FormatAddedShort(entry.DateAddedUtc, entry.DateAddedSource);
     }
+
+    private readonly string? _dateAddedShort;
+    private bool _showDateAdded;
+
+    /// <summary>
+    /// Set while the browser sorts by Date Added, so the date column shows the value the list is
+    /// ordered by instead of the DEF's version date.
+    /// </summary>
+    public bool ShowDateAdded
+    {
+        get => _showDateAdded;
+        set
+        {
+            if (SetProperty(ref _showDateAdded, value))
+            {
+                OnPropertyChanged(nameof(DateColumnText));
+                OnPropertyChanged(nameof(DateColumnToolTip));
+            }
+        }
+    }
+
+    public string DateColumnText => ShowDateAdded ? _dateAddedShort ?? "Unknown" : DateText;
+
+    public string? DateColumnToolTip => ShowDateAdded
+        ? DateAddedText ?? "Date Added unknown"
+        : DateText == "—" ? null : "Version date " + DateText;
 
     public CharacterEntry Entry { get; }
     public string DisplayName => Entry.DisplayName;

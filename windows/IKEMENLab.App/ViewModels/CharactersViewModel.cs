@@ -76,7 +76,9 @@ public sealed class CharactersViewModel : ObservableObject
         get => _sortMode;
         set
         {
-            if (SetProperty(ref _sortMode, value)) ApplyFilter();
+            if (!SetProperty(ref _sortMode, value)) return;
+            foreach (var row in _all) row.ShowDateAdded = value != BrowserSortMode.Default;
+            ApplyFilter();
         }
     }
 
@@ -132,7 +134,11 @@ public sealed class CharactersViewModel : ObservableObject
         {
             foreach (var entry in snapshot.Characters)
             {
-                _all.Add(new CharacterRowViewModel(entry) { CanToggleStatus = _rosterAvailable });
+                _all.Add(new CharacterRowViewModel(entry)
+                {
+                    CanToggleStatus = _rosterAvailable,
+                    ShowDateAdded = SortMode != BrowserSortMode.Default
+                });
             }
         }
 

@@ -24,7 +24,31 @@ public sealed class StageRowViewModel : ObservableObject
         AgeText = entry.ModifiedAtUtc is { } modified ? RecentContent.FormatRelativeAge(modified, nowUtc) : "—";
         AgeToolTip = entry.ModifiedAtUtc is { } m ? "DEF modified " + m.ToLocalTime().ToString("g") : "Modification date unavailable";
         DateAddedText = DateAddedSort.FormatAddedLabel(entry.DateAddedUtc, entry.DateAddedSource);
+        _dateAddedShort = DateAddedSort.FormatAddedShort(entry.DateAddedUtc, entry.DateAddedSource);
     }
+
+    private readonly string? _dateAddedShort;
+    private bool _showDateAdded;
+
+    /// <summary>
+    /// Set while the browser sorts by Date Added, so the date column shows the value the list is
+    /// ordered by instead of the DEF's modification age.
+    /// </summary>
+    public bool ShowDateAdded
+    {
+        get => _showDateAdded;
+        set
+        {
+            if (SetProperty(ref _showDateAdded, value))
+            {
+                OnPropertyChanged(nameof(DateColumnText));
+                OnPropertyChanged(nameof(DateColumnToolTip));
+            }
+        }
+    }
+
+    public string DateColumnText => ShowDateAdded ? _dateAddedShort ?? "Unknown" : AgeText;
+    public string DateColumnToolTip => ShowDateAdded ? DateAddedText ?? "Date Added unknown" : AgeToolTip;
 
     public StageEntry Entry { get; }
     public string Name => Entry.Name.Trim();
@@ -184,7 +208,9 @@ public sealed class StagesViewModel : ObservableObject
         get => _sortMode;
         set
         {
-            if (SetProperty(ref _sortMode, value)) ApplyFilter();
+            if (!SetProperty(ref _sortMode, value)) return;
+            foreach (var row in _all) row.ShowDateAdded = value != BrowserSortMode.Default;
+            ApplyFilter();
         }
     }
 
@@ -228,7 +254,11 @@ public sealed class StagesViewModel : ObservableObject
         {
             foreach (var stage in snapshot.Stages)
             {
-                _all.Add(new StageRowViewModel(stage, now) { CanToggleStatus = _rosterAvailable });
+                _all.Add(new StageRowViewModel(stage, now)
+                {
+                    CanToggleStatus = _rosterAvailable,
+                    ShowDateAdded = SortMode != BrowserSortMode.Default
+                });
             }
         }
 

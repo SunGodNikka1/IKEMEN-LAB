@@ -99,7 +99,7 @@
                             <ColumnDefinition Width="180"/>
                             <ColumnDefinition Width="*" MinWidth="160"/>
                             <ColumnDefinition Width="96"/>
-                            <ColumnDefinition Width="96"/>
+                            <ColumnDefinition Width="112"/>
                             <ColumnDefinition Width="46"/>
                             <ColumnDefinition Width="32"/>
                         </Grid.ColumnDefinitions>
@@ -120,7 +120,8 @@
                         <ContentPresenter Grid.Column="2" Content="{Binding}" ContentTemplate="{StaticResource BgmBadge}"
                                           VerticalAlignment="Center"/>
 
-                        <TextBlock Grid.Column="3" Text="{Binding AgeText}" ToolTip="{Binding AgeToolTip}" FontSize="12"
+                        <TextBlock Grid.Column="3" Text="{Binding DateColumnText}" ToolTip="{Binding DateColumnToolTip}" FontSize="12"
+                                   TextTrimming="CharacterEllipsis"
                                    FontFamily="{StaticResource CaptionFont}" Foreground="{DynamicResource TextTertiary}"
                                    VerticalAlignment="Center"/>
 
@@ -168,7 +169,8 @@
                                                   VerticalAlignment="Bottom"/>
                                 <StackPanel>
                                     <TextBlock Text="{Binding Name}" Style="{StaticResource StageName}" FontSize="13"/>
-                                    <TextBlock Text="{Binding AgeText}" FontSize="11" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBlock Text="{Binding DateColumnText}" ToolTip="{Binding DateColumnToolTip}" FontSize="11"
+                                               Foreground="{DynamicResource TextSecondary}"/>
                                 </StackPanel>
                             </DockPanel>
                         </Border>
