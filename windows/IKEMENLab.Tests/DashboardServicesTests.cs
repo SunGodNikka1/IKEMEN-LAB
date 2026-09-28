@@ -103,6 +103,27 @@ public class DashboardServicesTests
     }
 
     [Fact]
+    public void StageIndexReadsBgmAndCamera()
+    {
+        using var root = new TestRoot();
+        root.Write("stages/a.def", "[Info]\nname = A Stage\n[Camera]\nboundleft = -300\nboundright = 300\n[BGdef]\nspr = a.sff\n[Music]\nbgmusic = sound/a.mp3 ; loop\n");
+        root.Write("sound/a.mp3", "x");
+        root.Write("stages/b.def", "[Info]\nname = B Stage\n[BGdef]\nspr = b.sff\n[Music]\nbgmusic = missing.ogg\n");
+        root.Write("stages/c.def", "[Info]\nname = C Stage\n[BGdef]\nspr = c.sff\n[Music]\nbgvolume = 100\n");
+        root.Write("stages/d.def", "[Info]\nname = D Stage\n[BGdef]\nspr = d.sff\n[Music]\nround1.bgmusic = r1.mp3\n");
+        root.Write("stages/r1.mp3", "x");
+
+        var stages = new LibraryIndexService().Index(root.Path).Stages.ToDictionary(s => s.Id);
+        Assert.True(stages["a.def"].HasBgm && stages["a.def"].BgmFound);
+        Assert.Equal((-300, 300), (stages["a.def"].BoundLeft, stages["a.def"].BoundRight));
+        Assert.True(stages["b.def"].HasBgm);
+        Assert.False(stages["b.def"].BgmFound);
+        Assert.False(stages["c.def"].HasBgm);
+        Assert.Null(stages["c.def"].BoundLeft);
+        Assert.True(stages["d.def"].HasBgm && stages["d.def"].BgmFound);
+    }
+
+    [Fact]
     public void SnapshotCarriesStatusAndConfig()
     {
         using var root = new TestRoot();

@@ -1,0 +1,181 @@
+<UserControl x:Class="IKEMENLab.App.Views.StagesView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:IKEMENLab.App.ViewModels"
+             xmlns:views="clr-namespace:IKEMENLab.App.Views">
+    <UserControl.Resources>
+        <ContextMenu x:Key="RowMenu">
+            <MenuItem Header="Show in Explorer"
+                      Command="{Binding PlacementTarget.Tag.OpenFolderCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}"/>
+            <MenuItem Header="Copy DEF path"
+                      Command="{Binding PlacementTarget.Tag.CopyPathCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                      CommandParameter="{Binding}"/>
+        </ContextMenu>
+
+        <!-- Preview with placeholder + disabled/unregistered overlay -->
+        <DataTemplate x:Key="Preview" DataType="{x:Type vm:StageRowViewModel}">
+            <Grid Background="{DynamicResource SelectedBackgroundBrush}">
+                <TextBlock Text="{StaticResource Glyph.Stages}" FontFamily="{StaticResource IconFont}" FontSize="18"
+                           Foreground="{DynamicResource TextDisabled}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Visibility="{Binding Preview, Converter={StaticResource HasValueToVis}, ConverterParameter=invert}"/>
+                <Image Source="{Binding Preview}" Stretch="UniformToFill" Opacity="{Binding PreviewOpacity}"
+                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                <Border Background="#99000000" Visibility="{Binding IsActive, Converter={StaticResource BoolToVis}, ConverterParameter=invert}">
+                    <TextBlock Text="&#xED1A;" FontFamily="{StaticResource IconFont}" FontSize="16"
+                               Foreground="{DynamicResource TextSecondary}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Border>
+            </Grid>
+        </DataTemplate>
+
+        <!-- BGM / None badge -->
+        <DataTemplate x:Key="BgmBadge" DataType="{x:Type vm:StageRowViewModel}">
+            <Border x:Name="B" CornerRadius="4" Padding="7,2" BorderThickness="1" HorizontalAlignment="Left"
+                    Background="{DynamicResource ButtonSecondaryBrush}" BorderBrush="{DynamicResource BorderSubtle}"
+                    ToolTip="{Binding BgmToolTip}">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="I" Text="&#xE74F;" FontFamily="{StaticResource IconFont}" FontSize="10"
+                               Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <TextBlock x:Name="T" Text="{Binding BgmText}" FontSize="11" FontWeight="Medium"
+                               Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding HasBgm}" Value="True">
+                    <Setter TargetName="B" Property="Background" Value="{DynamicResource PositiveBackgroundBrush}"/>
+                    <Setter TargetName="B" Property="BorderBrush" Value="#4D10B981"/>
+                    <Setter TargetName="I" Property="Text" Value="&#xEC4F;"/>
+                    <Setter TargetName="I" Property="Foreground" Value="{DynamicResource PositiveBrush}"/>
+                    <Setter TargetName="T" Property="Foreground" Value="{DynamicResource PositiveBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding BgmMissing}" Value="True">
+                    <Setter TargetName="B" Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                    <Setter TargetName="B" Property="BorderBrush" Value="#4DF59E0B"/>
+                    <Setter TargetName="I" Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                    <Setter TargetName="T" Property="Foreground" Value="{DynamicResource WarningBrush}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <Style x:Key="StageName" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding IsDisabled}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource TextTertiary}"/>
+                    <Setter Property="TextDecorations" Value="Strikethrough"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsUnregistered}" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <views:BrowserHeader Section="Stages"
+                             SearchText="{Binding SearchText, Mode=TwoWay}"
+                             ViewMode="{Binding ViewMode, Mode=TwoWay}"
+                             HomeCommand="{Binding GoHomeCommand}"
+                             CountText="{Binding VisibleCount, StringFormat={}{0} shown}"/>
+
+        <!-- ================= List ================= -->
+        <ListBox Grid.Row="1" Style="{StaticResource BrowserListBox}"
+                 ItemsSource="{Binding Stages}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                 ItemContainerStyle="{StaticResource BrowserRowItem}"
+                 Visibility="{Binding IsListMode, Converter={StaticResource BoolToVis}}">
+            <ListBox.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:StageRowViewModel}">
+                    <Grid Height="98" Margin="16,0,16,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="180"/>
+                            <ColumnDefinition Width="*" MinWidth="160"/>
+                            <ColumnDefinition Width="96"/>
+                            <ColumnDefinition Width="96"/>
+                            <ColumnDefinition Width="46"/>
+                            <ColumnDefinition Width="32"/>
+                        </Grid.ColumnDefinitions>
+
+                        <Border Height="78" CornerRadius="6" ClipToBounds="True" BorderBrush="{DynamicResource BorderSubtle}"
+                                BorderThickness="1" ToolTip="{Binding SizeText}">
+                            <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Preview}"/>
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Margin="16,0,12,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Name}" Style="{StaticResource StageName}"/>
+                            <TextBlock Text="{Binding PathText}" Style="{StaticResource MonoText}" Margin="0,3,0,0"/>
+                            <TextBlock Text="{Binding Author}" FontSize="11" Margin="0,3,0,0"
+                                       Foreground="{DynamicResource TextTertiary}" TextTrimming="CharacterEllipsis"/>
+                        </StackPanel>
+
+                        <ContentPresenter Grid.Column="2" Content="{Binding}" ContentTemplate="{StaticResource BgmBadge}"
+                                          VerticalAlignment="Center"/>
+
+                        <TextBlock Grid.Column="3" Text="{Binding AgeText}" ToolTip="{Binding AgeToolTip}" FontSize="12"
+                                   FontFamily="{StaticResource CaptionFont}" Foreground="{DynamicResource TextTertiary}"
+                                   VerticalAlignment="Center"/>
+
+                        <Border Grid.Column="4" Background="Transparent" ToolTip="{Binding StatusToolTip}"
+                                HorizontalAlignment="Left" VerticalAlignment="Center"
+                                Visibility="{Binding IsUnregistered, Converter={StaticResource BoolToVis}, ConverterParameter=invert}">
+                            <CheckBox Style="{StaticResource StatusToggle}" IsChecked="{Binding IsActive, Mode=OneWay}"/>
+                        </Border>
+
+                        <Button Grid.Column="5" Style="{StaticResource GhostIconButton}" Content="{StaticResource Glyph.More}"
+                                ToolTip="More" Click="MoreButton_Click"
+                                Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=ListBox}}"/>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- ================= Grid ================= -->
+        <ListBox Grid.Row="1" Style="{StaticResource BrowserListBox}" Padding="24,20,8,20"
+                 ItemsSource="{Binding Stages}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                 ItemContainerStyle="{StaticResource BrowserCardItem}" VirtualizingPanel.IsVirtualizing="False"
+                 Visibility="{Binding IsGridMode, Converter={StaticResource BoolToVis}}">
+            <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <WrapPanel/>
+                </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemTemplate>
+                <DataTemplate DataType="{x:Type vm:StageRowViewModel}">
+                    <Grid Width="320" Height="160" ToolTip="{Binding PathText}">
+                        <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource Preview}"/>
+                        <Border VerticalAlignment="Bottom" Padding="12,24,12,10">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#00000000" Offset="0"/>
+                                    <GradientStop Color="#E6000000" Offset="1"/>
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <DockPanel>
+                                <ContentPresenter DockPanel.Dock="Right" Content="{Binding}" ContentTemplate="{StaticResource BgmBadge}"
+                                                  VerticalAlignment="Bottom"/>
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Name}" Style="{StaticResource StageName}" FontSize="13"/>
+                                    <TextBlock Text="{Binding AgeText}" FontSize="11" Foreground="{DynamicResource TextSecondary}"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <TextBlock Grid.Row="1" Text="No stages match your search." Style="{StaticResource BodyText}"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Visibility="{Binding HasNoResults, Converter={StaticResource BoolToVis}}"/>
+        <TextBlock Grid.Row="1" Text="No stages indexed. Choose an IKEMEN GO folder in Settings." Style="{StaticResource BodyText}"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"
+                   Visibility="{Binding HasNoStages, Converter={StaticResource BoolToVis}}"/>
+    </Grid>
+</UserControl>

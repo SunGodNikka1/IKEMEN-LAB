@@ -20,4 +20,16 @@ public sealed record StageEntry
 
     /// <summary>Root-relative DEF path as select.def references it (e.g. "stages/Pack/fancy.def").</summary>
     public string RootRelativeDefPath => "stages/" + DefPath;
+
+    /// <summary>[Music] bgmusic/bgm value as written, if any.</summary>
+    public string? BgmReference { get; init; }
+
+    /// <summary>True when the referenced BGM file exists (IKEMEN search: DEF dir, root, data/, sound/).</summary>
+    public bool BgmFound { get; init; }
+
+    public bool HasBgm => !string.IsNullOrWhiteSpace(BgmReference);
+
+    /// <summary>[Camera] boundleft/boundright (null when absent).</summary>
+    public int? BoundLeft { get; init; }
+    public int? BoundRight { get; init; }
 }

@@ -29,7 +29,11 @@ public partial class App : Application
         var options = QaOptions.Parse(e.Args);
 
         if (options.Page is { } page) mainVm.SelectedNav = page;
-        if (options.View is { } view) mainVm.Characters.ViewMode = view;
+        if (options.View is { } view)
+        {
+            mainVm.Characters.ViewMode = view;
+            mainVm.Stages.ViewMode = view;
+        }
 
         var window = new MainWindow(mainVm);
         MainWindow = window;

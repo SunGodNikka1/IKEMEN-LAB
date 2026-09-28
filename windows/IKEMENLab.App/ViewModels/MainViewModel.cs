@@ -31,11 +31,7 @@ public sealed class MainViewModel : ObservableObject
         Dashboard = new DashboardViewModel(launcher, Artwork, page => Navigate(page));
         Characters = new CharactersViewModel(Artwork, page => Navigate(page));
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
-        StagesPlaceholder = new PlaceholderViewModel
-        {
-            Title = "Stages",
-            Message = "Stage browser is a placeholder in WIN-1. Stage count is available on the Dashboard."
-        };
+        Stages = new StagesViewModel(Artwork, page => Navigate(page));
         ScreenpacksPlaceholder = new PlaceholderViewModel
         {
             Title = "Screenpacks",
@@ -72,7 +68,7 @@ public sealed class MainViewModel : ObservableObject
     public DashboardViewModel Dashboard { get; }
     public CharactersViewModel Characters { get; }
     public SettingsViewModel Settings { get; }
-    public PlaceholderViewModel StagesPlaceholder { get; }
+    public StagesViewModel Stages { get; }
     public PlaceholderViewModel ScreenpacksPlaceholder { get; }
     public PlaceholderViewModel CollectionsPlaceholder { get; }
 
@@ -160,6 +156,7 @@ public sealed class MainViewModel : ObservableObject
             Artwork.SetRoot(snapshot is { Installation.CanBrowse: true } ? snapshot.Installation.RootPath : null);
             Dashboard.ApplySnapshot(snapshot);
             Characters.ApplySnapshot(snapshot);
+            Stages.ApplySnapshot(snapshot);
             Settings.LoadFrom(_settingsStore.Load(), snapshot?.Installation);
 
             UpdateBadges(snapshot);
@@ -176,8 +173,6 @@ public sealed class MainViewModel : ObservableObject
             {
                 StatusText =
                     $"{snapshot.CharacterCount} characters · {snapshot.StageCount} stages · read-only index";
-                StagesPlaceholder.Message =
-                    $"WIN-1 placeholder. Indexed stage count: {snapshot.StageCount}. Full stage browser comes later.";
             }
         }
         catch (Exception ex)
@@ -261,7 +256,7 @@ public sealed class MainViewModel : ObservableObject
         {
             NavPage.Dashboard => Dashboard,
             NavPage.Characters => Characters,
-            NavPage.Stages => StagesPlaceholder,
+            NavPage.Stages => Stages,
             NavPage.Screenpacks => ScreenpacksPlaceholder,
             NavPage.Collections => CollectionsPlaceholder,
             NavPage.Settings => Settings,
