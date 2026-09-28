@@ -4,8 +4,20 @@ public static class AppDataPaths
 {
     public const string AppFolderName = "IKEMEN Lab";
 
+    /// <summary>
+    /// Optional override for isolated QA/fixture runs: when set, all app-owned data (settings,
+    /// backups, mutation manifests, staging, caches, date-added records) lives in this directory.
+    /// </summary>
+    public const string OverrideEnvironmentVariable = "IKEMENLAB_APPDATA_DIR";
+
     public static string GetAppDataDirectory()
     {
+        var overrideDir = Environment.GetEnvironmentVariable(OverrideEnvironmentVariable);
+        if (!string.IsNullOrWhiteSpace(overrideDir))
+        {
+            return Path.GetFullPath(overrideDir.Trim());
+        }
+
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(local, AppFolderName);
     }

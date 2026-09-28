@@ -68,8 +68,9 @@ public sealed class SafeMutationService : ISafeMutationService
     public MutationResult CreateFile(string ikemenRoot, string targetPath, byte[] content, bool dryRun = false)
         => Execute(PlanCreateFile(ikemenRoot, targetPath, content), content, dryRun);
 
-    public MutationResult ReplaceFile(string ikemenRoot, string targetPath, string sourceFilePath, bool dryRun = false)
-        => Execute(PlanReplaceFile(ikemenRoot, targetPath, sourceFilePath), createFileContent: null, dryRun);
+    public MutationResult ReplaceFile(string ikemenRoot, string targetPath, string sourceFilePath, bool dryRun = false,
+        string? expectedCurrentHash = null)
+        => Execute(PlanReplaceFile(ikemenRoot, targetPath, sourceFilePath), createFileContent: null, dryRun, expectedCurrentHash);
 
     public MutationResult CreateDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory, bool dryRun = false)
         => Execute(PlanCreateDirectory(ikemenRoot, targetDirectory, sourceDirectory), createFileContent: null, dryRun);
@@ -78,6 +79,9 @@ public sealed class SafeMutationService : ISafeMutationService
         => Execute(PlanReplaceDirectory(ikemenRoot, targetDirectory, sourceDirectory), createFileContent: null, dryRun);
 
     public MutationResult Execute(OperationPlan plan, byte[]? createFileContent = null, bool dryRun = false)
+        => Execute(plan, createFileContent, dryRun, expectedCurrentHash: null);
+
+    private MutationResult Execute(OperationPlan plan, byte[]? createFileContent, bool dryRun, string? expectedCurrentHash)
     {
         var operationId = NewOperationId();
         var timestamp = DateTimeOffset.UtcNow;
@@ -126,7 +130,7 @@ public sealed class SafeMutationService : ISafeMutationService
                     ExecuteCreateFile(plan, createFileContent ?? Array.Empty<byte>(), backupDir, manifest);
                     break;
                 case MutationKind.ReplaceFile:
-                    ExecuteReplaceFile(plan, backupDir, manifest);
+                    ExecuteReplaceFile(plan, backupDir, manifest, expectedCurrentHash);
                     break;
                 case MutationKind.CreateDirectory:
                     ExecuteCreateDirectory(plan, backupDir, manifest);
@@ -144,15 +148,27 @@ public sealed class SafeMutationService : ISafeMutationService
         }
         catch (Exception ex)
         {
+            var failure = FileReplacer.Classify(ex, plan.TargetPath);
             manifest.Status = MutationStatus.Failed;
-            manifest.Error = ex.Message;
+            manifest.FailureKind = failure.Kind;
+            manifest.Win32Error = failure.Win32Error;
+            manifest.ErrorDetail = failure.TechnicalDetail ?? ex.Message;
+            manifest.Error = failure.Message;
             try
             {
-                TryEmergencyRestore(manifest);
+                var restored = TryEmergencyRestore(manifest);
+                if (restored)
+                {
+                    manifest.Error = failure.Message.Replace(
+                        "The file was not changed.", "The original file was restored from backup.",
+                        StringComparison.Ordinal);
+                }
             }
             catch (Exception restoreEx)
             {
-                manifest.Error = ex.Message + " | rollback: " + restoreEx.Message;
+                manifest.Error = failure.Message + " Automatic restore also failed; the backup is at " +
+                                 (manifest.BackupPath ?? "(none)") + ".";
+                manifest.ErrorDetail += " | restore: " + restoreEx.Message;
             }
 
             SaveManifest(manifest);
@@ -189,7 +205,7 @@ public sealed class SafeMutationService : ISafeMutationService
                     break;
 
                 case MutationKind.ReplaceFile:
-                    RestoreFileFromBackup(manifest);
+                    RestoreFileFromBackup(manifest, force: true);
                     break;
 
                 case MutationKind.CreateDirectory:
@@ -212,8 +228,10 @@ public sealed class SafeMutationService : ISafeMutationService
         }
         catch (Exception ex)
         {
+            var failure = FileReplacer.Classify(ex, manifest.TargetPath);
             manifest.Status = MutationStatus.Failed;
-            manifest.Error = "Rollback failed: " + ex.Message;
+            manifest.Error = "Rollback failed: " + failure.Message;
+            manifest.ErrorDetail = failure.TechnicalDetail;
             SaveManifest(manifest);
             return Fail(manifest, plan: null);
         }
@@ -258,7 +276,7 @@ public sealed class SafeMutationService : ISafeMutationService
         }
     }
 
-    private void ExecuteReplaceFile(OperationPlan plan, string backupDir, MutationManifest manifest)
+    private void ExecuteReplaceFile(OperationPlan plan, string backupDir, MutationManifest manifest, string? expectedCurrentHash)
     {
         if (string.IsNullOrWhiteSpace(plan.SourcePath) || !File.Exists(plan.SourcePath))
         {
@@ -269,60 +287,156 @@ public sealed class SafeMutationService : ISafeMutationService
         IkemenPathGuard.EnsureNoReparseEscape(plan.IkemenRoot, plan.TargetPath);
         IkemenPathGuard.EnsureDistinctPaths(plan.SourcePath, plan.TargetPath);
 
-        var parent = Path.GetDirectoryName(plan.TargetPath)
+        var target = plan.TargetPath;
+        var parent = Path.GetDirectoryName(target)
             ?? throw new InvalidOperationException("Target has no parent directory.");
         Directory.CreateDirectory(parent);
+        FileReplacer.SweepStaleStaging(parent, StaleStagingAge);
 
-        var backupFile = Path.Combine(backupDir, "original" + Path.GetExtension(plan.TargetPath));
-        if (string.IsNullOrEmpty(Path.GetExtension(backupFile)))
-        {
-            backupFile = Path.Combine(backupDir, "original.bin");
-        }
+        var expectedAfter = FileReplacer.Sha256(plan.SourcePath);
+        manifest.ExpectedAfterHash = expectedAfter;
 
-        if (File.Exists(plan.TargetPath))
+        var targetExists = File.Exists(target);
+        var originalAttributes = FileAttributes.Normal;
+        var originalCreationUtc = default(DateTime);
+        if (targetExists)
         {
-            manifest.BeforeHash = IkemenPathGuard.Sha256File(plan.TargetPath);
-            File.Copy(plan.TargetPath, backupFile, overwrite: true);
+            originalAttributes = File.GetAttributes(target);
+            originalCreationUtc = File.GetCreationTimeUtc(target);
+            manifest.OriginalAttributes = originalAttributes.ToString();
+            if ((originalAttributes & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new SafeMutationException(MutationFailureKind.UnsafeTarget,
+                    $"'{Path.GetFileName(target)}' is a link (reparse point); IKEMEN Lab will not replace it. The file was not changed.");
+            }
+
+            manifest.BeforeHash = FileReplacer.Sha256(target);
+            if (expectedCurrentHash is not null &&
+                !string.Equals(expectedCurrentHash, manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.Conflict,
+                    $"'{Path.GetFileName(target)}' was changed by another program after IKEMEN Lab read it. " +
+                    "Refresh and try again. The file was not changed.");
+            }
+
+            // App-owned backup. It may live on another volume: it is never used as a ReplaceFile backup name.
+            var backupFile = Path.Combine(backupDir, "original" + Path.GetExtension(target));
+            if (string.IsNullOrEmpty(Path.GetExtension(target)))
+            {
+                backupFile = Path.Combine(backupDir, "original.bin");
+            }
+
+            FileReplacer.CopyDurable(target, backupFile);
+            if (!string.Equals(FileReplacer.Sha256(backupFile), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    "Could not create a verified backup, so the file was not changed.");
+            }
+
             manifest.BackupPath = backupFile;
         }
         else
         {
             // Treat missing target as create-via-replace; record marker.
-            File.WriteAllText(Path.Combine(backupDir, "did-not-exist.txt"), plan.TargetPath);
+            File.WriteAllText(Path.Combine(backupDir, "did-not-exist.txt"), target);
             manifest.BackupPath = backupDir;
         }
 
+        // Staging lives beside the target (same volume), so the final swap is a rename.
         var staging = Path.Combine(parent, $".ikemenlab-{manifest.OperationId}.tmp");
         manifest.StagingPath = staging;
         try
         {
-            File.Copy(plan.SourcePath, staging, overwrite: true);
-            if (File.Exists(plan.TargetPath))
+            FileReplacer.CopyDurable(plan.SourcePath, staging);
+            if (!string.Equals(FileReplacer.Sha256(staging), expectedAfter, StringComparison.OrdinalIgnoreCase))
             {
-                // Same-directory replace: delete then move is acceptable after backup.
-                var replaceBackup = Path.Combine(backupDir, "replace-win.bak");
-                File.Replace(staging, plan.TargetPath, replaceBackup, ignoreMetadataErrors: true);
-                if (File.Exists(replaceBackup) && manifest.BackupPath is null)
-                {
-                    manifest.BackupPath = replaceBackup;
-                }
-                else if (File.Exists(replaceBackup))
-                {
-                    File.Delete(replaceBackup);
-                }
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    "The staged replacement did not match its source, so the file was not changed.");
+            }
+
+            if (targetExists)
+            {
+                manifest.ReplaceMethod = SwapPreservingMetadata(staging, target, originalAttributes, originalCreationUtc, manifest);
             }
             else
             {
-                File.Move(staging, plan.TargetPath);
+                File.Move(staging, target);
+                manifest.ReplaceMethod = "Move";
             }
 
-            manifest.AfterHash = IkemenPathGuard.Sha256File(plan.TargetPath);
+            manifest.AfterHash = FileReplacer.Sha256(target);
+            if (!string.Equals(manifest.AfterHash, expectedAfter, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    $"'{Path.GetFileName(target)}' did not match the intended content after writing. The file was not changed.");
+            }
         }
         finally
         {
-            if (File.Exists(staging)) File.Delete(staging);
+            TryDeleteFile(staging);
         }
     }
+
+    /// <summary>
+    /// Swaps <paramref name="staging"/> into <paramref name="target"/>. A ReadOnly attribute is lifted
+    /// only for the swap and re-applied afterwards; the MoveFileEx fallback restores the original
+    /// attributes and creation time (ReplaceFile preserves them itself).
+    /// </summary>
+    private static string SwapPreservingMetadata(
+        string staging, string target, FileAttributes originalAttributes, DateTime originalCreationUtc, MutationManifest? manifest)
+    {
+        var readOnly = (originalAttributes & FileAttributes.ReadOnly) != 0;
+        if (readOnly)
+        {
+            File.SetAttributes(target, originalAttributes & ~FileAttributes.ReadOnly);
+            if (manifest is not null) manifest.ReadOnlyPreserved = true;
+        }
+
+        try
+        {
+            var method = FileReplacer.Replace(staging, target);
+            if (method == "MoveFileEx")
+            {
+                TryRestoreMetadata(target, originalAttributes & ~FileAttributes.ReadOnly, originalCreationUtc);
+            }
+
+            return method;
+        }
+        finally
+        {
+            if (readOnly && File.Exists(target))
+            {
+                File.SetAttributes(target, File.GetAttributes(target) | FileAttributes.ReadOnly);
+            }
+        }
+    }
+
+    private static void TryRestoreMetadata(string target, FileAttributes attributes, DateTime creationUtc)
+    {
+        try
+        {
+            var keep = attributes & (FileAttributes.Hidden | FileAttributes.System | FileAttributes.Archive |
+                                     FileAttributes.NotContentIndexed);
+            File.SetAttributes(target, keep == 0 ? FileAttributes.Normal : keep);
+            if (creationUtc != default) File.SetCreationTimeUtc(target, creationUtc);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            File.SetAttributes(path, FileAttributes.Normal);
+            File.Delete(path);
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+
+    private static readonly TimeSpan StaleStagingAge = TimeSpan.FromHours(1);
 
     private void ExecuteCreateDirectory(OperationPlan plan, string backupDir, MutationManifest manifest)
     {
@@ -417,45 +531,101 @@ public sealed class SafeMutationService : ISafeMutationService
         }
     }
 
-    private void TryEmergencyRestore(MutationManifest manifest)
+    /// <summary>Returns true when the target had to be (and was) restored from backup.</summary>
+    private static bool TryEmergencyRestore(MutationManifest manifest)
     {
-        if (manifest.BackupPath is null) return;
+        if (manifest.BackupPath is null) return false;
 
         switch (manifest.Kind)
         {
             case MutationKind.CreateFile:
                 if (File.Exists(manifest.TargetPath)) File.Delete(manifest.TargetPath);
-                break;
+                return false;
             case MutationKind.ReplaceFile:
-                RestoreFileFromBackup(manifest);
-                break;
+                return RestoreFileFromBackup(manifest, force: false);
             case MutationKind.CreateDirectory:
                 if (Directory.Exists(manifest.TargetPath)) Directory.Delete(manifest.TargetPath, true);
-                break;
+                return false;
             case MutationKind.ReplaceDirectory:
                 RestoreDirectoryFromBackup(manifest);
-                break;
+                return true;
         }
+
+        return false;
     }
 
-    private static void RestoreFileFromBackup(MutationManifest manifest)
+    /// <summary>
+    /// Restores a ReplaceFile target from its app-owned backup. A target that still holds its original
+    /// bytes is left untouched (the usual case when the swap itself was refused). The restore is staged
+    /// beside the target and swapped the same way as a replace, so it works across volumes and keeps a
+    /// ReadOnly attribute.
+    /// </summary>
+    private static bool RestoreFileFromBackup(MutationManifest manifest, bool force)
     {
-        if (manifest.BackupPath is null) return;
+        if (manifest.BackupPath is null) return false;
+        var target = manifest.TargetPath;
 
         if (File.Exists(manifest.BackupPath))
         {
-            var parent = Path.GetDirectoryName(manifest.TargetPath);
-            if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
-            File.Copy(manifest.BackupPath, manifest.TargetPath, overwrite: true);
-            return;
+            if (File.Exists(target) && manifest.BeforeHash is not null &&
+                string.Equals(FileReplacer.Sha256(target), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
+            {
+                manifest.OriginalVerifiedIntact = true;
+                return false;
+            }
+
+            if (!force && manifest.BeforeHash is null) return false;
+
+            var parent = Path.GetDirectoryName(target)!;
+            Directory.CreateDirectory(parent);
+            var staging = Path.Combine(parent, $".ikemenlab-{manifest.OperationId}-restore.tmp");
+            var attributes = Enum.TryParse<FileAttributes>(manifest.OriginalAttributes, out var parsed)
+                ? parsed
+                : FileAttributes.Normal;
+            try
+            {
+                FileReplacer.CopyDurable(manifest.BackupPath, staging);
+                if (File.Exists(target))
+                {
+                    var current = File.GetAttributes(target);
+                    SwapPreservingMetadata(staging, target,
+                        (current & ~FileAttributes.ReadOnly) | (attributes & FileAttributes.ReadOnly), default, manifest: null);
+                }
+                else
+                {
+                    File.Move(staging, target);
+                    if ((attributes & FileAttributes.ReadOnly) != 0)
+                    {
+                        File.SetAttributes(target, File.GetAttributes(target) | FileAttributes.ReadOnly);
+                    }
+                }
+            }
+            finally
+            {
+                TryDeleteFile(staging);
+            }
+
+            if (manifest.BeforeHash is not null &&
+                !string.Equals(FileReplacer.Sha256(target), manifest.BeforeHash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SafeMutationException(MutationFailureKind.VerificationFailed,
+                    "The restored file did not match the backup.");
+            }
+
+            manifest.OriginalVerifiedIntact = true;
+            return true;
         }
 
         // Marker-only backup means the file was newly created by replace; remove it.
         var marker = Path.Combine(manifest.BackupPath, "did-not-exist.txt");
-        if (File.Exists(marker) && File.Exists(manifest.TargetPath))
+        if (File.Exists(marker) && File.Exists(target))
         {
-            File.Delete(manifest.TargetPath);
+            File.SetAttributes(target, FileAttributes.Normal);
+            File.Delete(target);
+            return true;
         }
+
+        return false;
     }
 
     private static void RestoreDirectoryFromBackup(MutationManifest manifest)

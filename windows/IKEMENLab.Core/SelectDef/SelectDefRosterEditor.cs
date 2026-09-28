@@ -46,30 +46,31 @@ public static class SelectDefRosterEditor
         var section = kind == RosterContentKind.Character
             ? SelectDefSection.Characters
             : SelectDefSection.ExtraStages;
+        var what = kind == RosterContentKind.Character ? "character" : "stage";
 
-        var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var lines = content.Split(["\r\n", "\n", "\r"], StringSplitOptions.None);
+        // Work on line spans so an edit touches exactly one line: every other byte, the original
+        // newline style (including mixed endings) and the final terminator stay as they were.
+        var spans = SplitLines(content);
+        var lines = spans.Select(s => content.Substring(s.Start, s.Length)).ToArray();
 
         var matches = FindMatches(lines, ikemenRoot, section, targetKey);
         var active = matches.Where(m => !m.IsCommented).ToList();
         var disabled = matches.Where(m => m.IsCommented).ToList();
 
-        if (active.Count > 1 || disabled.Count > 1)
+        // Several *active* lines for one item stay fail-closed (which slot to keep is the user's call).
+        // Commented duplicates no longer block anything: previously disabling an entry that already had
+        // a commented copy produced two commented lines and the item could never be re-enabled.
+        if (active.Count > 1)
         {
             return Fail(content,
-                $"Ambiguous select.def entries for this {(kind == RosterContentKind.Character ? "character" : "stage")} " +
-                $"({active.Count} active, {disabled.Count} disabled). Resolve duplicates manually.");
-        }
-
-        if (action == RosterToggleAction.Enable && active.Count >= 1 && disabled.Count >= 1)
-        {
-            return Fail(content,
-                "Ambiguous select.def state: both active and disabled entries exist. Resolve duplicates manually.");
+                $"Ambiguous select.def entries: this {what} is listed {active.Count} times (lines " +
+                string.Join(", ", active.Select(m => m.LineIndex + 1)) +
+                "). Remove the extra entries manually, then try again.");
         }
 
         if (action == RosterToggleAction.Enable)
         {
-            if (active.Count == 1 && disabled.Count == 0)
+            if (active.Count == 1)
             {
                 return new RosterEditResult
                 {
@@ -81,43 +82,38 @@ public static class SelectDefRosterEditor
                 };
             }
 
-            if (disabled.Count == 1)
+            if (disabled.Count >= 1)
             {
+                // Re-enable the first commented entry in roster order; any further commented
+                // duplicates stay commented (they do not affect the resulting status).
                 var idx = disabled[0].LineIndex;
-                lines[idx] = UncommentLine(lines[idx]);
-                var updated = string.Join(newline, lines);
-                if (!EndsWithOriginalTerminator(content, newline) && content.EndsWith('\n'))
-                {
-                    // string.Join preserves last empty line if content ended with newline and Split kept trailing empty
-                }
-
-                return Validate(updated, ikemenRoot, kind, rootRelativeDefPath, ContentStatus.Active, idx + 1, "Uncommented existing entry.");
+                var updated = ReplaceLine(content, spans[idx], UncommentLine(lines[idx]));
+                var description = disabled.Count > 1
+                    ? $"Uncommented existing entry (line {idx + 1}); {disabled.Count - 1} other commented duplicate(s) left as-is."
+                    : "Uncommented existing entry.";
+                return Validate(updated, ikemenRoot, kind, rootRelativeDefPath, ContentStatus.Active, idx + 1, description);
             }
 
-            // Unregistered — append a new entry.
+            // Unregistered — add a new entry at the end of the section.
             var entryName = kind == RosterContentKind.Character
                 ? PreferredCharacterRosterName(rootRelativeDefPath)
                 : PreferredStageRosterName(rootRelativeDefPath);
 
-            if (string.IsNullOrWhiteSpace(entryName))
+            if (string.IsNullOrWhiteSpace(entryName) || entryName.IndexOfAny([',', ';']) >= 0 ||
+                (kind == RosterContentKind.Character && entryName.StartsWith('[')))
             {
-                return Fail(content, "Could not derive a safe select.def entry name.");
+                return Fail(content, $"This {what}'s path cannot be written as a select.def entry (it contains ',', ';' or a leading '[').");
             }
 
-            var inserted = InsertEntry(lines, section, entryName, newline);
-            if (inserted.Error is not null)
-            {
-                return Fail(content, inserted.Error);
-            }
-
-            return Validate(inserted.Content!, ikemenRoot, kind, rootRelativeDefPath, ContentStatus.Active,
+            var inserted = InsertEntry(content, spans, lines, section, entryName);
+            return Validate(inserted.Content, ikemenRoot, kind, rootRelativeDefPath, ContentStatus.Active,
                 inserted.LineNumber, $"Added roster entry '{entryName}'.");
         }
 
         // Disable
         if (active.Count == 0)
         {
-            if (disabled.Count == 1)
+            if (disabled.Count >= 1)
             {
                 return new RosterEditResult
                 {
@@ -134,11 +130,50 @@ public static class SelectDefRosterEditor
 
         {
             var idx = active[0].LineIndex;
-            lines[idx] = CommentOutLine(lines[idx]);
-            var updated = string.Join(newline, lines);
+            var updated = ReplaceLine(content, spans[idx], CommentOutLine(lines[idx]));
             return Validate(updated, ikemenRoot, kind, rootRelativeDefPath, ContentStatus.Disabled, idx + 1,
                 "Commented out roster entry.");
         }
+    }
+
+    private readonly record struct LineSpan(int Start, int Length, int TerminatorLength);
+
+    private static List<LineSpan> SplitLines(string content)
+    {
+        var spans = new List<LineSpan>();
+        var start = 0;
+        for (var i = 0; i < content.Length; i++)
+        {
+            if (content[i] == '\r')
+            {
+                var term = i + 1 < content.Length && content[i + 1] == '\n' ? 2 : 1;
+                spans.Add(new LineSpan(start, i - start, term));
+                i += term - 1;
+                start = i + 1;
+            }
+            else if (content[i] == '\n')
+            {
+                spans.Add(new LineSpan(start, i - start, 1));
+                start = i + 1;
+            }
+        }
+
+        spans.Add(new LineSpan(start, content.Length - start, 0));
+        return spans;
+    }
+
+    private static string ReplaceLine(string content, LineSpan span, string newText)
+        => string.Concat(content.AsSpan(0, span.Start), newText, content.AsSpan(span.Start + span.Length));
+
+    private static string PreferredNewline(string content, IReadOnlyList<LineSpan> spans, int nearIndex)
+    {
+        for (var i = Math.Min(nearIndex, spans.Count - 1); i >= 0; i--)
+        {
+            if (spans[i].TerminatorLength > 0)
+                return content.Substring(spans[i].Start + spans[i].Length, spans[i].TerminatorLength);
+        }
+
+        return content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : content.Contains('\n') ? "\n" : "\r\n";
     }
 
     private static RosterEditResult Validate(
@@ -281,67 +316,68 @@ public static class SelectDefRosterEditor
 
     private sealed class InsertResult
     {
-        public string? Content { get; init; }
-        public string? Error { get; init; }
+        public required string Content { get; init; }
         public int? LineNumber { get; init; }
     }
 
-    private static InsertResult InsertEntry(string[] lines, SelectDefSection section, string entryName, string newline)
+    /// <summary>
+    /// Inserts <paramref name="entryName"/> after the last non-blank line of the section (so trailing
+    /// blank lines before the next header are kept), or appends a new section when none exists.
+    /// </summary>
+    private static InsertResult InsertEntry(
+        string content, IReadOnlyList<LineSpan> spans, string[] lines, SelectDefSection section, string entryName)
     {
-        var header = section == SelectDefSection.Characters ? "[Characters]" : "[ExtraStages]";
         var sectionStart = -1;
-        var insertAt = -1;
-
+        var sectionEnd = lines.Length; // exclusive
         for (var i = 0; i < lines.Length; i++)
         {
-            var trimmed = lines[i].Trim(' ', '\t');
+            var trimmed = lines[i].Trim(' ', '\t', '﻿');
             if (!trimmed.StartsWith('[') || !trimmed.Contains(']')) continue;
+
+            if (sectionStart >= 0)
+            {
+                sectionEnd = i;
+                break;
+            }
 
             var end = trimmed.IndexOf(']');
             var name = trimmed[1..end].Trim();
             var isTarget = section == SelectDefSection.Characters
                 ? name.Equals("Characters", StringComparison.OrdinalIgnoreCase)
                 : name.Equals("ExtraStages", StringComparison.OrdinalIgnoreCase);
-            if (!isTarget) continue;
-
-            sectionStart = i;
-            insertAt = i + 1;
-            for (var j = i + 1; j < lines.Length; j++)
-            {
-                var t = lines[j].Trim(' ', '\t');
-                if (t.StartsWith('[') && t.Contains(']'))
-                {
-                    insertAt = j;
-                    break;
-                }
-
-                insertAt = j + 1;
-            }
-
-            break;
+            if (isTarget) sectionStart = i;
         }
 
-        var list = lines.ToList();
         if (sectionStart < 0)
         {
-            // Append section at end.
-            if (list.Count > 0 && !string.IsNullOrWhiteSpace(list[^1]))
-                list.Add(string.Empty);
-            list.Add(header);
-            list.Add(entryName);
-            return new InsertResult
-            {
-                Content = string.Join(newline, list),
-                LineNumber = list.Count
-            };
+            var header = section == SelectDefSection.Characters ? "[Characters]" : "[ExtraStages]";
+            var nl = PreferredNewline(content, spans, spans.Count - 1);
+            var prefix = content.Length == 0 || content.EndsWith('\n') || content.EndsWith('\r') ? string.Empty : nl;
+            var appended = content + prefix + nl + header + nl + entryName + nl;
+            return new InsertResult { Content = appended, LineNumber = SplitLines(appended).Count - 1 };
         }
 
-        list.Insert(insertAt, entryName);
-        return new InsertResult
+        var anchor = sectionStart;
+        for (var i = sectionStart + 1; i < sectionEnd; i++)
         {
-            Content = string.Join(newline, list),
-            LineNumber = insertAt + 1
-        };
+            if (!string.IsNullOrWhiteSpace(lines[i])) anchor = i;
+        }
+
+        var newline = PreferredNewline(content, spans, anchor);
+        var anchorSpan = spans[anchor];
+        string updated;
+        if (anchorSpan.TerminatorLength > 0)
+        {
+            var at = anchorSpan.Start + anchorSpan.Length + anchorSpan.TerminatorLength;
+            updated = string.Concat(content.AsSpan(0, at), entryName + newline, content.AsSpan(at));
+        }
+        else
+        {
+            // Anchor is the final line without a terminator.
+            updated = content + newline + entryName;
+        }
+
+        return new InsertResult { Content = updated, LineNumber = anchor + 2 };
     }
 
     public static string PreferredCharacterRosterName(string rootRelativeDefPath)
@@ -399,13 +435,14 @@ public static class SelectDefRosterEditor
         return ";" + line;
     }
 
+    /// <summary>Removes every leading ';' (after indentation), so ";;kfm" re-enables as "kfm".</summary>
     public static string UncommentLine(string line)
     {
         var i = 0;
         while (i < line.Length && (line[i] == ' ' || line[i] == '\t')) i++;
-        if (i < line.Length && line[i] == ';')
-            return line[..i] + line[(i + 1)..];
-        return line;
+        var j = i;
+        while (j < line.Length && line[j] == ';') j++;
+        return j == i ? line : line[..i] + line[j..];
     }
 
     public static string NormalizeKey(string root, string relative)
@@ -413,8 +450,6 @@ public static class SelectDefRosterEditor
         var combined = Path.IsPathRooted(relative) ? relative : Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
         return Path.GetFullPath(combined);
     }
-
-    private static bool EndsWithOriginalTerminator(string content, string newline) => content.EndsWith(newline);
 
     private static RosterEditResult Fail(string content, string error)
         => new() { Success = false, Content = content, Error = error, Changed = false };

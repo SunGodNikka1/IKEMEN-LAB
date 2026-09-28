@@ -168,8 +168,9 @@ public sealed class IkemenConfigMutationService : IIkemenConfigMutationService
                 };
             }
 
+            using var gate = TargetWriteGate.Enter(path);
             var originalBytes = File.ReadAllBytes(path);
-            var originalText = DefFileReader.ReadFileContent(path);
+            var originalText = DefFileReader.Decode(originalBytes, out var originalEncoding);
             if (originalText is null)
                 return Fail("Config file could not be decoded.", path);
 
@@ -203,8 +204,17 @@ public sealed class IkemenConfigMutationService : IIkemenConfigMutationService
             }
 
             var stagingFile = Path.Combine(_stagingRoot, Guid.NewGuid().ToString("N") + Path.GetExtension(path));
-            var encoding = DetectEncoding(originalBytes);
-            File.WriteAllText(stagingFile, edited.Content, encoding);
+            byte[] proposed;
+            try
+            {
+                proposed = DefFileReader.Encode(edited.Content, originalEncoding);
+            }
+            catch (EncoderFallbackException)
+            {
+                return Fail("The new value cannot be represented in the config file's text encoding.", path);
+            }
+
+            File.WriteAllBytes(stagingFile, proposed);
 
             try
             {
@@ -224,7 +234,8 @@ public sealed class IkemenConfigMutationService : IIkemenConfigMutationService
                     };
                 }
 
-                var mutation = _mutations.ReplaceFile(root, path, stagingFile);
+                var mutation = _mutations.ReplaceFile(root, path, stagingFile,
+                    expectedCurrentHash: TargetWriteGate.Sha256Hex(originalBytes));
                 if (!mutation.Success)
                     return Fail(mutation.Error ?? "SafeMutation ReplaceFile failed.", path, plan);
 
@@ -346,13 +357,6 @@ public sealed class IkemenConfigMutationService : IIkemenConfigMutationService
         {
             return IniEditResult.Fail(ex.Message);
         }
-    }
-
-    private static Encoding DetectEncoding(byte[] bytes)
-    {
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
-        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     }
 
     private static ConfigMutationPreview Blocked(

@@ -44,6 +44,12 @@ public sealed class StageRowViewModel : ObservableObject
         : Entry.BgmFound ? "bgmusic = " + Entry.BgmReference : $"bgmusic = {Entry.BgmReference} (file not found)";
 
     public bool IsActive => Entry.Status == ContentStatus.Active;
+
+    /// <summary>
+    /// Re-reads the bound status. A clicked switch shows its new position before the roster write
+    /// finishes; if the write fails (or changes nothing) this snaps it back to the real state.
+    /// </summary>
+    public void RefreshStatusBinding() => OnPropertyChanged(nameof(IsActive));
     public bool IsDisabled => Entry.Status == ContentStatus.Disabled;
     public bool IsUnregistered => Entry.Status == ContentStatus.Unregistered;
     public ContentStatus Status => Entry.Status;
@@ -262,6 +268,7 @@ public sealed class StagesViewModel : ObservableObject
         finally
         {
             row.IsToggling = false;
+            row.RefreshStatusBinding();
         }
     }
 

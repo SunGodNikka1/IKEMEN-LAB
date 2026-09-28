@@ -55,6 +55,7 @@ public sealed class DashboardViewModel : ObservableObject
     private string _quickSettingsNote = "No save/config.ini found";
     private bool _suppressQuickSettingsWrite;
     private bool _quickSettingsBusy;
+    private int? _committedMasterVolume;
     private readonly IIkemenConfigMutationService _configWriter;
 
     private HealthState _healthState = HealthState.Idle;
@@ -543,6 +544,7 @@ public sealed class DashboardViewModel : ObservableObject
             VSync = config?.VSync ?? false;
             Fullscreen = config?.Fullscreen ?? false;
             MasterVolume = config?.MasterVolume ?? 0;
+            _committedMasterVolume = config?.MasterVolume;
             OnPropertyChanged(nameof(MasterVolumeText));
             QuickSettingsNote = config is { Exists: true, SourcePath: { } path } && snapshot is not null
                 ? $"Editing {Path.GetRelativePath(snapshot.Installation.RootPath, path).Replace('\\', '/')}"
@@ -594,7 +596,8 @@ public sealed class DashboardViewModel : ObservableObject
     {
         if (_snapshot?.Installation.RootPath is not { } root || !CanEditMasterVolume || _quickSettingsBusy) return;
         _quickSettingsBusy = true;
-        var previous = _snapshot.Config?.MasterVolume ?? (int)Math.Round(MasterVolume);
+        // Revert target is the last value known to be on disk, not the (possibly stale) snapshot.
+        var previous = _committedMasterVolume ?? _snapshot.Config?.MasterVolume ?? (int)Math.Round(MasterVolume);
         try
         {
             var volume = (int)Math.Clamp(Math.Round(MasterVolume), 0, 100);
@@ -611,6 +614,7 @@ public sealed class DashboardViewModel : ObservableObject
             var re = result.ResultingConfig ?? IkemenConfigReader.Read(root);
             _suppressQuickSettingsWrite = true;
             MasterVolume = re.MasterVolume ?? volume;
+            _committedMasterVolume = re.MasterVolume ?? volume;
             _suppressQuickSettingsWrite = false;
             QuickSettingsNote = result.Changed ? $"Master Volume set to {MasterVolume:0}%." : "Already set.";
         }

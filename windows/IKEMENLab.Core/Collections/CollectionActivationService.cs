@@ -121,8 +121,9 @@ public sealed class CollectionActivationService : ICollectionActivationService
             var selectPath = preview.SelectDefPath!;
             IkemenPathGuard.EnsureInsideRoot(root, selectPath);
 
+            using var gate = TargetWriteGate.Enter(selectPath);
             var originalBytes = File.ReadAllBytes(selectPath);
-            var originalText = DefFileReader.ReadFileContent(selectPath);
+            var originalText = DefFileReader.Decode(originalBytes, out var originalEncoding);
             if (originalText is null)
             {
                 return Fail("select.def could not be decoded.", preview);
@@ -193,8 +194,17 @@ public sealed class CollectionActivationService : ICollectionActivationService
             }
 
             var stagingFile = Path.Combine(_stagingRoot, Guid.NewGuid().ToString("N") + ".def");
-            var encoding = DetectEncoding(originalBytes);
-            File.WriteAllText(stagingFile, content, encoding);
+            byte[] proposed;
+            try
+            {
+                proposed = DefFileReader.Encode(content, originalEncoding);
+            }
+            catch (EncoderFallbackException)
+            {
+                return Fail("The updated roster cannot be represented in select.def's text encoding.", preview);
+            }
+
+            File.WriteAllBytes(stagingFile, proposed);
 
             try
             {
@@ -216,7 +226,8 @@ public sealed class CollectionActivationService : ICollectionActivationService
                     };
                 }
 
-                var mutation = _mutations.ReplaceFile(root, selectPath, stagingFile);
+                var mutation = _mutations.ReplaceFile(root, selectPath, stagingFile,
+                    expectedCurrentHash: TargetWriteGate.Sha256Hex(originalBytes));
                 if (!mutation.Success)
                     return Fail(mutation.Error ?? "SafeMutation ReplaceFile failed.", preview, plan);
 
@@ -551,13 +562,6 @@ public sealed class CollectionActivationService : ICollectionActivationService
             Missing = missing ?? [],
             MissingNames = missingNames ?? []
         };
-
-    private static Encoding DetectEncoding(byte[] bytes)
-    {
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
-        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
-    }
 
     private static CollectionActivationResult Fail(
         string error,

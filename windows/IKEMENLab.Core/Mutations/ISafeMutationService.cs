@@ -8,7 +8,12 @@ public interface ISafeMutationService
     OperationPlan PlanReplaceDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory);
 
     MutationResult CreateFile(string ikemenRoot, string targetPath, byte[] content, bool dryRun = false);
-    MutationResult ReplaceFile(string ikemenRoot, string targetPath, string sourceFilePath, bool dryRun = false);
+    /// <param name="expectedCurrentHash">
+    /// Optional SHA-256 (hex) the target must still have; if another program changed the file since
+    /// the caller read it, the operation fails with <see cref="MutationFailureKind.Conflict"/>.
+    /// </param>
+    MutationResult ReplaceFile(string ikemenRoot, string targetPath, string sourceFilePath, bool dryRun = false,
+        string? expectedCurrentHash = null);
     MutationResult CreateDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory, bool dryRun = false);
     MutationResult ReplaceDirectory(string ikemenRoot, string targetDirectory, string sourceDirectory, bool dryRun = false);
 

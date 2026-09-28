@@ -31,8 +31,15 @@ public static class DefFileReader
         }
     }
 
-    public static string? ReadFileContent(string path)
+    public static string? ReadFileContent(string path) => ReadFileContent(path, out _);
+
+    /// <summary>
+    /// Decodes a DEF-style text file and reports the encoding that was used, so writers can
+    /// re-encode edits byte-for-byte compatibly (a UTF-8 BOM is reported as a BOM-emitting UTF-8).
+    /// </summary>
+    public static string? ReadFileContent(string path, out Encoding? encoding)
     {
+        encoding = null;
         EnsureEncodingsRegistered();
 
         if (!File.Exists(path)) return null;
@@ -47,9 +54,19 @@ public static class DefFileReader
             return null;
         }
 
+        return Decode(bytes, out encoding);
+    }
+
+    /// <summary>Decodes raw bytes with the same rules as <see cref="ReadFileContent(string)"/>.</summary>
+    public static string? Decode(byte[] bytes, out Encoding? encoding)
+    {
+        encoding = null;
+        EnsureEncodingsRegistered();
+
         // Strip UTF-8 BOM before strict decode attempts.
         ReadOnlySpan<byte> span = bytes;
-        if (span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF)
+        var hasBom = span.Length >= 3 && span[0] == 0xEF && span[1] == 0xBB && span[2] == 0xBF;
+        if (hasBom)
         {
             span = span[3..];
         }
@@ -59,7 +76,9 @@ public static class DefFileReader
         // otherwise turn Japanese/Korean names into mojibake.
         try
         {
-            return _fallbackEncodings![0].GetString(span);
+            var text = _fallbackEncodings![0].GetString(span);
+            encoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: hasBom, throwOnInvalidBytes: true);
+            return text;
         }
         catch (DecoderFallbackException)
         {
@@ -69,7 +88,10 @@ public static class DefFileReader
         {
             try
             {
-                return Strict(codePage).GetString(span);
+                var strict = Strict(codePage);
+                var text = strict.GetString(span);
+                encoding = strict;
+                return text;
             }
             catch (DecoderFallbackException)
             {
@@ -82,6 +104,24 @@ public static class DefFileReader
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Encodes edited text with the encoding the file was read with. UTF-8 with BOM keeps its BOM;
+    /// legacy code pages use strict encoders so an unrepresentable character fails instead of
+    /// silently becoming '?'.
+    /// </summary>
+    public static byte[] Encode(string text, Encoding? encoding)
+    {
+        EnsureEncodingsRegistered();
+        if (encoding is null or UTF8Encoding)
+        {
+            var withBom = encoding is UTF8Encoding utf8 && utf8.GetPreamble().Length > 0;
+            var body = new UTF8Encoding(false, true).GetBytes(text);
+            return withBom ? [.. Encoding.UTF8.GetPreamble(), .. body] : body;
+        }
+
+        return Strict(encoding.CodePage).GetBytes(text);
     }
 
     private static Encoding Strict(int codePage)

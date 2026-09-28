@@ -179,6 +179,7 @@ public sealed class CharactersViewModel : ObservableObject
         finally
         {
             row.IsToggling = false;
+            row.RefreshStatusBinding();
         }
     }
 

@@ -66,13 +66,15 @@ public sealed class RosterActivationService : IRosterActivationService
 
             IkemenPathGuard.EnsureInsideRoot(root, location.Path);
 
-            var originalText = DefFileReader.ReadFileContent(location.Path);
+            // One read-modify-write at a time per select.def (rapid toggles, collection activation).
+            using var gate = TargetWriteGate.Enter(location.Path);
+
+            var originalBytes = File.ReadAllBytes(location.Path);
+            var originalText = DefFileReader.Decode(originalBytes, out var originalEncoding);
             if (originalText is null)
             {
                 return Fail("select.def could not be decoded.", location.Path);
             }
-
-            var originalBytes = File.ReadAllBytes(location.Path);
             var action = enabled ? RosterToggleAction.Enable : RosterToggleAction.Disable;
             var edit = SelectDefRosterEditor.Toggle(originalText, root, kind, rootRelativeDefPath, action);
             if (!edit.Success)
@@ -94,8 +96,18 @@ public sealed class RosterActivationService : IRosterActivationService
 
             // Write proposed content to staging (outside IKEMEN root), then ReplaceFile.
             var stagingFile = Path.Combine(_stagingRoot, Guid.NewGuid().ToString("N") + ".def");
-            var encoding = DetectEncoding(originalBytes);
-            File.WriteAllText(stagingFile, edit.Content, encoding);
+            byte[] proposed;
+            try
+            {
+                // Re-encode with the file's own encoding so untouched lines keep their exact bytes.
+                proposed = DefFileReader.Encode(edit.Content, originalEncoding);
+            }
+            catch (EncoderFallbackException)
+            {
+                return Fail("The new select.def entry cannot be represented in select.def's text encoding.", location.Path);
+            }
+
+            File.WriteAllBytes(stagingFile, proposed);
 
             try
             {
@@ -118,7 +130,8 @@ public sealed class RosterActivationService : IRosterActivationService
                     };
                 }
 
-                var mutation = _mutations.ReplaceFile(root, location.Path, stagingFile);
+                var mutation = _mutations.ReplaceFile(root, location.Path, stagingFile,
+                    expectedCurrentHash: TargetWriteGate.Sha256Hex(originalBytes));
                 if (!mutation.Success)
                 {
                     return Fail(mutation.Error ?? "SafeMutation ReplaceFile failed.", location.Path, plan);
@@ -174,13 +187,6 @@ public sealed class RosterActivationService : IRosterActivationService
         {
             return Fail(ex.Message);
         }
-    }
-
-    private static Encoding DetectEncoding(byte[] bytes)
-    {
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-            return new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
-        return new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
     }
 
     private static RosterActivationResult Fail(
