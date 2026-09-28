@@ -13,6 +13,7 @@ public sealed class SelectDefIndex
     private readonly HashSet<string> _disabledCharacters = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _activeStages = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _disabledStages = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(string FullPath, bool Active)> _characterRefs = [];
 
     private SelectDefIndex(string root, SelectDefLocation location, SelectDefDocument? document)
     {
@@ -63,6 +64,7 @@ public sealed class SelectDefIndex
                 : (index._activeStages, index._disabledStages);
             if (entry.IsCommented) disabled.Add(key);
             else active.Add(key);
+            if (entry.Section == SelectDefSection.Characters) index._characterRefs.Add((key, !entry.IsCommented));
         }
 
         index.MissingEntries = missing;
@@ -76,6 +78,29 @@ public sealed class SelectDefIndex
     /// <param name="rootRelativeDefPath">e.g. "chars/kfm/kfm.def".</param>
     public ContentStatus CharacterStatus(string rootRelativeDefPath)
         => StatusOf(rootRelativeDefPath, _activeCharacters, _disabledCharacters);
+
+    /// <summary>
+    /// Every character DEF below <paramref name="rootRelativeFolder"/> ("chars/Muzan") that select.def
+    /// lists, as root-relative paths. This is how the roster knows which DEF of a package is actually
+    /// used (e.g. "chars/Muzan/Muzan_AI.def"), not just whether the primary DEF is.
+    /// </summary>
+    public RosterReferences CharacterReferencesUnder(string rootRelativeFolder)
+    {
+        var prefix = Path.TrimEndingDirectorySeparator(Key(rootRelativeFolder)) + Path.DirectorySeparatorChar;
+        var active = new List<string>();
+        var disabled = new List<string>();
+        foreach (var (full, isActive) in _characterRefs)
+        {
+            if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) continue;
+            var relative = Path.GetRelativePath(_root, full).Replace('\\', '/');
+            var list = isActive ? active : disabled;
+            if (!list.Contains(relative, StringComparer.OrdinalIgnoreCase)) list.Add(relative);
+        }
+
+        // A DEF with both an uncommented and a commented line is in use.
+        disabled.RemoveAll(d => active.Contains(d, StringComparer.OrdinalIgnoreCase));
+        return new RosterReferences(active, disabled);
+    }
 
     /// <param name="rootRelativeDefPath">e.g. "stages/kfm.def".</param>
     public ContentStatus StageStatus(string rootRelativeDefPath)
@@ -94,4 +119,14 @@ public sealed class SelectDefIndex
         var combined = Path.IsPathRooted(relative) ? relative : Path.Combine(_root, relative);
         return Path.GetFullPath(combined);
     }
+}
+
+/// <summary>Root-relative character DEFs of one folder that select.def lists uncommented / commented.</summary>
+public sealed record RosterReferences(IReadOnlyList<string> Active, IReadOnlyList<string> Disabled)
+{
+    public static RosterReferences None { get; } = new([], []);
+
+    public ContentStatus Status => Active.Count > 0 ? ContentStatus.Active
+        : Disabled.Count > 0 ? ContentStatus.Disabled
+        : ContentStatus.Unregistered;
 }

@@ -28,6 +28,10 @@ public sealed class CollectionActivationPreview
     public IReadOnlyList<string> AlreadyActiveNames { get; init; } = [];
     public IReadOnlyList<string> MissingNames { get; init; } = [];
     public IReadOnlyList<string> AmbiguousNames { get; init; } = [];
+
+    /// <summary>Members with several plausible DEFs and no choice yet; activation never guesses one.</summary>
+    public IReadOnlyList<string> NeedsDefChoice { get; init; } = [];
+    public IReadOnlyList<string> NeedsDefChoiceNames { get; init; } = [];
     public bool CanActivate { get; init; }
     public string? Error { get; init; }
     public string? Warning { get; init; }

@@ -1,16 +1,32 @@
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.Mutations;
 using IKEMENLab.Core.Parsing;
+using IKEMENLab.Core.SelectDef;
 
 namespace IKEMENLab.Core.Services;
 
+/// <summary>What the library knows beyond the files when choosing a character's primary DEF.</summary>
+public sealed class CharacterIndexContext
+{
+    /// <summary>select.def references below a root-relative folder ("chars/Muzan").</summary>
+    public Func<string, RosterReferences>? Roster { get; init; }
+
+    /// <summary>Saved choices: character identity → DEF relative to the character folder.</summary>
+    public IReadOnlyDictionary<string, string>? SavedChoices { get; init; }
+}
+
 /// <summary>
-/// Read-only character discovery with one-level nested DEF fallback.
+/// Read-only character discovery: one entry per folder under chars/, with the primary DEF chosen by
+/// <see cref="PrimaryDefResolver"/> (DEFs at the top of the folder, or one nested level down).
 /// Never writes beneath the IKEMEN root.
 /// </summary>
 public sealed class CharacterIndexer
 {
     public IReadOnlyList<CharacterEntry> Index(string rootPath, out IReadOnlyList<IndexWarning> warnings)
+        => Index(rootPath, out warnings, context: null);
+
+    public IReadOnlyList<CharacterEntry> Index(string rootPath, out IReadOnlyList<IndexWarning> warnings, CharacterIndexContext? context)
     {
         var warningList = new List<IndexWarning>();
         var characters = new List<CharacterEntry>();
@@ -27,13 +43,7 @@ public sealed class CharacterIndexer
             if (IkemenLabStaging.IsStagingName(topFolder)) continue;
             try
             {
-                var entry = ResolveCharacter(rootPath, charsRoot, topFolder, nested: false);
-                if (entry is null)
-                {
-                    entry = TryNestedFallback(rootPath, charsRoot, topFolder);
-                }
-
-
+                var entry = ResolveCharacter(rootPath, charsRoot, topFolder, context);
                 if (entry is null)
                 {
                     warningList.Add(new IndexWarning
@@ -68,57 +78,48 @@ public sealed class CharacterIndexer
         return characters;
     }
 
-    private static CharacterEntry? TryNestedFallback(string rootPath, string charsRoot, string topFolder)
+    private static CharacterEntry? ResolveCharacter(string rootPath, string charsRoot, string topFolder, CharacterIndexContext? context)
     {
-        foreach (var nestedFolder in Directory.EnumerateDirectories(topFolder)
-                     .OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase))
+        var topName = Path.GetFileName(topFolder);
+        var folderPrefix = "chars/" + topName + "/";
+        var roster = context?.Roster?.Invoke("chars/" + topName) ?? RosterReferences.None;
+        string? saved = null;
+        context?.SavedChoices?.TryGetValue(ContentIdentity.ForCharacterFolder(topName), out saved);
+
+        string InFolder(string rootRelative) => rootRelative.StartsWith(folderPrefix, StringComparison.OrdinalIgnoreCase)
+            ? rootRelative[folderPrefix.Length..]
+            : rootRelative;
+
+        var decision = PrimaryDefResolver.Resolve(topFolder, topName, new PrimaryDefHints
         {
-            var entry = ResolveCharacter(rootPath, charsRoot, nestedFolder, nested: true);
-            if (entry is not null) return entry;
-        }
+            SavedChoice = saved,
+            ActiveRoster = roster.Active.Select(InFolder).ToList(),
+            DisabledRoster = roster.Disabled.Select(InFolder).ToList(),
+            SearchRoots = [rootPath, Path.Combine(rootPath, "data")]
+        });
 
-        return null;
-    }
-
-    private static CharacterEntry? ResolveCharacter(string rootPath, string charsRoot, string folder, bool nested)
-    {
-        var folderName = Path.GetFileName(folder);
-        var preferredPath = Path.Combine(folder, folderName + ".def");
-        string? defPath = null;
-
-        if (File.Exists(preferredPath) && DefContentClassifier.IsValidCharacterDefFile(preferredPath))
-        {
-            defPath = preferredPath;
-        }
-        else
-        {
-            var candidates = Directory.EnumerateFiles(folder, "*.def")
-                .Where(DefContentClassifier.IsValidCharacterDefFile)
-                .OrderBy(f => Path.GetFileName(f), StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            defPath = candidates.FirstOrDefault(f =>
-                string.Equals(Path.GetFileNameWithoutExtension(f), folderName, StringComparison.OrdinalIgnoreCase))
-                ?? candidates.FirstOrDefault();
-        }
-
-        if (defPath is null) return null;
+        var chosen = decision.DisplayCandidate;
+        if (chosen is null) return null;
 
         DefParseResult? parsed;
         try
         {
-            parsed = DefParser.ParseFile(defPath);
+            parsed = DefParser.ParseFile(chosen.FullPath);
         }
         catch
         {
             return null;
         }
 
-        var relativeFolder = Relativize(charsRoot, folder).Replace('\\', '/');
+        // A character is its top folder; only a nested-only layout ("Muzan/Muzan/Muzan.def") keeps the
+        // nested folder as its id, as before.
+        var defFolder = Path.GetDirectoryName(chosen.FullPath)!;
+        var nestedOnly = decision.Candidates.All(c => c.RelativePath.Contains('/'));
+        var relativeFolder = Relativize(charsRoot, nestedOnly ? defFolder : topFolder);
         var parsedName = parsed?.Name;
         if (string.IsNullOrWhiteSpace(parsedName))
         {
-            parsedName = Path.GetFileName(folder);
+            parsedName = Path.GetFileName(defFolder);
         }
 
         var displayName = parsedName;
@@ -135,11 +136,17 @@ public sealed class CharacterIndexer
             DisplayName = displayName!,
             Author = string.IsNullOrWhiteSpace(parsed?.Author) ? "Unknown" : parsed!.Author!,
             VersionDate = parsed?.VersionDate ?? string.Empty,
-            DefPath = Relativize(rootPath, defPath).Replace('\\', '/'),
+            DefPath = Relativize(rootPath, chosen.FullPath),
             FolderPath = relativeFolder,
             SpriteFile = parsed?.SpriteFile,
-            Nested = nested,
-            ModifiedAtUtc = SafeLastWrite(defPath)
+            Nested = !string.Equals(Path.GetFullPath(defFolder), Path.GetFullPath(topFolder), StringComparison.OrdinalIgnoreCase),
+            ModifiedAtUtc = SafeLastWrite(chosen.FullPath),
+            DefCandidates = decision.Candidates.Select(c => Relativize(rootPath, c.FullPath)).ToList(),
+            PrimaryRule = decision.Rule,
+            NeedsDefChoice = decision.IsAmbiguous,
+            Status = context?.Roster is null ? ContentStatus.Unregistered : roster.Status,
+            ActiveDefPaths = roster.Active,
+            DisabledDefPaths = roster.Disabled
         };
     }
 

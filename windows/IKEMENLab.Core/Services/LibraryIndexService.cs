@@ -15,14 +15,17 @@ public sealed class LibraryIndexService
     private readonly CharacterIndexer _characterIndexer = new();
     private readonly StageIndexer _stageIndexer = new();
     private readonly DateAddedTracker _dateAdded;
+    private readonly PrimaryDefStore? _primaryDefs;
 
     /// <param name="dateAdded">
     /// Persistent Date Added tracker. Omit for read-only tools/tests: entries then carry a
     /// non-persisted estimate instead of an app-owned record.
     /// </param>
-    public LibraryIndexService(DateAddedTracker? dateAdded = null)
+    /// <param name="primaryDefs">Saved DEF choices (app data). Omit for read-only tools/tests.</param>
+    public LibraryIndexService(DateAddedTracker? dateAdded = null, PrimaryDefStore? primaryDefs = null)
     {
         _dateAdded = dateAdded ?? DateAddedTracker.EstimateOnly;
+        _primaryDefs = primaryDefs;
     }
 
     public LibrarySnapshot Index(string rootPath)
@@ -48,18 +51,22 @@ public sealed class LibraryIndexService
         }
 
         var root = installation.RootPath;
-        var characters = _characterIndexer.Index(root, out var charWarnings);
-        var stages = _stageIndexer.Index(root, out var stageWarnings);
-        var warnings = charWarnings.Concat(stageWarnings).ToList();
 
-        // Registration status is derived read-only from the select.def IKEMEN actually loads.
+        // Registration status is derived read-only from the select.def IKEMEN actually loads. It also
+        // tells the character index which DEF of a folder the roster actually uses.
         var config = IkemenConfigReader.Read(root);
         var selectDef = SelectDefIndex.Build(root, SelectDefLocator.Locate(root, config.Motif));
+        var appWarnings = new List<IndexWarning>();
+        var characters = _characterIndexer.Index(root, out var charWarnings, new CharacterIndexContext
+        {
+            Roster = selectDef.IsAvailable ? selectDef.CharacterReferencesUnder : null,
+            SavedChoices = ReadSavedChoices(root, appWarnings)
+        });
+        var stages = _stageIndexer.Index(root, out var stageWarnings);
+        var warnings = charWarnings.Concat(stageWarnings).Concat(appWarnings).ToList();
+
         if (selectDef.IsAvailable)
         {
-            characters = characters
-                .Select(c => c with { Status = selectDef.CharacterStatus(c.DefPath) })
-                .ToList();
             stages = stages
                 .Select(s => s with { Status = selectDef.StageStatus(s.RootRelativeDefPath) })
                 .ToList();
@@ -78,6 +85,20 @@ public sealed class LibraryIndexService
             SelectDef = selectDef,
             Screenpacks = ScreenpackIndexer.Index(root, config.Motif)
         };
+    }
+
+    private IReadOnlyDictionary<string, string>? ReadSavedChoices(string root, List<IndexWarning> warnings)
+    {
+        if (_primaryDefs is null) return null;
+        try
+        {
+            return _primaryDefs.Read(root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add(new IndexWarning { Path = "IKEMEN Lab library data", Message = "Saved DEF choices unavailable: " + ex.Message });
+            return null;
+        }
     }
 
     private (IReadOnlyList<CharacterEntry>, IReadOnlyList<StageEntry>) ApplyDateAdded(

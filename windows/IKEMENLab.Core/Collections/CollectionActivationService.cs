@@ -347,6 +347,7 @@ public sealed class CollectionActivationService : ICollectionActivationService
             var willDisable = new List<(string Def, string Name)>();
             var alreadyActive = new List<(string Def, string Name)>();
             var ambiguous = new List<(string Def, string Name)>();
+            var needsChoice = new List<(string Def, string Name)>();
 
             var desiredKeys = desired.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
@@ -358,14 +359,17 @@ public sealed class CollectionActivationService : ICollectionActivationService
 
                 if (inCollection)
                 {
+                    // Keep whichever DEF of the package the roster already uses (e.g. Muzan_AI.def).
                     if (status == ContentStatus.Active)
-                        alreadyActive.Add((entry.DefPath, entry.DisplayName));
+                        alreadyActive.AddRange(ActiveDefs(entry).Select(d => (d, entry.DisplayName)));
+                    else if (entry.NeedsDefChoice)
+                        needsChoice.Add((entry.DefPath, entry.DisplayName));
                     else
                         willEnable.Add((entry.DefPath, entry.DisplayName));
                 }
                 else if (status == ContentStatus.Active)
                 {
-                    willDisable.Add((entry.DefPath, entry.DisplayName));
+                    willDisable.AddRange(ActiveDefs(entry).Select(d => (d, entry.DisplayName)));
                 }
             }
 
@@ -404,10 +408,14 @@ public sealed class CollectionActivationService : ICollectionActivationService
             if (isAllCharacters == false && collection is { Kind: CollectionKind.Manual, Members.Count: 0 } && presentMembers == 0)
                 warning = (warning is null ? "" : warning + " ") + "Collection is empty; all active characters will be disabled.";
 
-            var canActivate = ambiguous.Count == 0;
+            var canActivate = ambiguous.Count == 0 && needsChoice.Count == 0;
             string? error = null;
-            if (!canActivate)
+            if (ambiguous.Count > 0)
                 error = $"Ambiguous select.def entries for {ambiguous.Count} character(s). Resolve duplicates manually before activating.";
+            else if (needsChoice.Count > 0)
+                error = "Choose which DEF to use for " + string.Join(", ", needsChoice.Select(n => n.Name).Take(5)) +
+                        (needsChoice.Count > 5 ? $" and {needsChoice.Count - 5} more" : string.Empty) +
+                        " (switch them on in Characters) before activating this collection.";
 
             return new CollectionActivationPreview
             {
@@ -425,6 +433,8 @@ public sealed class CollectionActivationService : ICollectionActivationService
                 AlreadyActiveNames = alreadyActive.Select(x => x.Name).ToArray(),
                 MissingNames = missingNames,
                 AmbiguousNames = ambiguous.Select(x => x.Name).ToArray(),
+                NeedsDefChoice = needsChoice.Select(x => x.Def).ToArray(),
+                NeedsDefChoiceNames = needsChoice.Select(x => x.Name).ToArray(),
                 CanActivate = canActivate,
                 Error = error,
                 Warning = warning?.Trim(),
@@ -514,6 +524,10 @@ public sealed class CollectionActivationService : ICollectionActivationService
 
         return true;
     }
+
+    /// <summary>The DEFs of an active character's folder that select.def lists uncommented.</summary>
+    private static IReadOnlyList<string> ActiveDefs(CharacterEntry entry)
+        => entry.ActiveDefPaths.Count > 0 ? entry.ActiveDefPaths : [entry.DefPath];
 
     private static string NormDef(string root, string relative)
         => SelectDefRosterEditor.NormalizeKey(root, relative);
