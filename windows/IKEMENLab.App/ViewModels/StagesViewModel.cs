@@ -238,7 +238,8 @@ public sealed class StagesViewModel : ObservableObject
         CommandManager.InvalidateRequerySuggested();
     }
 
-    private async Task ToggleStatusAsync(StageRowViewModel? row)
+    /// <summary>Flips the row's select.def status (the switch's command; also used by QA scripts).</summary>
+    public async Task ToggleStatusAsync(StageRowViewModel? row)
     {
         if (row is null || _root is null || !row.CanToggleStatus) return;
 
@@ -251,11 +252,7 @@ public sealed class StagesViewModel : ObservableObject
             var result = await Task.Run(() => _roster.SetStageEnabled(root, defPath, enable));
             if (!result.Success)
             {
-                MessageBox.Show(
-                    result.Error ?? "Could not update select.def.",
-                    "Roster",
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning);
+                UserDialogs.Warn(result.Error ?? "Could not update select.def.", "Roster");
                 return;
             }
 
@@ -263,7 +260,7 @@ public sealed class StagesViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Roster", MessageBoxButton.OK, MessageBoxImage.Warning);
+            UserDialogs.Warn(ex.Message, "Roster");
         }
         finally
         {

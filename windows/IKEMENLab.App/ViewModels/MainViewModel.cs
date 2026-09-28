@@ -35,6 +35,7 @@ public sealed class MainViewModel : ObservableObject
         var roster = new RosterActivationService();
         var collectionActivation = new CollectionActivationService();
         var installer = new IKEMENLab.Core.Install.ContentInstallService(dateAdded: dateAdded);
+        Installer = installer;
         Dashboard = new DashboardViewModel(
             launcher,
             Artwork,
@@ -70,6 +71,9 @@ public sealed class MainViewModel : ObservableObject
 
     public ObservableCollection<NavItem> NavItems { get; }
     public ArtworkLoader Artwork { get; }
+
+    /// <summary>The Install Content service the Dashboard uses (shared Date Added tracker).</summary>
+    public IKEMENLab.Core.Install.IContentInstallService Installer { get; }
     public NavItem SettingsNav { get; }
     public DashboardViewModel Dashboard { get; }
     public CharactersViewModel Characters { get; }

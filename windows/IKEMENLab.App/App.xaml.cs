@@ -48,7 +48,27 @@ public partial class App : Application
             window.Height = options.Height;
         }
 
-        if (options.SnapshotPath is not null)
+        if (options.QaScriptPath is { } qaScript)
+        {
+            // Scripted QA run: no modal dialogs, never activated, exits when the script ends.
+            UserDialogs.QaMode = true;
+            window.ShowActivated = false;
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Left = SystemParameters.VirtualScreenLeft + 20;
+            window.Top = SystemParameters.VirtualScreenTop + 20;
+            window.Loaded += async (_, _) =>
+            {
+                try
+                {
+                    await new QaScriptRunner(mainVm, window).RunAsync(qaScript);
+                }
+                finally
+                {
+                    Shutdown();
+                }
+            };
+        }
+        else if (options.SnapshotPath is not null)
         {
             // Render our own visual tree; never activate or cover other windows (e.g. a running game).
             window.ShowActivated = false;
@@ -139,6 +159,7 @@ public partial class App : Application
         public BrowserViewMode? View { get; private set; }
         public string? SnapshotPath { get; private set; }
         public string? InstallPreviewPath { get; private set; }
+        public string? QaScriptPath { get; private set; }
         public double SnapshotDelaySeconds { get; private set; } = 8;
         public int Width { get; private set; }
         public int Height { get; private set; }
@@ -169,6 +190,9 @@ public partial class App : Application
                         break;
                     case "snapshot-delay" when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d):
                         o.SnapshotDelaySeconds = Math.Clamp(d, 0.5, 120);
+                        break;
+                    case "qa-script":
+                        o.QaScriptPath = value;
                         break;
                     case "size":
                         var parts = value.Split('x', 'X');
