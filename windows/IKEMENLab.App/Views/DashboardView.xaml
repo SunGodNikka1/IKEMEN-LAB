@@ -235,18 +235,20 @@
                         <StackPanel>
                             <DockPanel>
                                 <Border DockPanel.Dock="Right" Background="Transparent" ToolTipService.ShowOnDisabled="True"
-                                        ToolTip="Read-only: IKEMEN Lab does not edit config.ini yet">
-                                    <CheckBox Style="{StaticResource ToggleSwitch}" IsEnabled="False"
-                                              IsChecked="{Binding VSync, Mode=OneWay}"/>
+                                        ToolTip="Writes Video.VSync in save/config.ini">
+                                    <CheckBox Style="{StaticResource ToggleSwitch}"
+                                              IsEnabled="{Binding CanEditVSync}"
+                                              IsChecked="{Binding VSync, Mode=TwoWay}"/>
                                 </Border>
                                 <TextBlock Text="V-Sync" FontSize="14" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextPrimary}"/>
                             </DockPanel>
                             <DockPanel Margin="0,16,0,0">
                                 <Border DockPanel.Dock="Right" Background="Transparent"
-                                        ToolTip="Read-only: IKEMEN Lab does not edit config.ini yet">
-                                    <CheckBox Style="{StaticResource ToggleSwitch}" IsEnabled="False"
-                                              IsChecked="{Binding Fullscreen, Mode=OneWay}"/>
+                                        ToolTip="Writes Video.Fullscreen in save/config.ini">
+                                    <CheckBox Style="{StaticResource ToggleSwitch}"
+                                              IsEnabled="{Binding CanEditFullscreen}"
+                                              IsChecked="{Binding Fullscreen, Mode=TwoWay}"/>
                                 </Border>
                                 <TextBlock Text="Fullscreen" FontSize="14" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextPrimary}"/>
@@ -260,9 +262,12 @@
                                 <TextBlock Text="Master Volume" FontSize="14" VerticalAlignment="Center"
                                            Foreground="{DynamicResource TextPrimary}"/>
                                 <Border Grid.Column="1" Background="Transparent" Margin="12,0,8,0"
-                                        ToolTip="Read-only: IKEMEN Lab does not edit config.ini yet">
-                                    <Slider Style="{StaticResource FlatSlider}" Minimum="0" Maximum="100" IsEnabled="False"
-                                            Value="{Binding MasterVolume, Mode=OneWay}" VerticalAlignment="Center"/>
+                                        ToolTip="Writes Sound.MasterVolume (0–100) in save/config.ini">
+                                    <Slider x:Name="MasterVolumeSlider" Style="{StaticResource FlatSlider}" Minimum="0" Maximum="100"
+                                            IsEnabled="{Binding CanEditMasterVolume}"
+                                            Value="{Binding MasterVolume, Mode=TwoWay}" VerticalAlignment="Center"
+                                            PreviewMouseUp="MasterVolumeSlider_PreviewMouseUp"
+                                            LostMouseCapture="MasterVolumeSlider_LostMouseCapture"/>
                                 </Border>
                                 <TextBlock Grid.Column="2" Text="{Binding MasterVolumeText}" FontSize="12"
                                            FontFamily="{StaticResource CaptionFont}" VerticalAlignment="Center"

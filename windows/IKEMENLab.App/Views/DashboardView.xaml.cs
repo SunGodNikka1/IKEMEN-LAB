@@ -89,4 +89,13 @@ public partial class DashboardView : UserControl
 
     private void ResetDropStroke()
         => DropStroke.SetResourceReference(System.Windows.Shapes.Shape.StrokeProperty, "BorderActive");
+
+    private void MasterVolumeSlider_PreviewMouseUp(object sender, MouseButtonEventArgs e) => CommitMasterVolume();
+    private void MasterVolumeSlider_LostMouseCapture(object sender, MouseEventArgs e) => CommitMasterVolume();
+
+    private void CommitMasterVolume()
+    {
+        if (DataContext is DashboardViewModel vm && vm.CommitMasterVolumeCommand.CanExecute(null))
+            vm.CommitMasterVolumeCommand.Execute(null);
+    }
 }

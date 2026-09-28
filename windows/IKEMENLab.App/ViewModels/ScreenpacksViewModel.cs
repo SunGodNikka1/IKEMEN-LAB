@@ -97,8 +97,8 @@ public sealed class ScreenpacksViewModel : ObservableObject
             var def = Path.GetFullPath(Path.Combine(_root, row.Entry.DefPath));
             if (File.Exists(def)) Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{def}\"") { UseShellExecute = true });
         });
-        BeginActivateCommand = new RelayCommand(p => BeginActivate(p as ScreenpackRowViewModel ?? Selected), () => CanBeginActivate);
-        ConfirmActivateCommand = new AsyncRelayCommand(ConfirmActivateAsync, () => CanConfirmActivate);
+        BeginActivateCommand = new RelayCommand(p => BeginActivate(p as ScreenpackRowViewModel ?? Selected), _ => CanBeginActivate);
+        ConfirmActivateCommand = new AsyncRelayCommand(_ => ConfirmActivateAsync(), _ => CanConfirmActivate);
         CancelPreviewCommand = new RelayCommand(() => ClearPreview(), () => IsPreviewing && !IsActivating);
     }
 

@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Views;
+using IKEMENLab.Core.Config;
 using IKEMENLab.Core.Install;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.Services;
@@ -44,10 +45,16 @@ public sealed class DashboardViewModel : ObservableObject
     private string _launchSubtitle = "Select an IKEMEN GO folder in Settings";
 
     private bool _quickSettingsAvailable;
+    private bool _canEditVSync;
+    private bool _canEditFullscreen;
+    private bool _canEditMasterVolume;
     private bool _vSync;
     private bool _fullscreen;
     private double _masterVolume;
     private string _quickSettingsNote = "No save/config.ini found";
+    private bool _suppressQuickSettingsWrite;
+    private bool _quickSettingsBusy;
+    private readonly IIkemenConfigMutationService _configWriter;
 
     private HealthState _healthState = HealthState.Idle;
     private string _healthStatusText = "Click 'Scan' to check for issues";
@@ -62,13 +69,15 @@ public sealed class DashboardViewModel : ObservableObject
         Services.ArtworkLoader artwork,
         Action<NavPage> navigate,
         Func<Task> refreshLibrary,
-        IContentInstallService? installer = null)
+        IContentInstallService? installer = null,
+        IIkemenConfigMutationService? configWriter = null)
     {
         _launcher = launcher;
         _artwork = artwork;
         _navigate = navigate;
         _refreshLibrary = refreshLibrary;
         _installer = installer ?? new ContentInstallService();
+        _configWriter = configWriter ?? new IkemenConfigMutationService();
         LaunchCommand = new RelayCommand(Launch, () => CanLaunch && !IsGameRunning);
         OpenCharactersCommand = new RelayCommand(() => _navigate(NavPage.Characters));
         OpenStagesCommand = new RelayCommand(() => _navigate(NavPage.Stages));
@@ -86,6 +95,7 @@ public sealed class DashboardViewModel : ObservableObject
         DismissDropNoticeCommand = new RelayCommand(() => DropNotice = null);
         BrowseInstallFilesCommand = new AsyncRelayCommand(BrowseFilesAsync, () => !_installBusy && CanInstall);
         BrowseInstallFolderCommand = new AsyncRelayCommand(BrowseFolderAsync, () => !_installBusy && CanInstall);
+        CommitMasterVolumeCommand = new AsyncRelayCommand(CommitMasterVolumeAsync, () => CanEditMasterVolume && !_quickSettingsBusy);
     }
 
     public ICommand LaunchCommand { get; }
@@ -97,6 +107,7 @@ public sealed class DashboardViewModel : ObservableObject
     public ICommand DismissDropNoticeCommand { get; }
     public ICommand BrowseInstallFilesCommand { get; }
     public ICommand BrowseInstallFolderCommand { get; }
+    public ICommand CommitMasterVolumeCommand { get; }
 
     public ObservableCollection<RecentItemViewModel> RecentItems { get; } = [];
     public ObservableCollection<HealthGroupViewModel> HealthGroups { get; } = [];
@@ -133,13 +144,36 @@ public sealed class DashboardViewModel : ObservableObject
     public bool HasRecentItems => RecentItems.Count > 0;
 
     public bool QuickSettingsAvailable { get => _quickSettingsAvailable; private set => SetProperty(ref _quickSettingsAvailable, value); }
-    public bool VSync { get => _vSync; private set => SetProperty(ref _vSync, value); }
-    public bool Fullscreen { get => _fullscreen; private set => SetProperty(ref _fullscreen, value); }
+    public bool CanEditVSync { get => _canEditVSync; private set => SetProperty(ref _canEditVSync, value); }
+    public bool CanEditFullscreen { get => _canEditFullscreen; private set => SetProperty(ref _canEditFullscreen, value); }
+    public bool CanEditMasterVolume { get => _canEditMasterVolume; private set => SetProperty(ref _canEditMasterVolume, value); }
+
+    public bool VSync
+    {
+        get => _vSync;
+        set
+        {
+            if (!SetProperty(ref _vSync, value)) return;
+            if (!_suppressQuickSettingsWrite && CanEditVSync)
+                _ = WriteBoolAsync(ConfigValueKind.VSync, value, () => VSync = !value);
+        }
+    }
+
+    public bool Fullscreen
+    {
+        get => _fullscreen;
+        set
+        {
+            if (!SetProperty(ref _fullscreen, value)) return;
+            if (!_suppressQuickSettingsWrite && CanEditFullscreen)
+                _ = WriteBoolAsync(ConfigValueKind.Fullscreen, value, () => Fullscreen = !value);
+        }
+    }
 
     public double MasterVolume
     {
         get => _masterVolume;
-        private set
+        set
         {
             if (SetProperty(ref _masterVolume, value)) OnPropertyChanged(nameof(MasterVolumeText));
         }
@@ -376,14 +410,98 @@ public sealed class DashboardViewModel : ObservableObject
     private void ApplyQuickSettings(LibrarySnapshot? snapshot)
     {
         var config = snapshot?.Config;
-        QuickSettingsAvailable = config is { Exists: true };
-        VSync = config?.VSync ?? false;
-        Fullscreen = config?.Fullscreen ?? false;
-        MasterVolume = config?.MasterVolume ?? 0;
-        OnPropertyChanged(nameof(MasterVolumeText));
-        QuickSettingsNote = config is { Exists: true, SourcePath: { } path } && snapshot is not null
-            ? $"Read from {Path.GetRelativePath(snapshot.Installation.RootPath, path).Replace('\\', '/')} · read-only"
-            : "No save/config.ini found";
+        _suppressQuickSettingsWrite = true;
+        try
+        {
+            QuickSettingsAvailable = config is { Exists: true };
+            CanEditVSync = config?.VSync is not null;
+            CanEditFullscreen = config?.Fullscreen is not null;
+            CanEditMasterVolume = config?.MasterVolume is not null;
+            VSync = config?.VSync ?? false;
+            Fullscreen = config?.Fullscreen ?? false;
+            MasterVolume = config?.MasterVolume ?? 0;
+            OnPropertyChanged(nameof(MasterVolumeText));
+            QuickSettingsNote = config is { Exists: true, SourcePath: { } path } && snapshot is not null
+                ? $"Editing {Path.GetRelativePath(snapshot.Installation.RootPath, path).Replace('\\', '/')}"
+                : "No save/config.ini found";
+        }
+        finally
+        {
+            _suppressQuickSettingsWrite = false;
+        }
+    }
+
+    private async Task WriteBoolAsync(ConfigValueKind kind, bool value, Action revert)
+    {
+        if (_snapshot?.Installation.RootPath is not { } root || _quickSettingsBusy) return;
+        _quickSettingsBusy = true;
+        try
+        {
+            var result = await Task.Run(() => _configWriter.SetBool(root, kind, value));
+            if (!result.Success)
+            {
+                _suppressQuickSettingsWrite = true;
+                revert();
+                _suppressQuickSettingsWrite = false;
+                QuickSettingsNote = result.Error ?? "Config write failed.";
+                return;
+            }
+
+            var re = result.ResultingConfig ?? IkemenConfigReader.Read(root);
+            _suppressQuickSettingsWrite = true;
+            if (kind == ConfigValueKind.VSync) VSync = re.VSync ?? value;
+            if (kind == ConfigValueKind.Fullscreen) Fullscreen = re.Fullscreen ?? value;
+            _suppressQuickSettingsWrite = false;
+            QuickSettingsNote = result.Changed ? $"Updated {kind}." : "Already set.";
+        }
+        catch (Exception ex)
+        {
+            _suppressQuickSettingsWrite = true;
+            revert();
+            _suppressQuickSettingsWrite = false;
+            QuickSettingsNote = ex.Message;
+        }
+        finally
+        {
+            _quickSettingsBusy = false;
+        }
+    }
+
+    private async Task CommitMasterVolumeAsync()
+    {
+        if (_snapshot?.Installation.RootPath is not { } root || !CanEditMasterVolume || _quickSettingsBusy) return;
+        _quickSettingsBusy = true;
+        var previous = _snapshot.Config?.MasterVolume ?? (int)Math.Round(MasterVolume);
+        try
+        {
+            var volume = (int)Math.Clamp(Math.Round(MasterVolume), 0, 100);
+            var result = await Task.Run(() => _configWriter.SetMasterVolume(root, volume));
+            if (!result.Success)
+            {
+                _suppressQuickSettingsWrite = true;
+                MasterVolume = previous;
+                _suppressQuickSettingsWrite = false;
+                QuickSettingsNote = result.Error ?? "Volume write failed.";
+                return;
+            }
+
+            var re = result.ResultingConfig ?? IkemenConfigReader.Read(root);
+            _suppressQuickSettingsWrite = true;
+            MasterVolume = re.MasterVolume ?? volume;
+            _suppressQuickSettingsWrite = false;
+            QuickSettingsNote = result.Changed ? $"Master Volume set to {MasterVolume:0}%." : "Already set.";
+        }
+        catch (Exception ex)
+        {
+            _suppressQuickSettingsWrite = true;
+            MasterVolume = previous;
+            _suppressQuickSettingsWrite = false;
+            QuickSettingsNote = ex.Message;
+        }
+        finally
+        {
+            _quickSettingsBusy = false;
+        }
     }
 
     private async Task CalculateStorageAsync(string root, CancellationToken token)
