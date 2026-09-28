@@ -33,18 +33,15 @@ public sealed class MainViewModel : ObservableObject
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page));
         Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page));
-        CollectionsPlaceholder = new PlaceholderViewModel
-        {
-            Title = "Collections",
-            Message = "Collections are deferred past WIN-1. WIN-1 never writes select.def."
-        };
+        Collections = new CollectionsViewModel(Artwork);
 
         NavItems =
         [
             new NavItem { Page = NavPage.Dashboard, Title = "Dashboard", IconGlyph = "\uF0E2" },
             new NavItem { Page = NavPage.Characters, Title = "Characters", IconGlyph = "\uE77B", Badge = "0" },
             new NavItem { Page = NavPage.Stages, Title = "Stages", IconGlyph = "\uE91B", Badge = "0" },
-            new NavItem { Page = NavPage.Screenpacks, Title = "Screenpacks", IconGlyph = "\uE81E" }
+            new NavItem { Page = NavPage.Screenpacks, Title = "Screenpacks", IconGlyph = "\uE81E" },
+            new NavItem { Page = NavPage.Collections, Title = "Collections", IconGlyph = "\uE8B7" }
         ];
         SettingsNav = new NavItem { Page = NavPage.Settings, Title = "Settings", IconGlyph = "\uE713" };
 
@@ -66,7 +63,7 @@ public sealed class MainViewModel : ObservableObject
     public SettingsViewModel Settings { get; }
     public StagesViewModel Stages { get; }
     public ScreenpacksViewModel Screenpacks { get; }
-    public PlaceholderViewModel CollectionsPlaceholder { get; }
+    public CollectionsViewModel Collections { get; }
 
     // SYSTEM > GPU readout. Neutral until a real reading exists (never a fabricated value).
     private string _gpuPercentText = "—";
@@ -154,6 +151,7 @@ public sealed class MainViewModel : ObservableObject
             Characters.ApplySnapshot(snapshot);
             Stages.ApplySnapshot(snapshot);
             Screenpacks.ApplySnapshot(snapshot);
+            Collections.ApplySnapshot(snapshot);
             Settings.LoadFrom(_settingsStore.Load(), snapshot?.Installation);
 
             UpdateBadges(snapshot);
@@ -255,7 +253,7 @@ public sealed class MainViewModel : ObservableObject
             NavPage.Characters => Characters,
             NavPage.Stages => Stages,
             NavPage.Screenpacks => Screenpacks,
-            NavPage.Collections => CollectionsPlaceholder,
+            NavPage.Collections => Collections,
             NavPage.Settings => Settings,
             _ => Dashboard
         };

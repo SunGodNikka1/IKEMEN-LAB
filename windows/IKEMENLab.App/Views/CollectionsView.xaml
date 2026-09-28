@@ -1,0 +1,123 @@
+<UserControl x:Class="IKEMENLab.App.Views.CollectionsView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Margin="20">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,14">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Style="{StaticResource GhostIconButton}" Command="{Binding NewCommand}" ToolTip="New collection" AutomationProperties.Name="New collection">
+                    <TextBlock Style="{StaticResource IconText}" Text="&#xE710;"/>
+                </Button>
+                <Button Style="{StaticResource GhostIconButton}" Command="{Binding NewSmartCommand}" ToolTip="New smart collection" AutomationProperties.Name="New smart collection">
+                    <TextBlock Style="{StaticResource IconText}" Text="&#xE945;"/>
+                </Button>
+            </StackPanel>
+            <TextBlock Text="Collections" Style="{StaticResource PageTitle}"/>
+        </DockPanel>
+        <TextBlock Grid.Row="1" Text="{Binding Error}" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"
+                   Margin="0,0,0,10" Visibility="{Binding Error, Converter={StaticResource HasValueToVis}}"/>
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="150"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <ListBox ItemsSource="{Binding Collections}" SelectedItem="{Binding Selected}" Style="{StaticResource BrowserListBox}"
+                     AutomationProperties.Name="Collection list" Margin="0,0,12,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemTemplate><DataTemplate>
+                    <StackPanel Margin="4,10" ToolTip="{Binding Name}">
+                        <TextBlock Text="{Binding Name}" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding Detail}" Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </DataTemplate></ListBox.ItemTemplate>
+            </ListBox>
+            <Grid Grid.Column="1">
+                <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                <StackPanel>
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                            <Button Style="{StaticResource GhostIconButton}" Command="{Binding EditCommand}" ToolTip="Edit collection" AutomationProperties.Name="Edit collection">
+                                <TextBlock Style="{StaticResource IconText}" Text="&#xE70F;"/>
+                            </Button>
+                            <Button Style="{StaticResource GhostIconButton}" IsEnabled="{Binding CanEdit}" Click="Delete_Click" ToolTip="Delete collection" AutomationProperties.Name="Delete collection">
+                                <TextBlock Style="{StaticResource IconText}" Text="&#xE74D;"/>
+                            </Button>
+                        </StackPanel>
+                        <TextBlock Text="{Binding Title}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Metadata}" Style="{StaticResource CaptionText}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                    <TextBlock Text="{Binding LibraryPath}" Style="{StaticResource MonoText}" ToolTip="{Binding LibraryPath}" Margin="0,6,0,0"/>
+                    <TextBlock Text="{Binding RuleSummary}" Style="{StaticResource BodyText}" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                </StackPanel>
+                <Border Grid.Row="1" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,1" Padding="0,12" Margin="0,10,0,0"
+                        Visibility="{Binding IsEditing, Converter={StaticResource BoolToVis}}">
+                    <ScrollViewer MaxHeight="290" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                        <StackPanel>
+                            <TextBlock Text="Collection name" Style="{StaticResource CaptionText}"/>
+                            <TextBox Text="{Binding EditName, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" Margin="0,6,0,12" AutomationProperties.Name="Collection name"/>
+                            <StackPanel Visibility="{Binding EditSmart, Converter={StaticResource BoolToVis}}">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <TextBlock Text="Match" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <ComboBox ItemsSource="{Binding Matches}" SelectedItem="{Binding EditMatch}" Width="80" AutomationProperties.Name="Rule match"/>
+                                    <Button Style="{StaticResource GhostIconButton}" Command="{Binding AddRuleCommand}" ToolTip="Add rule" AutomationProperties.Name="Add rule" Margin="8,0,0,0">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE710;"/>
+                                    </Button>
+                                </StackPanel>
+                                <ItemsControl ItemsSource="{Binding Rules}"><ItemsControl.ItemTemplate><DataTemplate>
+                                    <WrapPanel Margin="0,0,0,8">
+                                        <ComboBox ItemsSource="{Binding DataContext.Fields, RelativeSource={RelativeSource AncestorType=UserControl}}" SelectedItem="{Binding Field}" Width="105" Margin="0,0,6,4" AutomationProperties.Name="Rule field"/>
+                                        <ComboBox ItemsSource="{Binding DataContext.Comparisons, RelativeSource={RelativeSource AncestorType=UserControl}}" SelectedItem="{Binding Comparison}" Width="132" Margin="0,0,6,4" AutomationProperties.Name="Rule comparison"/>
+                                        <TextBox Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource FieldBox}" Width="130" Margin="0,0,6,4" AutomationProperties.Name="Rule value"/>
+                                        <Button Style="{StaticResource GhostIconButton}" Command="{Binding DataContext.RemoveRuleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" ToolTip="Remove rule" AutomationProperties.Name="Remove rule">
+                                            <TextBlock Style="{StaticResource IconText}" Text="&#xE738;"/>
+                                        </Button>
+                                    </WrapPanel>
+                                </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Save" Command="{Binding SaveCommand}" Style="{StaticResource PrimaryButton}" AutomationProperties.Name="Save collection"/>
+                                <Button Content="Cancel" Command="{Binding CancelCommand}" Style="{StaticResource SecondaryButton}" Margin="8,0,0,0"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+                <StackPanel Grid.Row="2" Margin="0,12,0,8">
+                    <WrapPanel Margin="0,0,0,8">
+                        <Button Command="{Binding ToggleAddCommand}" Style="{StaticResource SecondaryButton}" Visibility="{Binding CanManageMembers, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Add characters">
+                            <StackPanel Orientation="Horizontal"><TextBlock Style="{StaticResource IconText}" Text="&#xE710;" Margin="0,0,8,0"/><TextBlock Text="{Binding AddLabel}"/></StackPanel>
+                        </Button>
+                        <TextBlock Text="{Binding ResultsText}" Style="{StaticResource CaptionText}" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                    </WrapPanel>
+                    <TextBox Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource SearchBox}" Tag="Search characters" AutomationProperties.Name="Search characters" ToolTip="Search characters"/>
+                </StackPanel>
+                <Grid Grid.Row="3">
+                    <ListBox ItemsSource="{Binding Characters}" Style="{StaticResource BrowserListBox}" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             HorizontalContentAlignment="Stretch" AutomationProperties.Name="Collection characters">
+                        <ListBox.ItemTemplate><DataTemplate>
+                            <Grid Margin="2,5">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="48"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                                <Grid Width="40" Height="48" Background="{DynamicResource CardBackgroundBrush}">
+                                    <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="{DynamicResource TextTertiary}"/>
+                                    <Image Source="{Binding Thumbnail}" Stretch="Uniform"/>
+                                </Grid>
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="4,0,6,0">
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Foreground="{DynamicResource TextPrimary}"/>
+                                    <TextBlock Text="{Binding Detail}" Style="{StaticResource CaptionText}" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+                                    <TextBlock Text="{Binding Path}" Style="{StaticResource MonoText}" ToolTip="{Binding Path}"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" VerticalAlignment="Center">
+                                    <Button Style="{StaticResource GhostIconButton}" Command="{Binding DataContext.AddMemberCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                            Visibility="{Binding DataContext.IsAdding, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}" ToolTip="Add character" AutomationProperties.Name="Add character">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE710;"/>
+                                    </Button>
+                                    <Button Style="{StaticResource GhostIconButton}" Command="{Binding DataContext.RemoveMemberCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                            Visibility="{Binding DataContext.CanRemoveMembers, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}" ToolTip="Remove character" AutomationProperties.Name="Remove character">
+                                        <TextBlock Style="{StaticResource IconText}" Text="&#xE738;"/>
+                                    </Button>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate></ListBox.ItemTemplate>
+                    </ListBox>
+                    <TextBlock Text="{Binding EmptyText}" Style="{StaticResource BodyText}" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
+                               Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVis}}"/>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</UserControl>

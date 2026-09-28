@@ -26,6 +26,9 @@
         <DataTemplate DataType="{x:Type vm:ScreenpacksViewModel}">
             <views:ScreenpacksView/>
         </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:CollectionsViewModel}">
+            <views:CollectionsView/>
+        </DataTemplate>
         <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
             <views:SettingsView/>
         </DataTemplate>
