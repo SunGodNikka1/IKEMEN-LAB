@@ -211,4 +211,50 @@ public class RosterRegressionTests
         Assert.True(read.Fullscreen);
         Assert.Equal(55, read.MasterVolume);
     }
+
+    [Theory]
+    [MemberData(nameof(Layouts))]
+    public void ConfigWriteChangesOnlyTheValueOnAMixedLineEndingFile(string layout)
+    {
+        // IKEMEN GO writes config.ini with CRLF lines and LF-only multi-line comments; runtime QA on a
+        // copy of a real config found every LF rewritten to CRLF by a VSync toggle.
+        using var f = Make(layout);
+        if (f is null) return;
+        const string original =
+            "; Configuration file for Ikemen GO\r\n" +
+            "; multi-line comment\nwritten with LF only\n" +
+            "[Video]\r\n" +
+            "; Toggles VSync\n" +
+            "VSync                    = 1\r\n" +
+            "Fullscreen               = 0\r\n" +
+            "\r\n" +
+            "[Sound]\r\n" +
+            "MasterVolume         = 100\r\n" +
+            "PauseMasterVolume    = 100";
+        var path = f.Write("save/config.ini", original);
+        var config = new IkemenConfigMutationService(f.Mutations, f.StagingDir);
+
+        Assert.True(config.SetBool(f.Root, ConfigValueKind.VSync, false).Success);
+        Assert.True(config.SetMasterVolume(f.Root, 55).Success);
+        Assert.True(config.SetBool(f.Root, ConfigValueKind.Fullscreen, true).Success);
+
+        var expected = original
+            .Replace("VSync                    = 1\r\n", "VSync                    = 0\r\n")
+            .Replace("MasterVolume         = 100\r\n", "MasterVolume         = 55\r\n")
+            .Replace("Fullscreen               = 0\r\n", "Fullscreen               = 1\r\n");
+        Assert.Equal(expected, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void IniEditorInsertsMissingKeysWithoutTouchingOtherLines()
+    {
+        var added = IniConfigEditor.SetValue("[Video]\r\nFullscreen = 0\n[Sound]\r\nMasterVolume = 80", "Video", "VSync", "1");
+        Assert.Equal("[Video]\r\nFullscreen = 0\nVSync = 1\r\n[Sound]\r\nMasterVolume = 80", added.Content);
+
+        var appended = IniConfigEditor.SetValue("[Video]\nVSync = 1", "Video", "Fullscreen", "1");
+        Assert.Equal("[Video]\nVSync = 1\nFullscreen = 1", appended.Content);
+
+        var newSection = IniConfigEditor.SetValue("[Video]\r\nVSync = 1\r\n", "Sound", "MasterVolume", "70");
+        Assert.Equal("[Video]\r\nVSync = 1\r\n\r\n[Sound]\r\nMasterVolume = 70\r\n", newSection.Content);
+    }
 }

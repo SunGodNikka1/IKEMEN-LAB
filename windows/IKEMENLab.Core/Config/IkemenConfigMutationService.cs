@@ -409,7 +409,10 @@ public sealed class IniEditResult
         => new() { Success = false, Error = error, Changed = false };
 }
 
-/// <summary>Line-level INI key mutation. Preserves comments, blank lines, and unrelated keys.</summary>
+/// <summary>
+/// Line-level INI key mutation. Preserves comments, blank lines, unrelated keys and every line's own
+/// terminator: IKEMEN GO writes config.ini with mixed CRLF/LF endings, and only the edited line may change.
+/// </summary>
 public static class IniConfigEditor
 {
     public static IniEditResult SetValue(string content, string section, string key, string value)
@@ -418,7 +421,7 @@ public static class IniConfigEditor
             return IniEditResult.Fail("Config is empty.");
 
         var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var lines = content.Split(["\r\n", "\n", "\r"], StringSplitOptions.None).ToList();
+        var lines = SplitKeepingTerminators(content);
 
         var sectionIndex = -1;
         var keyIndex = -1;
@@ -426,7 +429,7 @@ public static class IniConfigEditor
 
         for (var i = 0; i < lines.Count; i++)
         {
-            var raw = lines[i];
+            var raw = lines[i].Text;
             var trimmed = raw.Trim(' ', '\t', '\uFEFF');
             if (trimmed.Length == 0 || trimmed.StartsWith(';') || trimmed.StartsWith('#'))
                 continue;
@@ -455,24 +458,26 @@ public static class IniConfigEditor
 
         if (keyIndex >= 0)
         {
-            lines[keyIndex] = ReplaceValueKeepingLayout(lines[keyIndex], value);
-            return IniEditResult.Ok(string.Join(newline, lines));
+            lines[keyIndex] = lines[keyIndex] with { Text = ReplaceValueKeepingLayout(lines[keyIndex].Text, value) };
+            return IniEditResult.Ok(Join(lines));
         }
 
         if (sectionIndex < 0)
         {
-            if (lines.Count > 0 && !string.IsNullOrWhiteSpace(lines[^1]))
-                lines.Add(string.Empty);
-            lines.Add($"[{section}]");
-            lines.Add($"{key} = {value}");
-            return IniEditResult.Ok(string.Join(newline, lines));
+            var endsWithTerminator = lines[^1].Terminator.Length > 0;
+            if (!endsWithTerminator) lines[^1] = lines[^1] with { Terminator = newline };
+            if (!string.IsNullOrWhiteSpace(lines[^1].Text))
+                lines.Add(new Line(string.Empty, newline));
+            lines.Add(new Line($"[{section}]", newline));
+            lines.Add(new Line($"{key} = {value}", endsWithTerminator ? newline : string.Empty));
+            return IniEditResult.Ok(Join(lines));
         }
 
-        // Insert after last non-empty line in section (before next section).
+        // Insert after last line in section (before next section).
         var insertAt = sectionIndex + 1;
         for (var j = sectionIndex + 1; j < lines.Count; j++)
         {
-            var t = lines[j].Trim(' ', '\t');
+            var t = lines[j].Text.Trim(' ', '\t');
             if (t.StartsWith('[') && t.Contains(']'))
             {
                 insertAt = j;
@@ -481,8 +486,46 @@ public static class IniConfigEditor
             insertAt = j + 1;
         }
 
-        lines.Insert(insertAt, $"{key} = {value}");
-        return IniEditResult.Ok(string.Join(newline, lines));
+        if (insertAt == lines.Count && lines[^1].Terminator.Length == 0)
+        {
+            // Appending after an unterminated last line: terminate it, keep the file's no-final-newline form.
+            lines[^1] = lines[^1] with { Terminator = newline };
+            lines.Add(new Line($"{key} = {value}", string.Empty));
+        }
+        else
+        {
+            lines.Insert(insertAt, new Line($"{key} = {value}", newline));
+        }
+
+        return IniEditResult.Ok(Join(lines));
+    }
+
+    private readonly record struct Line(string Text, string Terminator);
+
+    private static List<Line> SplitKeepingTerminators(string content)
+    {
+        var lines = new List<Line>();
+        var start = 0;
+        for (var i = 0; i < content.Length; i++)
+        {
+            var c = content[i];
+            if (c != '\r' && c != '\n') continue;
+            var terminator = c == '\r' && i + 1 < content.Length && content[i + 1] == '\n' ? "\r\n" : c.ToString();
+            lines.Add(new Line(content[start..i], terminator));
+            i += terminator.Length - 1;
+            start = i + 1;
+        }
+
+        if (start < content.Length || lines.Count == 0)
+            lines.Add(new Line(content[start..], string.Empty));
+        return lines;
+    }
+
+    private static string Join(List<Line> lines)
+    {
+        var builder = new System.Text.StringBuilder();
+        foreach (var line in lines) builder.Append(line.Text).Append(line.Terminator);
+        return builder.ToString();
     }
 
     private static string ReplaceValueKeepingLayout(string line, string newValue)
