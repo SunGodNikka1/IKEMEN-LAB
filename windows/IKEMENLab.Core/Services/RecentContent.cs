@@ -17,7 +17,8 @@ public sealed record RecentContentItem(
     DateTime DateAddedUtc,
     ContentStatus Status,
     string DefPath,
-    DateAddedSource? DateAddedSource = null)
+    DateAddedSource? DateAddedSource = null,
+    bool NeedsDefChoice = false)
 {
     public bool IsEstimated => DateAddedSource == Library.DateAddedSource.LegacyEstimate;
 }
@@ -34,7 +35,7 @@ public static class RecentContent
             .Where(c => c.DateAddedUtc is not null)
             .Select(c => new RecentContentItem(
                 c.Id, c.DisplayName, c.Author, RecentContentType.Character,
-                c.DateAddedUtc!.Value, c.Status, c.DefPath, c.DateAddedSource));
+                c.DateAddedUtc!.Value, c.Status, c.DefPath, c.DateAddedSource, c.NeedsDefChoice));
 
         var stages = snapshot.Stages
             .Where(s => s.DateAddedUtc is not null)

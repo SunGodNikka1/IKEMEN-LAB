@@ -150,7 +150,7 @@
                                     <TextBlock Grid.Column="1" Text="Type" Style="{StaticResource CaptionText}" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="2" Text="Date" Style="{StaticResource CaptionText}" VerticalAlignment="Center"/>
                                     <TextBlock Grid.Column="3" Text="Status" Style="{StaticResource CaptionText}" VerticalAlignment="Center"
-                                               ToolTip="select.def registration (read-only)"/>
+                                               ToolTip="Enable or disable in select.def (same as Characters / Stages)"/>
                                 </Grid>
                             </Border>
 
@@ -159,59 +159,70 @@
                                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,40"
                                        Visibility="{Binding HasRecentItems, Converter={StaticResource BoolToVis}, ConverterParameter=invert}"/>
 
-                            <ItemsControl Grid.Row="1" ItemsSource="{Binding RecentItems}" Focusable="False">
+                            <ItemsControl Grid.Row="1" ItemsSource="{Binding RecentItems}" Focusable="False"
+                                          x:Name="RecentItemsList">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type vm:RecentItemViewModel}">
                                         <Border BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1">
-                                            <Button Style="{StaticResource RowButton}" Height="72" ToolTip="{Binding ToolTip}"
-                                                    Command="{Binding DataContext.OpenRecentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                    CommandParameter="{Binding}">
-                                                <Grid Margin="20,0,16,0">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto"/>
-                                                        <ColumnDefinition Width="*"/>
-                                                        <ColumnDefinition Width="100"/>
-                                                        <ColumnDefinition Width="110"/>
-                                                        <ColumnDefinition Width="44"/>
-                                                    </Grid.ColumnDefinitions>
-                                                    <Border Width="40" Height="40" CornerRadius="6" ClipToBounds="True"
-                                                            Background="{DynamicResource SelectedBackgroundBrush}"
-                                                            BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
-                                                        <Grid>
-                                                            <TextBlock Text="{Binding Initial}" FontSize="14" FontWeight="Medium"
-                                                                       Foreground="{DynamicResource TextTertiary}"
-                                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                                       Visibility="{Binding Thumbnail, Converter={StaticResource HasValueToVis}, ConverterParameter=invert}"/>
-                                                            <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"
-                                                                   RenderOptions.BitmapScalingMode="HighQuality"/>
-                                                        </Grid>
-                                                    </Border>
-                                                    <StackPanel Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis"
-                                                                   Foreground="{DynamicResource TextPrimary}"/>
-                                                        <TextBlock Text="{Binding Author}" FontSize="12" TextTrimming="CharacterEllipsis"
-                                                                   Foreground="{DynamicResource TextTertiary}" Margin="0,2,0,0"/>
-                                                    </StackPanel>
-                                                    <Border x:Name="TypeBadge" Grid.Column="2" HorizontalAlignment="Left" Height="24"
-                                                            CornerRadius="12" Padding="9,0" BorderThickness="1"
-                                                            Background="{DynamicResource BadgeCharacterBackgroundBrush}"
-                                                            BorderBrush="#4D3B82F6">
-                                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                                            <Ellipse x:Name="TypeDot" Width="6" Height="6" Fill="{DynamicResource BadgeCharacterBrush}"/>
-                                                            <TextBlock x:Name="TypeText" Text="{Binding TypeLabel}" Margin="6,0,0,0"
-                                                                       FontSize="12" FontWeight="Medium"
-                                                                       Foreground="{DynamicResource BadgeCharacterBrush}"/>
+                                            <!-- Toggle sits outside the row Button so it cannot fire OpenRecentCommand. -->
+                                            <Grid Height="72">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="44"/>
+                                                </Grid.ColumnDefinitions>
+                                                <Button Style="{StaticResource RowButton}" ToolTip="{Binding ToolTip}"
+                                                        Command="{Binding DataContext.OpenRecentCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                        CommandParameter="{Binding}">
+                                                    <Grid Margin="20,0,0,0">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto"/>
+                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="100"/>
+                                                            <ColumnDefinition Width="110"/>
+                                                        </Grid.ColumnDefinitions>
+                                                        <Border Width="40" Height="40" CornerRadius="6" ClipToBounds="True"
+                                                                Background="{DynamicResource SelectedBackgroundBrush}"
+                                                                BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
+                                                            <Grid>
+                                                                <TextBlock Text="{Binding Initial}" FontSize="14" FontWeight="Medium"
+                                                                           Foreground="{DynamicResource TextTertiary}"
+                                                                           HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                                           Visibility="{Binding Thumbnail, Converter={StaticResource HasValueToVis}, ConverterParameter=invert}"/>
+                                                                <Image Source="{Binding Thumbnail}" Stretch="UniformToFill"
+                                                                       RenderOptions.BitmapScalingMode="HighQuality"/>
+                                                            </Grid>
+                                                        </Border>
+                                                        <StackPanel Grid.Column="1" Margin="12,0,12,0" VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding Name}" FontSize="14" TextTrimming="CharacterEllipsis"
+                                                                       Foreground="{DynamicResource TextPrimary}"/>
+                                                            <TextBlock Text="{Binding Author}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                                                       Foreground="{DynamicResource TextTertiary}" Margin="0,2,0,0"/>
                                                         </StackPanel>
-                                                    </Border>
-                                                    <TextBlock Grid.Column="3" Text="{Binding DateText}" FontSize="13"
-                                                               Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center"/>
-                                                    <Border Grid.Column="4" Background="Transparent" ToolTip="{Binding StatusToolTip}"
-                                                            HorizontalAlignment="Left" VerticalAlignment="Center">
-                                                        <CheckBox Style="{StaticResource StatusToggle}"
-                                                                  IsChecked="{Binding IsEnabledInRoster, Mode=OneWay}"/>
-                                                    </Border>
-                                                </Grid>
-                                            </Button>
+                                                        <Border x:Name="TypeBadge" Grid.Column="2" HorizontalAlignment="Left" Height="24"
+                                                                CornerRadius="12" Padding="9,0" BorderThickness="1"
+                                                                Background="{DynamicResource BadgeCharacterBackgroundBrush}"
+                                                                BorderBrush="#4D3B82F6">
+                                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                                <Ellipse x:Name="TypeDot" Width="6" Height="6" Fill="{DynamicResource BadgeCharacterBrush}"/>
+                                                                <TextBlock x:Name="TypeText" Text="{Binding TypeLabel}" Margin="6,0,0,0"
+                                                                           FontSize="12" FontWeight="Medium"
+                                                                           Foreground="{DynamicResource BadgeCharacterBrush}"/>
+                                                            </StackPanel>
+                                                        </Border>
+                                                        <TextBlock Grid.Column="3" Text="{Binding DateText}" FontSize="13"
+                                                                   Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center"/>
+                                                    </Grid>
+                                                </Button>
+                                                <Border Grid.Column="1" Background="Transparent" ToolTip="{Binding StatusToolTip}"
+                                                        HorizontalAlignment="Left" VerticalAlignment="Center" Margin="0,0,16,0"
+                                                        ToolTipService.ShowOnDisabled="True">
+                                                    <CheckBox Style="{StaticResource InteractiveStatusToggle}"
+                                                              IsChecked="{Binding IsEnabledInRoster, Mode=OneWay}"
+                                                              IsEnabled="{Binding CanToggleStatus}"
+                                                              Command="{Binding DataContext.ToggleRecentStatusCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                              CommandParameter="{Binding}"/>
+                                                </Border>
+                                            </Grid>
                                         </Border>
                                         <DataTemplate.Triggers>
                                             <DataTrigger Binding="{Binding IsCharacter}" Value="False">

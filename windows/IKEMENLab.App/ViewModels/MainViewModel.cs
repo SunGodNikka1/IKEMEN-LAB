@@ -45,7 +45,8 @@ public sealed class MainViewModel : ObservableObject
             page => Navigate(page),
             refresh,
             installer: installer,
-            fullgame: new IKEMENLab.Core.Install.FullgameImporter(installer: installer, dateAdded: dateAdded));
+            fullgame: new IKEMENLab.Core.Install.FullgameImporter(installer: installer, dateAdded: dateAdded),
+            roster: roster);
         Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster, primaryDefs);
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page), refresh, roster);

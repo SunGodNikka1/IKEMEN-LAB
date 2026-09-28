@@ -4,10 +4,12 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
+using IKEMENLab.App.Services;
 using IKEMENLab.App.Views;
 using IKEMENLab.Core.Config;
 using IKEMENLab.Core.Install;
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.SelectDef;
 using IKEMENLab.Core.Services;
 using IKEMENLab.Core.Validation;
 using Microsoft.Win32;
@@ -31,6 +33,7 @@ public sealed class DashboardViewModel : ObservableObject
     private readonly IContentInstallService _installer;
     private readonly FullgameImporter _fullgame;
     private readonly Services.ArtworkLoader _artwork;
+    private readonly IRosterActivationService _roster;
     private LibrarySnapshot? _snapshot;
     private CancellationTokenSource? _backgroundWork;
 
@@ -73,7 +76,8 @@ public sealed class DashboardViewModel : ObservableObject
         Func<Task> refreshLibrary,
         IContentInstallService? installer = null,
         IIkemenConfigMutationService? configWriter = null,
-        FullgameImporter? fullgame = null)
+        FullgameImporter? fullgame = null,
+        IRosterActivationService? roster = null)
     {
         _launcher = launcher;
         _artwork = artwork;
@@ -82,6 +86,7 @@ public sealed class DashboardViewModel : ObservableObject
         _installer = installer ?? new ContentInstallService();
         _fullgame = fullgame ?? new FullgameImporter();
         _configWriter = configWriter ?? new IkemenConfigMutationService();
+        _roster = roster ?? new RosterActivationService();
         LaunchCommand = new RelayCommand(Launch, () => CanLaunch && !IsGameRunning);
         OpenCharactersCommand = new RelayCommand(() => _navigate(NavPage.Characters));
         OpenStagesCommand = new RelayCommand(() => _navigate(NavPage.Stages));
@@ -92,10 +97,11 @@ public sealed class DashboardViewModel : ObservableObject
         OpenRecentCommand = new RelayCommand(p =>
         {
             if (p is RecentItemViewModel item)
-            {
                 _navigate(item.IsCharacter ? NavPage.Characters : NavPage.Stages);
-            }
         });
+        ToggleRecentStatusCommand = new AsyncRelayCommand(
+            p => ToggleRecentStatusAsync(p as RecentItemViewModel),
+            p => p is RecentItemViewModel row && row.CanToggleStatus);
         DismissDropNoticeCommand = new RelayCommand(() => DropNotice = null);
         BrowseInstallFilesCommand = new AsyncRelayCommand(BrowseFilesAsync, () => !_installBusy && CanInstall);
         BrowseInstallFolderCommand = new AsyncRelayCommand(BrowseFolderAsync, () => !_installBusy && CanInstall);
@@ -108,6 +114,7 @@ public sealed class DashboardViewModel : ObservableObject
     public ICommand ScanCommand { get; }
     public ICommand ToggleHealthDetailsCommand { get; }
     public ICommand OpenRecentCommand { get; }
+    public ICommand ToggleRecentStatusCommand { get; }
     public ICommand DismissDropNoticeCommand { get; }
     public ICommand BrowseInstallFilesCommand { get; }
     public ICommand BrowseInstallFolderCommand { get; }
@@ -242,9 +249,13 @@ public sealed class DashboardViewModel : ObservableObject
             : $"Indexed {CharacterCount} characters ({NestedCount} nested), {StageCount} stages.";
 
         var now = DateTime.Now;
+        var rosterAvailable = snapshot is { Installation.CanBrowse: true, SelectDef.IsAvailable: true };
         foreach (var item in RecentContent.FromSnapshot(snapshot))
         {
-            var row = new RecentItemViewModel(item, now);
+            var row = new RecentItemViewModel(item, now)
+            {
+                CanToggleStatus = rosterAvailable && !item.NeedsDefChoice
+            };
             RecentItems.Add(row);
             _ = LoadThumbnailAsync(row, snapshot);
         }
@@ -273,6 +284,54 @@ public sealed class DashboardViewModel : ObservableObject
         if (load is null) return;
         var image = await load;
         if (ReferenceEquals(snapshot, _snapshot)) row.Thumbnail = image;
+    }
+
+    /// <summary>
+    /// Enables/disables a Recently Installed row through the same roster service as the Characters/Stages browsers.
+    /// Must not navigate; the row button handles OpenRecent separately.
+    /// </summary>
+    public async Task ToggleRecentStatusAsync(RecentItemViewModel? row)
+    {
+        if (row is null || string.IsNullOrWhiteSpace(RootPath) || !row.CanToggleStatus) return;
+
+        if (row.Item.NeedsDefChoice)
+        {
+            UserDialogs.Warn(
+                "This character folder has several possible DEFs. Choose the primary DEF in the inspector first.",
+                "Roster");
+            _navigate(NavPage.Characters);
+            return;
+        }
+
+        var enable = row.Item.Status != ContentStatus.Active;
+        row.IsToggling = true;
+        try
+        {
+            var root = RootPath;
+            var defPath = row.Item.DefPath;
+            var result = await Task.Run(() => row.IsCharacter
+                ? _roster.SetCharacterEnabled(root, defPath, enable)
+                : _roster.SetStageEnabled(root, defPath, enable));
+
+            if (!result.Success)
+            {
+                UserDialogs.Warn(result.Error ?? "Could not update select.def.", "Roster");
+                row.RefreshStatusBinding();
+                return;
+            }
+
+            await _refreshLibrary();
+        }
+        catch (Exception ex)
+        {
+            UserDialogs.Warn(ex.Message, "Roster");
+            row.RefreshStatusBinding();
+        }
+        finally
+        {
+            row.IsToggling = false;
+            row.RefreshStatusBinding();
+        }
     }
 
     public void HandleDroppedPaths(IReadOnlyList<string> paths)
@@ -751,6 +810,8 @@ public sealed class DashboardViewModel : ObservableObject
 public sealed class RecentItemViewModel : ObservableObject
 {
     private System.Windows.Media.ImageSource? _thumbnail;
+    private bool _canToggleStatus;
+    private bool _isToggling;
 
     public RecentItemViewModel(RecentContentItem item, DateTime nowLocal)
     {
@@ -776,12 +837,57 @@ public sealed class RecentItemViewModel : ObservableObject
     public string Initial { get; }
     public bool IsEnabledInRoster => Item.Status == ContentStatus.Active;
 
-    public string StatusToolTip => Item.Status switch
+    public bool CanToggleStatus
     {
-        ContentStatus.Active => "Enabled in select.def (read-only view)",
-        ContentStatus.Disabled => "Commented out in select.def (read-only view)",
-        _ => "Not listed in select.def (read-only view)"
-    };
+        get => _canToggleStatus && !_isToggling;
+        set
+        {
+            if (SetProperty(ref _canToggleStatus, value))
+                OnPropertyChanged(nameof(StatusToolTip));
+        }
+    }
+
+    public bool IsToggling
+    {
+        get => _isToggling;
+        set
+        {
+            if (SetProperty(ref _isToggling, value))
+            {
+                OnPropertyChanged(nameof(CanToggleStatus));
+                OnPropertyChanged(nameof(StatusToolTip));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
+    public void RefreshStatusBinding() => OnPropertyChanged(nameof(IsEnabledInRoster));
+
+    public string StatusToolTip
+    {
+        get
+        {
+            if (IsToggling) return "Updating select.def…";
+            if (!CanToggleStatus)
+            {
+                if (Item.NeedsDefChoice)
+                    return "Several DEFs could be primary — open Characters and choose one before enabling.";
+                return Item.Status switch
+                {
+                    ContentStatus.Active => "Enabled in select.def (roster toggle unavailable)",
+                    ContentStatus.Disabled => "Commented out in select.def (roster toggle unavailable)",
+                    _ => "Not listed in select.def (roster toggle unavailable)"
+                };
+            }
+
+            return Item.Status switch
+            {
+                ContentStatus.Active => "Enabled — click to disable in select.def",
+                ContentStatus.Disabled => "Disabled — click to re-enable in select.def",
+                _ => "Unregistered — click to add to select.def"
+            };
+        }
+    }
 
     public string ToolTip => Item.DateAddedSource switch
     {
