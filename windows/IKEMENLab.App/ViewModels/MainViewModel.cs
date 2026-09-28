@@ -41,7 +41,7 @@ public sealed class MainViewModel : ObservableObject
         Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster);
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page), refresh, roster);
-        Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page));
+        Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page), refresh);
         Collections = new CollectionsViewModel(Artwork, refresh, activation: collectionActivation);
 
         NavItems =
