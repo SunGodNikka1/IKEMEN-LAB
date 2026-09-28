@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
@@ -6,6 +7,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using IKEMENLab.App.ViewModels;
+using IKEMENLab.Core.Collections;
 using IKEMENLab.Core.Services;
 
 namespace IKEMENLab.App.Services;
@@ -16,6 +18,7 @@ namespace IKEMENLab.App.Services;
 /// (which would steal focus from other windows, e.g. a running game). One command per line:
 /// wait-ready, refresh, page NAME, sort characters|stages default|latest|oldest,
 /// ui-sort default|latest|oldest [POPUP-PNG] (the visible Sort drop-down), toggle character|stage ID,
+/// vsync on|off, volume N, collection-create NAME|id,id, activate-collection NAME,
 /// install [replace] PATH, hold PATH, release, dump PATH, snapshot PATH, sleep MS.
 /// Lines starting with '#' are ignored.
 /// </summary>
@@ -83,6 +86,23 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 await InstallAsync(replace ? rest["replace ".Length..].Trim() : rest, replace);
                 await main.RefreshAsync(null);
                 break;
+            case "vsync":
+                main.Dashboard.VSync = rest.Equals("on", StringComparison.OrdinalIgnoreCase);
+                await Task.Delay(1500);
+                _log.Add($"  vsync: {main.Dashboard.VSync} note='{main.Dashboard.QuickSettingsNote}'");
+                break;
+            case "volume":
+                main.Dashboard.MasterVolume = double.Parse(rest, CultureInfo.InvariantCulture);
+                main.Dashboard.CommitMasterVolumeCommand.Execute(null);
+                await Task.Delay(1500);
+                _log.Add($"  volume: {main.Dashboard.MasterVolume} note='{main.Dashboard.QuickSettingsNote}'");
+                break;
+            case "collection-create":
+                await CreateCollectionAsync(rest);
+                break;
+            case "activate-collection":
+                await ActivateCollectionAsync(rest);
+                break;
             case "hold":
                 // Simulates another program keeping the file open (readable, not replaceable).
                 _held?.Dispose();
@@ -127,6 +147,41 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         combo.IsDropDownOpen = false;
         await Task.Delay(200);
         _log.Add($"  ui-sort: shown='{(combo.SelectedItem as BrowserSortOption)?.Label}' characters={main.Characters.SortMode} stages={main.Stages.SortMode}");
+    }
+
+    /// <summary>collection-create NAME|id1,id2 — a manual collection in the app's collection store.</summary>
+    private async Task CreateCollectionAsync(string spec)
+    {
+        var parts = spec.Split('|', 2);
+        var ids = parts[1].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var snapshot = main.Snapshot ?? throw new InvalidOperationException("No snapshot");
+        var root = snapshot.Installation.RootPath;
+        var store = new CollectionStore();
+        var collection = store.Create(root, parts[0]);
+        store.Add(root, collection.Id, snapshot.Characters.Where(c => ids.Contains(c.Id, StringComparer.OrdinalIgnoreCase)));
+        await main.RefreshAsync(null);
+        await WaitReadyAsync(TimeSpan.FromSeconds(60));
+    }
+
+    /// <summary>activate-collection NAME — Preview then Confirm, exactly as the Collections page buttons do.</summary>
+    private async Task ActivateCollectionAsync(string name)
+    {
+        var collections = main.Collections;
+        collections.Selected = collections.Collections.FirstOrDefault(c => c.Name == name)
+                               ?? throw new InvalidOperationException("No collection " + name);
+        collections.BeginActivateCommand.Execute(null);
+        if (!collections.CanConfirmActivate)
+        {
+            _log.Add($"  activate: preview refused '{collections.Error}'");
+            return;
+        }
+
+        collections.ConfirmActivateCommand.Execute(null);
+        var until = DateTime.UtcNow.AddSeconds(60);
+        do await Task.Delay(100);
+        while (collections.IsActivating && DateTime.UtcNow < until);
+        await WaitReadyAsync(TimeSpan.FromSeconds(60));
+        _log.Add($"  activate: status='{collections.StatusText}' error='{collections.Error}'");
     }
 
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
