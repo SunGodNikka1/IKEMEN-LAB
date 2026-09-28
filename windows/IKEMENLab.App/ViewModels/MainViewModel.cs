@@ -27,7 +27,8 @@ public sealed class MainViewModel : ObservableObject
         _settingsStore = settingsStore;
         _indexService = indexService;
 
-        Dashboard = new DashboardViewModel(launcher, page => Navigate(page));
+        Artwork = new ArtworkLoader();
+        Dashboard = new DashboardViewModel(launcher, Artwork, page => Navigate(page));
         Characters = new CharactersViewModel();
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         StagesPlaceholder = new PlaceholderViewModel
@@ -66,6 +67,7 @@ public sealed class MainViewModel : ObservableObject
     }
 
     public ObservableCollection<NavItem> NavItems { get; }
+    public ArtworkLoader Artwork { get; }
     public NavItem SettingsNav { get; }
     public DashboardViewModel Dashboard { get; }
     public CharactersViewModel Characters { get; }
@@ -155,6 +157,7 @@ public sealed class MainViewModel : ObservableObject
             }
 
             Snapshot = snapshot;
+            Artwork.SetRoot(snapshot is { Installation.CanBrowse: true } ? snapshot.Installation.RootPath : null);
             Dashboard.ApplySnapshot(snapshot);
             Characters.ApplySnapshot(snapshot);
             Settings.LoadFrom(_settingsStore.Load(), snapshot?.Installation);

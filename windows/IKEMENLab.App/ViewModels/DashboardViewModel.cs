@@ -23,6 +23,7 @@ public sealed class DashboardViewModel : ObservableObject
 {
     private readonly IGameLauncher _launcher;
     private readonly Action<NavPage> _navigate;
+    private readonly Services.ArtworkLoader _artwork;
     private LibrarySnapshot? _snapshot;
     private CancellationTokenSource? _backgroundWork;
 
@@ -50,9 +51,10 @@ public sealed class DashboardViewModel : ObservableObject
 
     private string? _dropNotice;
 
-    public DashboardViewModel(IGameLauncher launcher, Action<NavPage> navigate)
+    public DashboardViewModel(IGameLauncher launcher, Services.ArtworkLoader artwork, Action<NavPage> navigate)
     {
         _launcher = launcher;
+        _artwork = artwork;
         _navigate = navigate;
         LaunchCommand = new RelayCommand(Launch, () => CanLaunch && !IsGameRunning);
         OpenCharactersCommand = new RelayCommand(() => _navigate(NavPage.Characters));
@@ -186,7 +188,9 @@ public sealed class DashboardViewModel : ObservableObject
         var now = DateTime.Now;
         foreach (var item in RecentContent.FromSnapshot(snapshot))
         {
-            RecentItems.Add(new RecentItemViewModel(item, now));
+            var row = new RecentItemViewModel(item, now);
+            RecentItems.Add(row);
+            _ = LoadThumbnailAsync(row, snapshot);
         }
 
         OnPropertyChanged(nameof(HasRecentItems));
@@ -201,6 +205,16 @@ public sealed class DashboardViewModel : ObservableObject
         {
             StorageText = "—";
         }
+    }
+
+    private async Task LoadThumbnailAsync(RecentItemViewModel row, LibrarySnapshot snapshot)
+    {
+        Task<System.Windows.Media.ImageSource?>? load = row.IsCharacter
+            ? snapshot.Characters.FirstOrDefault(c => c.DefPath == row.Item.DefPath) is { } c ? _artwork.CharacterThumbnailAsync(c) : null
+            : snapshot.Stages.FirstOrDefault(s => s.RootRelativeDefPath == row.Item.DefPath) is { } s ? _artwork.StageThumbnailAsync(s) : null;
+        if (load is null) return;
+        var image = await load;
+        if (ReferenceEquals(snapshot, _snapshot)) row.Thumbnail = image;
     }
 
     /// <summary>Called by the drop zone. Installing is a later safe-write phase; nothing is touched.</summary>
@@ -346,8 +360,10 @@ public sealed class DashboardViewModel : ObservableObject
     }
 }
 
-public sealed class RecentItemViewModel
+public sealed class RecentItemViewModel : ObservableObject
 {
+    private System.Windows.Media.ImageSource? _thumbnail;
+
     public RecentItemViewModel(RecentContentItem item, DateTime nowLocal)
     {
         Item = item;
@@ -356,6 +372,12 @@ public sealed class RecentItemViewModel
     }
 
     public RecentContentItem Item { get; }
+
+    public System.Windows.Media.ImageSource? Thumbnail
+    {
+        get => _thumbnail;
+        set => SetProperty(ref _thumbnail, value);
+    }
     public string Name => Item.Name;
     public string Author => Item.Author;
     public bool IsCharacter => Item.Type == RecentContentType.Character;
