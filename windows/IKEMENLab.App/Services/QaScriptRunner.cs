@@ -1,6 +1,8 @@
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using IKEMENLab.App.ViewModels;
@@ -13,7 +15,8 @@ namespace IKEMENLab.App.Services;
 /// commands the UI binds to, so fixtures can be exercised end to end without synthetic mouse input
 /// (which would steal focus from other windows, e.g. a running game). One command per line:
 /// wait-ready, refresh, page NAME, sort characters|stages default|latest|oldest,
-/// toggle character|stage ID, install [replace] PATH, hold PATH, release, dump PATH, snapshot PATH, sleep MS.
+/// ui-sort default|latest|oldest [POPUP-PNG] (the visible Sort drop-down), toggle character|stage ID,
+/// install [replace] PATH, hold PATH, release, dump PATH, snapshot PATH, sleep MS.
 /// Lines starting with '#' are ignored.
 /// </summary>
 public sealed class QaScriptRunner(MainViewModel main, Window window)
@@ -66,6 +69,11 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 if (p[1].StartsWith("char", StringComparison.OrdinalIgnoreCase)) main.Characters.SortMode = mode;
                 else main.Stages.SortMode = mode;
                 break;
+            case "ui-sort":
+                // ui-sort default|latest|oldest [POPUP-PNG]: drives the visible page's real Sort drop-down.
+                var args = rest.Split(' ', 2);
+                await UiSortAsync(args[0], args.Length > 1 ? args[1] : null);
+                break;
             case "toggle":
                 await ToggleAsync(p[1], p[2]);
                 await WaitReadyAsync(TimeSpan.FromSeconds(60));
@@ -95,6 +103,39 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 break;
             default:
                 throw new InvalidOperationException("Unknown QA command: " + verb);
+        }
+    }
+
+    private async Task UiSortAsync(string mode, string? popupSnapshot)
+    {
+        window.UpdateLayout();
+        var combo = Descendants(window).OfType<ComboBox>()
+                        .FirstOrDefault(c => c.IsVisible && System.Windows.Automation.AutomationProperties.GetName(c) == "Sort")
+                    ?? throw new InvalidOperationException("No visible Sort drop-down");
+        combo.IsDropDownOpen = true;
+        await Task.Delay(400);
+        var item = combo.Items.Cast<object>().Select(i => (ComboBoxItem?)combo.ItemContainerGenerator.ContainerFromItem(i))
+                       .FirstOrDefault(c => c?.Content is BrowserSortOption o && o.Mode.ToString().StartsWith(mode, StringComparison.OrdinalIgnoreCase))
+                   ?? throw new InvalidOperationException("No generated item for " + mode);
+        if (popupSnapshot is not null && combo.Template.FindName("PART_Popup", combo) is Popup { Child: FrameworkElement popup })
+        {
+            Render(popup, popupSnapshot);
+        }
+
+        // Same effect as clicking the item: select it and close the list.
+        item.IsSelected = true;
+        combo.IsDropDownOpen = false;
+        await Task.Delay(200);
+        _log.Add($"  ui-sort: shown='{(combo.SelectedItem as BrowserSortOption)?.Label}' characters={main.Characters.SortMode} stages={main.Stages.SortMode}");
+    }
+
+    private static IEnumerable<DependencyObject> Descendants(DependencyObject root)
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            yield return child;
+            foreach (var d in Descendants(child)) yield return d;
         }
     }
 
@@ -161,7 +202,8 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 switchOn = r.IsActive,
                 dateAddedUtc = r.Entry.DateAddedUtc,
                 dateAddedSource = r.Entry.DateAddedSource?.ToString(),
-                label = r.DateAddedText
+                label = r.DateAddedText,
+                column = r.DateColumnText
             }),
             stageSort = main.Stages.SortMode.ToString(),
             stages = main.Stages.Stages.Select(r => new
@@ -171,7 +213,8 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 status = r.Entry.Status.ToString(),
                 dateAddedUtc = r.Entry.DateAddedUtc,
                 dateAddedSource = r.Entry.DateAddedSource?.ToString(),
-                label = r.DateAddedText
+                label = r.DateAddedText,
+                column = r.DateColumnText
             }),
             recentlyInstalled = main.Dashboard.RecentItems.Select(r => new
             {
@@ -192,7 +235,11 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
     private void Snapshot(string path)
     {
         window.UpdateLayout();
-        var root = (FrameworkElement)window.Content;
+        Render((FrameworkElement)window.Content, path);
+    }
+
+    private static void Render(FrameworkElement root, string path)
+    {
         var width = (int)Math.Ceiling(Math.Max(root.ActualWidth, 1));
         var height = (int)Math.Ceiling(Math.Max(root.ActualHeight, 1));
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
