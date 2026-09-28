@@ -1,0 +1,49 @@
+<UserControl x:Class="IKEMENLab.App.Views.BrowserHeader"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Self">
+    <Border Height="64" Padding="24,0" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="0,0,0,1">
+        <DockPanel VerticalAlignment="Center">
+            <!-- Grid | List -->
+            <Border DockPanel.Dock="Right" Style="{StaticResource SegmentedHost}" Margin="12,0,0,0"
+                    Visibility="{Binding ShowViewToggle, ElementName=Self, Converter={StaticResource BoolToVis}}">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton Style="{StaticResource SegmentedItem}" GroupName="{Binding GroupKey, ElementName=Self}"
+                                 IsChecked="{Binding IsGrid, ElementName=Self, Mode=TwoWay}" ToolTip="Grid view">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{StaticResource Glyph.Grid}" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                       VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock Text="Grid" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </RadioButton>
+                    <RadioButton Style="{StaticResource SegmentedItem}" GroupName="{Binding GroupKey, ElementName=Self}"
+                                 IsChecked="{Binding IsList, ElementName=Self, Mode=TwoWay}" ToolTip="List view">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{StaticResource Glyph.List}" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                       VerticalAlignment="Center" Margin="0,0,6,0"/>
+                            <TextBlock Text="List" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </RadioButton>
+                </StackPanel>
+            </Border>
+
+            <TextBox DockPanel.Dock="Right" Width="260" Style="{StaticResource SearchBox}" Tag="Search assets..."
+                     Text="{Binding SearchText, ElementName=Self, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     AutomationProperties.Name="Search"/>
+
+            <!-- Breadcrumb -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Style="{StaticResource LinkButton}" Foreground="{DynamicResource TextTertiary}"
+                        Command="{Binding HomeCommand, ElementName=Self}" FontSize="13">
+                    <TextBlock Text="Home"/>
+                </Button>
+                <TextBlock Text="{StaticResource Glyph.ChevronRight}" FontFamily="{StaticResource IconFont}" FontSize="9"
+                           Foreground="{DynamicResource TextDisabled}" VerticalAlignment="Center" Margin="8,1,8,0"/>
+                <TextBlock Text="{Binding Section, ElementName=Self}" FontSize="13" FontWeight="Medium"
+                           Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding CountText, ElementName=Self}" FontSize="12" Margin="10,0,0,0"
+                           Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center"/>
+            </StackPanel>
+        </DockPanel>
+    </Border>
+</UserControl>

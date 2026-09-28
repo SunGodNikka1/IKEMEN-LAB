@@ -13,7 +13,7 @@ namespace IKEMENLab.App.Services;
 /// </summary>
 public sealed class ArtworkLoader
 {
-    public const int ThumbnailDecodeHeight = 96;
+    public const int ThumbnailDecodeHeight = 160;
     public const int StageThumbnailDecodeWidth = 360;
 
     private readonly SemaphoreSlim _gate = new(Math.Clamp(Environment.ProcessorCount / 2, 2, 4));

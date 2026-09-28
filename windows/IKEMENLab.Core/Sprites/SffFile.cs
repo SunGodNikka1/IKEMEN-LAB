@@ -105,6 +105,82 @@ public sealed class SffFile : IDisposable
     public SffSprite? Find(int group, int number)
         => _sprites.FirstOrDefault(s => s.Group == group && s.Number == number);
 
+    /// <summary>SFF v2 palette identified by (group, number), e.g. selectable palette 1,n. Null for v1.</summary>
+    public uint[]? PaletteByGroup(int group, int number)
+    {
+        if (Version != 2) return null;
+        Span<byte> node = stackalloc byte[4];
+        for (var i = 0; i < _paletteCount; i++)
+        {
+            if (!ReadAt(_paletteListOffset + i * 16L, node)) return null;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(node) == group &&
+                BinaryPrimitives.ReadUInt16LittleEndian(node[2..]) == number)
+            {
+                return V2Palette(i);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>Raw 8-bit indices of a sprite (null for true-colour sprites). Used for palette swatches.</summary>
+    public (int Width, int Height, byte[] Indices)? DecodeIndices(SffSprite sprite)
+    {
+        try
+        {
+            var data = ResolveLinked(sprite);
+            if (Version == 1)
+            {
+                // Decode with a dummy greyscale palette, then read the index back from the blue channel.
+                var gray = new uint[256];
+                for (var i = 0; i < 256; i++) gray[i] = 0xFF000000u | (uint)i;
+                var img = DecodeV1(sprite, null, gray);
+                if (img is null) return null;
+                var idx = new byte[img.Width * img.Height];
+                for (var i = 0; i < idx.Length; i++) idx[i] = img.Bgra[i * 4];
+                return (img.Width, img.Height, idx);
+            }
+
+            if (data.Format is 2 or 3 or 4 && data.DataLength >= 4)
+            {
+                var bytes = new byte[data.DataLength];
+                if (!ReadAt(data.DataOffset, bytes)) return null;
+                var body = bytes.AsSpan(4);
+                var indices = data.Format switch
+                {
+                    2 => SffCodecs.Rle8(body, data.Width, data.Height),
+                    3 => SffCodecs.Rle5(body, data.Width, data.Height),
+                    _ => SffCodecs.Lz5(body, data.Width, data.Height)
+                };
+                return (data.Width, data.Height, indices);
+            }
+
+            if (data.Format == 10 && data.DataLength > 4)
+            {
+                var bytes = new byte[data.DataLength];
+                if (!ReadAt(data.DataOffset, bytes)) return null;
+                var png = Png.TryDecode(bytes.AsSpan(4));
+                return png?.Indices is null ? null : (png.Width, png.Height, png.Indices);
+            }
+
+            if (data.Format == 0 && data.ColorDepth == 8)
+            {
+                var bytes = new byte[data.DataLength];
+                if (!ReadAt(data.DataOffset, bytes)) return null;
+                return (data.Width, data.Height, Pad(bytes, data.Width * data.Height));
+            }
+        }
+        catch (Exception e) when (e is IOException or IndexOutOfRangeException or ArgumentException or OverflowException)
+        {
+        }
+
+        return null;
+    }
+
+    /// <summary>The embedded palette a v1 sprite is drawn with (after the previous-sprite chain).</summary>
+    public uint[]? EmbeddedPaletteFor(SffSprite sprite)
+        => Version == 1 ? V1Palette(PaletteOwner(sprite)) : V2Palette(ResolveLinked(sprite).PaletteIndex);
+
     /// <summary>Width/height, reading the PCX header for v1 sprites when needed.</summary>
     public (int Width, int Height) Dimensions(SffSprite sprite)
     {
@@ -243,7 +319,7 @@ public sealed class SffFile : IDisposable
 
     // ------------------------------------------------------------------ v1
 
-    private SpriteImage? DecodeV1(SffSprite sprite, uint[]? palette0Override)
+    private SpriteImage? DecodeV1(SffSprite sprite, uint[]? palette0Override, uint[]? forcedPalette = null)
     {
         var data = ResolveLinked(sprite);
         if (data.DataLength == 0 && data.BlockEnd <= data.DataOffset + 128) return null;
@@ -268,7 +344,8 @@ public sealed class SffFile : IDisposable
 
         var indices = SffCodecs.PcxRle(rle, width, height, encoding == 1 ? bytesPerLine : 0);
 
-        uint[]? palette = owner == 0 && palette0Override is not null ? palette0Override : V1Palette(owner);
+        uint[]? palette = forcedPalette
+                          ?? (owner == 0 && palette0Override is not null ? palette0Override : V1Palette(owner));
         if (palette is null) return null;
         return SpriteImage.FromIndexed(width, height, indices, palette);
     }

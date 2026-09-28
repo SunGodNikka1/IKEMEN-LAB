@@ -1,0 +1,160 @@
+using System.Windows.Media;
+using IKEMENLab.App.Infrastructure;
+using IKEMENLab.Core.Characters;
+using IKEMENLab.Core.Models;
+
+namespace IKEMENLab.App.ViewModels;
+
+public sealed record AttributeRow(string Label, string ValueText, double Fraction, Brush Fill, string ToolTip);
+
+public sealed record PaletteSwatch(Brush Fill, string ToolTip);
+
+public sealed record MoveRow(string Name, string Notation, bool IsHyper);
+
+public sealed record DefSegment(string Text, Brush Foreground, bool Bold);
+
+public sealed record DefLine(IReadOnlyList<DefSegment> Segments);
+
+/// <summary>Right-hand inspector for the selected character. All data is read-only.</summary>
+public sealed class CharacterInspectorViewModel : ObservableObject
+{
+    private static readonly Brush LifeBrush = Frozen(Colors.White);
+    private static readonly Brush StatBrush = Frozen(Color.FromRgb(0xA1, 0xA1, 0xAA));
+    private static readonly Brush PowerBrush = Frozen(Color.FromArgb(0xB3, 0x0A, 0x84, 0xFF));
+    private static readonly Brush SectionBrush = Frozen(Color.FromRgb(0x66, 0x99, 0xFF));
+    private static readonly Brush KeyBrush = Frozen(Color.FromRgb(0xCC, 0x99, 0xFF));
+    private static readonly Brush ValueBrush = Frozen(Colors.White);
+    private static readonly Brush CommentBrush = Frozen(Color.FromRgb(0x71, 0x71, 0x7A));
+    private static readonly Brush PlainBrush = Frozen(Color.FromRgb(0xA1, 0xA1, 0xAA));
+
+    private ImageSource? _portrait;
+    private bool _isLoading = true;
+    private CharacterDetails? _details;
+
+    public CharacterInspectorViewModel(CharacterRowViewModel row)
+    {
+        Row = row;
+    }
+
+    public CharacterRowViewModel Row { get; }
+    public string Name => Row.DisplayName;
+    public string Author => Row.Author;
+
+    public ImageSource? Portrait
+    {
+        get => _portrait;
+        set => SetProperty(ref _portrait, value);
+    }
+
+    public bool IsLoading
+    {
+        get => _isLoading;
+        private set => SetProperty(ref _isLoading, value);
+    }
+
+    public string EngineLabel => _details?.EngineLabel ?? "…";
+    public string UpdatedText => string.IsNullOrEmpty(_details?.VersionDate) ? string.Empty : "Updated " + _details!.VersionDate;
+    public string VersionText => string.IsNullOrEmpty(_details?.VersionDate) ? "—" : _details!.VersionDate;
+
+    public bool HasStats => _details?.Stats is not null;
+    public string StatsNote => _details is null ? string.Empty : HasStats ? "Based on CNS data" : "CNS not found — stats unavailable";
+    public IReadOnlyList<AttributeRow> Attributes { get; private set; } = [];
+
+    public string PaletteHeader => $"Palettes ({_details?.Palettes.Count ?? 0})";
+    public IReadOnlyList<PaletteSwatch> Palettes { get; private set; } = [];
+    public string? MorePalettesText { get; private set; }
+    public bool HasPalettes => Palettes.Count > 0;
+
+    public IReadOnlyList<MoveRow> Moves { get; private set; } = [];
+    public string? MoreMovesText { get; private set; }
+    public bool HasMoves => Moves.Count > 0;
+
+    public string DefFileName => System.IO.Path.GetFileName(Row.Entry.DefPath);
+    public IReadOnlyList<DefLine> DefLines { get; private set; } = [];
+
+    public void Apply(CharacterDetails details)
+    {
+        _details = details;
+
+        if (details.Stats is { } s)
+        {
+            Attributes =
+            [
+                Attr("Life", s.Life, CharacterStats.MaxLife, LifeBrush),
+                Attr("Atk", s.Attack, CharacterStats.MaxAttack, StatBrush),
+                Attr("Def", s.Defence, CharacterStats.MaxDefence, StatBrush),
+                Attr("Pow", s.Power, CharacterStats.MaxPower, PowerBrush)
+            ];
+        }
+
+        Palettes = details.Palettes.Take(6)
+            .Select(p => new PaletteSwatch(
+                p.SwatchArgb is { } argb ? Frozen(Color.FromArgb(255, (byte)(argb >> 16), (byte)(argb >> 8), (byte)argb)) : StatBrush,
+                $"Palette {p.Number}: {p.Source}"))
+            .ToList();
+        MorePalettesText = details.Palettes.Count > 6 ? $"+{details.Palettes.Count - 6}" : null;
+
+        Moves = details.Moves.Take(10).Select(m => new MoveRow(m.DisplayName, m.Notation, m.IsHyper)).ToList();
+        MoreMovesText = details.Moves.Count > 10 ? $"+{details.Moves.Count - 10} more moves…" : null;
+
+        DefLines = Highlight(details.DefText);
+        IsLoading = false;
+        OnPropertyChanged(string.Empty);
+    }
+
+    private static AttributeRow Attr(string label, CnsValue value, int max, Brush fill)
+        => new(label, value.Value.ToString(), Math.Clamp((double)value.Value / max, 0.01, 1), fill,
+            value.IsEngineDefault ? $"{label}: not set in [Data]; engine default {value.Value}" : $"{label}: {value.Value} from [Data]");
+
+    /// <summary>macOS-style DEF highlighting: sections blue, keys purple, comments grey.</summary>
+    public static IReadOnlyList<DefLine> Highlight(string? text)
+    {
+        if (text is null) return [new DefLine([new DefSegment("Unable to read definition file", CommentBrush, false)])];
+        var lines = new List<DefLine>();
+        foreach (var line in text.Replace("\r\n", "\n").Split('\n').Take(400))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith(';'))
+            {
+                lines.Add(new DefLine([new DefSegment(line, CommentBrush, false)]));
+            }
+            else if (trimmed.StartsWith('[') && trimmed.Contains(']'))
+            {
+                lines.Add(new DefLine([new DefSegment(line, SectionBrush, true)]));
+            }
+            else
+            {
+                var eq = line.IndexOf('=');
+                if (eq < 0)
+                {
+                    lines.Add(new DefLine([new DefSegment(line, PlainBrush, false)]));
+                    continue;
+                }
+
+                var value = line[(eq + 1)..];
+                var comment = value.IndexOf(';');
+                var segments = new List<DefSegment> { new(line[..(eq + 1)], KeyBrush, false) };
+                if (comment >= 0)
+                {
+                    segments.Add(new DefSegment(value[..comment], ValueBrush, false));
+                    segments.Add(new DefSegment(value[comment..], CommentBrush, false));
+                }
+                else
+                {
+                    segments.Add(new DefSegment(value, ValueBrush, false));
+                }
+
+                lines.Add(new DefLine(segments));
+            }
+        }
+
+        return lines;
+    }
+
+    private static Brush Frozen(Color c)
+    {
+        var b = new SolidColorBrush(c);
+        b.Freeze();
+        return b;
+    }
+}

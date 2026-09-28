@@ -1,62 +1,213 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
+using System.Windows;
+using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
+using IKEMENLab.App.Services;
+using IKEMENLab.Core.Characters;
 using IKEMENLab.Core.Models;
 
 namespace IKEMENLab.App.ViewModels;
 
+public enum BrowserViewMode
+{
+    Grid,
+    List
+}
+
+/// <summary>Character browser: search, Grid/List, portraits, feature badges and the read-only inspector.</summary>
 public sealed class CharactersViewModel : ObservableObject
 {
-    private readonly List<CharacterCardViewModel> _all = [];
+    private readonly ArtworkLoader _artwork;
+    private readonly Action<NavPage> _navigate;
+    private readonly List<CharacterRowViewModel> _all = [];
     private string _searchText = string.Empty;
+    private BrowserViewMode _viewMode = BrowserViewMode.List;
+    private CharacterRowViewModel? _selected;
+    private CharacterInspectorViewModel? _inspector;
+    private string? _root;
+    private CancellationTokenSource? _scan;
 
-    public ObservableCollection<CharacterCardViewModel> Characters { get; } = [];
+    public CharactersViewModel(ArtworkLoader artwork, Action<NavPage> navigate)
+    {
+        _artwork = artwork;
+        _navigate = navigate;
+        GoHomeCommand = new RelayCommand(() => _navigate(NavPage.Dashboard));
+        OpenFolderCommand = new RelayCommand(p => OpenFolder(p as CharacterRowViewModel ?? Selected));
+        CopyPathCommand = new RelayCommand(p => CopyPath(p as CharacterRowViewModel ?? Selected));
+        ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty);
+    }
+
+    public ObservableCollection<CharacterRowViewModel> Characters { get; } = [];
+
+    public ICommand GoHomeCommand { get; }
+    public ICommand OpenFolderCommand { get; }
+    public ICommand CopyPathCommand { get; }
+    public ICommand ClearSearchCommand { get; }
 
     public string SearchText
     {
         get => _searchText;
         set
         {
-            if (SetProperty(ref _searchText, value))
+            if (SetProperty(ref _searchText, value)) ApplyFilter();
+        }
+    }
+
+    public BrowserViewMode ViewMode
+    {
+        get => _viewMode;
+        set
+        {
+            if (SetProperty(ref _viewMode, value))
             {
-                ApplyFilter();
+                OnPropertyChanged(nameof(IsListMode));
+                OnPropertyChanged(nameof(IsGridMode));
             }
         }
     }
 
+    public bool IsListMode => ViewMode == BrowserViewMode.List;
+    public bool IsGridMode => ViewMode == BrowserViewMode.Grid;
+
     public int TotalCount => _all.Count;
+    public int VisibleCount => Characters.Count;
+    public bool HasNoResults => _all.Count > 0 && Characters.Count == 0;
+    public bool HasNoCharacters => _all.Count == 0;
+
+    public CharacterRowViewModel? Selected
+    {
+        get => _selected;
+        set
+        {
+            if (SetProperty(ref _selected, value)) _ = LoadInspectorAsync(value);
+        }
+    }
+
+    public CharacterInspectorViewModel? Inspector
+    {
+        get => _inspector;
+        private set => SetProperty(ref _inspector, value);
+    }
 
     public void ApplySnapshot(LibrarySnapshot? snapshot)
     {
+        _scan?.Cancel();
+        _scan = new CancellationTokenSource();
         _all.Clear();
         Characters.Clear();
-        if (snapshot is null) return;
+        Selected = null;
+        _root = snapshot?.Installation.RootPath;
 
-        foreach (var entry in snapshot.Characters)
+        if (snapshot is not null)
         {
-            _all.Add(new CharacterCardViewModel(entry));
+            foreach (var entry in snapshot.Characters)
+            {
+                _all.Add(new CharacterRowViewModel(entry));
+            }
         }
 
         ApplyFilter();
         OnPropertyChanged(nameof(TotalCount));
+        OnPropertyChanged(nameof(HasNoCharacters));
+        if (snapshot is { Installation.CanBrowse: true })
+        {
+            _ = LoadThumbnailsAsync(_all.ToList(), _scan.Token);
+            _ = ScanFeaturesAsync(snapshot.Installation.RootPath, _all.ToList(), _scan.Token);
+        }
+
+        Selected = Characters.FirstOrDefault();
     }
 
     private void ApplyFilter()
     {
+        var query = SearchText.Trim();
+        var keep = Selected;
         Characters.Clear();
-        var q = SearchText.Trim();
-        IEnumerable<CharacterCardViewModel> query = _all;
-        if (!string.IsNullOrEmpty(q))
+        foreach (var row in _all)
         {
-            query = _all.Where(c =>
-                c.DisplayName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                c.Author.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                c.FolderId.Contains(q, StringComparison.OrdinalIgnoreCase) ||
-                c.DefPath.Contains(q, StringComparison.OrdinalIgnoreCase));
+            if (query.Length == 0 || row.Matches(query)) Characters.Add(row);
         }
 
-        foreach (var item in query)
+        if (keep is not null && !Characters.Contains(keep)) Selected = Characters.FirstOrDefault();
+        OnPropertyChanged(nameof(VisibleCount));
+        OnPropertyChanged(nameof(HasNoResults));
+    }
+
+    private async Task LoadThumbnailsAsync(IReadOnlyList<CharacterRowViewModel> rows, CancellationToken token)
+    {
+        var tasks = rows.Select(async row =>
         {
-            Characters.Add(item);
+            var image = await _artwork.CharacterThumbnailAsync(row.Entry);
+            if (!token.IsCancellationRequested) row.Thumbnail = image;
+        });
+        await Task.WhenAll(tasks);
+    }
+
+    private static async Task ScanFeaturesAsync(string root, IReadOnlyList<CharacterRowViewModel> rows, CancellationToken token)
+    {
+        foreach (var row in rows)
+        {
+            if (token.IsCancellationRequested) return;
+            var features = await Task.Run(() =>
+            {
+                try { return CharacterFeatureScanner.Scan(root, row.Entry); }
+                catch (Exception) { return null; }
+            }, token).ConfigureAwait(true);
+            if (features is not null && !token.IsCancellationRequested)
+            {
+                row.FeaturesText = string.Join(" · ", features.Labels());
+            }
+        }
+    }
+
+    private async Task LoadInspectorAsync(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null)
+        {
+            Inspector = null;
+            return;
+        }
+
+        var inspector = new CharacterInspectorViewModel(row) { Portrait = row.Thumbnail };
+        Inspector = inspector;
+        var root = _root;
+
+        var detailsTask = Task.Run(() =>
+        {
+            try { return CharacterDetailsReader.Read(root, row.Entry); }
+            catch (Exception) { return null; }
+        });
+        var portraitTask = _artwork.CharacterPortraitAsync(row.Entry);
+
+        var details = await detailsTask;
+        if (!ReferenceEquals(Inspector, inspector)) return;
+        if (details is not null) inspector.Apply(details);
+
+        var portrait = await portraitTask;
+        if (ReferenceEquals(Inspector, inspector) && portrait is not null) inspector.Portrait = portrait;
+    }
+
+    private void OpenFolder(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null) return;
+        var def = Path.GetFullPath(Path.Combine(_root, row.Entry.DefPath));
+        if (!File.Exists(def)) return;
+        // Explorer only reveals the file; nothing is modified.
+        Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{def}\"") { UseShellExecute = true });
+    }
+
+    private void CopyPath(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null) return;
+        try
+        {
+            Clipboard.SetText(Path.GetFullPath(Path.Combine(_root, row.Entry.DefPath)));
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            // Clipboard busy; ignore.
         }
     }
 }

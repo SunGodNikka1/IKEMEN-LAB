@@ -29,6 +29,7 @@ public partial class App : Application
         var options = QaOptions.Parse(e.Args);
 
         if (options.Page is { } page) mainVm.SelectedNav = page;
+        if (options.View is { } view) mainVm.Characters.ViewMode = view;
 
         var window = new MainWindow(mainVm);
         MainWindow = window;
@@ -94,6 +95,7 @@ public partial class App : Application
     private sealed class QaOptions
     {
         public NavPage? Page { get; private set; }
+        public BrowserViewMode? View { get; private set; }
         public string? SnapshotPath { get; private set; }
         public double SnapshotDelaySeconds { get; private set; } = 8;
         public int Width { get; private set; }
@@ -113,6 +115,9 @@ public partial class App : Application
                 {
                     case "page" when Enum.TryParse<NavPage>(value, true, out var page):
                         o.Page = page;
+                        break;
+                    case "view" when Enum.TryParse<BrowserViewMode>(value, true, out var view):
+                        o.View = view;
                         break;
                     case "snapshot":
                         o.SnapshotPath = value;

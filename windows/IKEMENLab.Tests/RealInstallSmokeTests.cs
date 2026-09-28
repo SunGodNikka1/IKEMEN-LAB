@@ -113,6 +113,44 @@ public class RealInstallSmokeTests(ITestOutputHelper output)
         }
     }
 
+    [Fact]
+    public void ReadsRealCharacterDetails()
+    {
+        var root = Environment.GetEnvironmentVariable("IKEMENLAB_REAL_ROOT");
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) return;
+
+        var snapshot = new LibraryIndexService().Index(root);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int stats = 0, withMoves = 0, ai = 0, intro = 0, sfx = 0;
+        var palettes = new Dictionary<int, int>();
+        foreach (var c in snapshot.Characters)
+        {
+            var d = IKEMENLab.Core.Characters.CharacterDetailsReader.Read(root, c);
+            if (d.Stats is not null) stats++;
+            if (d.Moves.Count > 0) withMoves++;
+            palettes[d.Palettes.Count] = palettes.GetValueOrDefault(d.Palettes.Count) + 1;
+            var f = IKEMENLab.Core.Characters.CharacterFeatureScanner.Scan(root, c);
+            if (f.HasAi) ai++;
+            if (f.HasIntro) intro++;
+            if (f.HasSound) sfx++;
+        }
+
+        foreach (var c in snapshot.Characters.Where(c => (c.DisplayName + c.Author).Any(ch => ch > 127)))
+        {
+            output.WriteLine($"  non-ascii: {c.DisplayName} | {c.Author}");
+        }
+
+        output.WriteLine($"details for {snapshot.CharacterCount} chars in {sw.ElapsedMilliseconds} ms");
+        output.WriteLine($"stats={stats} moves={withMoves} ai={ai} intro={intro} sfx={sfx}");
+        output.WriteLine("palette counts: " + string.Join(", ", palettes.OrderBy(k => k.Key).Select(k => $"{k.Key}:{k.Value}")));
+        var kfm = snapshot.Characters.FirstOrDefault(c => c.Id.Equals("kfm", StringComparison.OrdinalIgnoreCase));
+        if (kfm is not null)
+        {
+            var d = IKEMENLab.Core.Characters.CharacterDetailsReader.Read(root, kfm);
+            output.WriteLine($"kfm: {d.EngineLabel} {d.VersionDate} life={d.Stats?.Life} pal={d.Palettes.Count} moves={string.Join(" | ", d.Moves.Select(m => m.DisplayName + " " + m.Notation))}");
+        }
+    }
+
     private static void WriteSheet(string path, IEnumerable<byte[]?> pngs, int cellW, int cellH, int columns)
     {
         var images = pngs.ToList();

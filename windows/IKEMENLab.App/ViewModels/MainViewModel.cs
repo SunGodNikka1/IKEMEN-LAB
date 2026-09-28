@@ -29,7 +29,7 @@ public sealed class MainViewModel : ObservableObject
 
         Artwork = new ArtworkLoader();
         Dashboard = new DashboardViewModel(launcher, Artwork, page => Navigate(page));
-        Characters = new CharactersViewModel();
+        Characters = new CharactersViewModel(Artwork, page => Navigate(page));
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         StagesPlaceholder = new PlaceholderViewModel
         {

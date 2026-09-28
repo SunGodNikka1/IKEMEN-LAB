@@ -27,6 +27,29 @@ public class DefFileReaderTests
         }
     }
 
+    [Theory]
+    [InlineData(949, "author = 한국토끼")]
+    [InlineData(932, "author = アイスマン")]
+    [InlineData(932, "name = 草薙京")]
+    [InlineData(1252, "author = Frédéric Müller")]
+    [InlineData(1252, "author = Ça va")]
+    public void LegacyEncodingsDecodeToTheOriginalText(int codePage, string text)
+    {
+        DefFileReader.EnsureEncodingsRegistered();
+        var dir = Path.Combine(Path.GetTempPath(), "ikemenlab-tests-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var path = Path.Combine(dir, "legacy.def");
+            File.WriteAllBytes(path, Encoding.GetEncoding(codePage).GetBytes(text + "\n"));
+            Assert.Equal(text + "\n", DefFileReader.ReadFileContent(path));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
     [Fact]
     public void ReturnsNullForMissingFile()
     {
