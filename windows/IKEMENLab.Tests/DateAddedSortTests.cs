@@ -5,7 +5,7 @@ namespace IKEMENLab.Tests;
 
 public sealed class DateAddedSortTests
 {
-    private sealed record Item(string Name, DateTime? InstalledAtUtc);
+    private sealed record Item(string Name, DateTime? DateAddedUtc);
 
     private static List<Item> Sample() =>
     [
@@ -23,7 +23,7 @@ public sealed class DateAddedSortTests
     [Fact]
     public void LatestAdded_orders_descending_with_name_tiebreak()
     {
-        var ordered = DateAddedSort.Apply(Sample(), BrowserSortMode.LatestAdded, i => i.InstalledAtUtc, i => i.Name).ToList();
+        var ordered = DateAddedSort.Apply(Sample(), BrowserSortMode.LatestAdded, i => i.DateAddedUtc, i => i.Name).ToList();
         Assert.Equal(
             ["Alpha", "SameDayA", "SameDayB", "Bravo", "Charlie", "NullTwo", "Zulu"],
             Names(ordered));
@@ -32,7 +32,7 @@ public sealed class DateAddedSortTests
     [Fact]
     public void OldestAdded_orders_ascending_with_name_tiebreak()
     {
-        var ordered = DateAddedSort.Apply(Sample(), BrowserSortMode.OldestAdded, i => i.InstalledAtUtc, i => i.Name).ToList();
+        var ordered = DateAddedSort.Apply(Sample(), BrowserSortMode.OldestAdded, i => i.DateAddedUtc, i => i.Name).ToList();
         Assert.Equal(
             ["Charlie", "Bravo", "Alpha", "SameDayA", "SameDayB", "NullTwo", "Zulu"],
             Names(ordered));
@@ -49,8 +49,8 @@ public sealed class DateAddedSortTests
             new("NullSecond", null),
         };
 
-        var latest = Names(DateAddedSort.Apply(items, BrowserSortMode.LatestAdded, i => i.InstalledAtUtc, i => i.Name));
-        var oldest = Names(DateAddedSort.Apply(items, BrowserSortMode.OldestAdded, i => i.InstalledAtUtc, i => i.Name));
+        var latest = Names(DateAddedSort.Apply(items, BrowserSortMode.LatestAdded, i => i.DateAddedUtc, i => i.Name));
+        var oldest = Names(DateAddedSort.Apply(items, BrowserSortMode.OldestAdded, i => i.DateAddedUtc, i => i.Name));
 
         Assert.Equal(["New", "Old", "NullFirst", "NullSecond"], latest);
         Assert.Equal(["Old", "New", "NullFirst", "NullSecond"], oldest);
@@ -70,15 +70,15 @@ public sealed class DateAddedSortTests
             new("Mia", new DateTime(2026, 5, 1, 0, 0, 0, DateTimeKind.Utc)),
         };
 
-        Assert.Equal(["Ada", "Mia", "Zed"], Names(DateAddedSort.Apply(items, BrowserSortMode.LatestAdded, i => i.InstalledAtUtc, i => i.Name)));
-        Assert.Equal(["Ada", "Mia", "Zed"], Names(DateAddedSort.Apply(items, BrowserSortMode.OldestAdded, i => i.InstalledAtUtc, i => i.Name)));
+        Assert.Equal(["Ada", "Mia", "Zed"], Names(DateAddedSort.Apply(items, BrowserSortMode.LatestAdded, i => i.DateAddedUtc, i => i.Name)));
+        Assert.Equal(["Ada", "Mia", "Zed"], Names(DateAddedSort.Apply(items, BrowserSortMode.OldestAdded, i => i.DateAddedUtc, i => i.Name)));
     }
 
     [Fact]
     public void Default_preserves_original_ordering()
     {
         var sample = Sample();
-        var ordered = DateAddedSort.Apply(sample, BrowserSortMode.Default, i => i.InstalledAtUtc, i => i.Name).ToList();
+        var ordered = DateAddedSort.Apply(sample, BrowserSortMode.Default, i => i.DateAddedUtc, i => i.Name).ToList();
         Assert.Equal(Names(sample), Names(ordered));
     }
 
@@ -91,9 +91,9 @@ public sealed class DateAddedSortTests
         Assert.Contains(filtered, i => i.Name == "SameDayA");
         Assert.Contains(filtered, i => i.Name == "Charlie");
 
-        var latest = DateAddedSort.Apply(filtered, BrowserSortMode.LatestAdded, i => i.InstalledAtUtc, i => i.Name).ToList();
-        var oldest = DateAddedSort.Apply(filtered, BrowserSortMode.OldestAdded, i => i.InstalledAtUtc, i => i.Name).ToList();
-        var againDefault = DateAddedSort.Apply(filtered, BrowserSortMode.Default, i => i.InstalledAtUtc, i => i.Name).ToList();
+        var latest = DateAddedSort.Apply(filtered, BrowserSortMode.LatestAdded, i => i.DateAddedUtc, i => i.Name).ToList();
+        var oldest = DateAddedSort.Apply(filtered, BrowserSortMode.OldestAdded, i => i.DateAddedUtc, i => i.Name).ToList();
+        var againDefault = DateAddedSort.Apply(filtered, BrowserSortMode.Default, i => i.DateAddedUtc, i => i.Name).ToList();
 
         Assert.Equal(filtered.Count, latest.Count);
         Assert.Equal(filtered.Count, oldest.Count);
@@ -111,7 +111,7 @@ public sealed class DateAddedSortTests
         HashSet<string>? expected = null;
         foreach (var mode in modes)
         {
-            var ordered = DateAddedSort.Apply(sample, mode, i => i.InstalledAtUtc, i => i.Name).ToList();
+            var ordered = DateAddedSort.Apply(sample, mode, i => i.DateAddedUtc, i => i.Name).ToList();
             var names = ordered.Select(i => i.Name).ToHashSet(StringComparer.Ordinal);
             expected ??= names;
             Assert.Equal(expected, names);
@@ -131,25 +131,25 @@ public sealed class DateAddedSortTests
     }
 
     [Fact]
-    public void Character_and_stage_entry_sort_use_InstalledAtUtc_not_ModifiedAtUtc()
+    public void Character_and_stage_entry_sort_use_DateAddedUtc_not_ModifiedAtUtc()
     {
         var stages = new[]
         {
-            new { Name = "NewInstallOldDef", InstalledAtUtc = (DateTime?)new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc), ModifiedAtUtc = (DateTime?)new DateTime(2010, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new { Name = "OldInstallNewDef", InstalledAtUtc = (DateTime?)new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), ModifiedAtUtc = (DateTime?)new DateTime(2026, 9, 26, 0, 0, 0, DateTimeKind.Utc) },
-            new { Name = "UnknownInstall", InstalledAtUtc = (DateTime?)null, ModifiedAtUtc = (DateTime?)new DateTime(2026, 9, 27, 0, 0, 0, DateTimeKind.Utc) },
+            new { Name = "NewInstallOldDef", DateAddedUtc = (DateTime?)new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc), ModifiedAtUtc = (DateTime?)new DateTime(2010, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new { Name = "OldInstallNewDef", DateAddedUtc = (DateTime?)new DateTime(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc), ModifiedAtUtc = (DateTime?)new DateTime(2026, 9, 26, 0, 0, 0, DateTimeKind.Utc) },
+            new { Name = "UnknownInstall", DateAddedUtc = (DateTime?)null, ModifiedAtUtc = (DateTime?)new DateTime(2026, 9, 27, 0, 0, 0, DateTimeKind.Utc) },
         };
 
-        var latest = DateAddedSort.Apply(stages, BrowserSortMode.LatestAdded, s => s.InstalledAtUtc, s => s.Name)
+        var latest = DateAddedSort.Apply(stages, BrowserSortMode.LatestAdded, s => s.DateAddedUtc, s => s.Name)
             .Select(s => s.Name).ToList();
         Assert.Equal(["NewInstallOldDef", "OldInstallNewDef", "UnknownInstall"], latest);
 
         var chars = new[]
         {
-            new { DisplayName = "KFM", InstalledAtUtc = (DateTime?)new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
-            new { DisplayName = "Newer", InstalledAtUtc = (DateTime?)new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new { DisplayName = "KFM", DateAddedUtc = (DateTime?)new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc) },
+            new { DisplayName = "Newer", DateAddedUtc = (DateTime?)new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc) },
         };
-        var charLatest = DateAddedSort.Apply(chars, BrowserSortMode.LatestAdded, c => c.InstalledAtUtc, c => c.DisplayName)
+        var charLatest = DateAddedSort.Apply(chars, BrowserSortMode.LatestAdded, c => c.DateAddedUtc, c => c.DisplayName)
             .Select(c => c.DisplayName).ToList();
         Assert.Equal(["Newer", "KFM"], charLatest);
     }

@@ -1,3 +1,4 @@
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Models;
 
 namespace IKEMENLab.Core.Services;
@@ -13,34 +14,38 @@ public sealed record RecentContentItem(
     string Name,
     string Author,
     RecentContentType Type,
-    DateTime InstalledAtUtc,
+    DateTime DateAddedUtc,
     ContentStatus Status,
-    string DefPath);
+    string DefPath,
+    DateAddedSource? DateAddedSource = null)
+{
+    public bool IsEstimated => DateAddedSource == Library.DateAddedSource.LegacyEstimate;
+}
 
 /// <summary>
-/// "Recently installed" derived from the filesystem: character folders and stage DEFs ordered by
-/// creation time. Windows sets creation time when content is copied or extracted, so this tracks
-/// install time without any database or write.
+/// Dashboard "Recently Installed": the newest characters and stages by the same Date Added that the
+/// browsers sort on (<see cref="DateAddedTracker"/>), so there is one definition of "recent".
 /// </summary>
 public static class RecentContent
 {
     public static IReadOnlyList<RecentContentItem> FromSnapshot(LibrarySnapshot snapshot, int limit = 10)
     {
         var characters = snapshot.Characters
-            .Where(c => c.InstalledAtUtc is not null)
+            .Where(c => c.DateAddedUtc is not null)
             .Select(c => new RecentContentItem(
                 c.Id, c.DisplayName, c.Author, RecentContentType.Character,
-                c.InstalledAtUtc!.Value, c.Status, c.DefPath));
+                c.DateAddedUtc!.Value, c.Status, c.DefPath, c.DateAddedSource));
 
         var stages = snapshot.Stages
-            .Where(s => s.InstalledAtUtc is not null)
+            .Where(s => s.DateAddedUtc is not null)
             .Select(s => new RecentContentItem(
                 s.Id, s.Name, s.Author, RecentContentType.Stage,
-                s.InstalledAtUtc!.Value, s.Status, s.RootRelativeDefPath));
+                s.DateAddedUtc!.Value, s.Status, s.RootRelativeDefPath, s.DateAddedSource));
 
         return characters.Concat(stages)
-            .OrderByDescending(i => i.InstalledAtUtc)
+            .OrderByDescending(i => i.DateAddedUtc)
             .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(i => i.DefPath, StringComparer.OrdinalIgnoreCase)
             .Take(limit)
             .ToList();
     }

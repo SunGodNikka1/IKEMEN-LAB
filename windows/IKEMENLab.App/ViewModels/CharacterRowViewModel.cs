@@ -21,7 +21,7 @@ public sealed class CharacterRowViewModel : ObservableObject
         PathText = entry.DefPath.StartsWith("chars/", StringComparison.OrdinalIgnoreCase) ? entry.DefPath[6..] : entry.DefPath;
         var date = VersionDateFormatter.Format(entry.VersionDate);
         DateText = string.IsNullOrEmpty(date) ? "—" : date;
-        DateAddedText = IKEMENLab.Core.Services.DateAddedSort.FormatAddedLabel(entry.InstalledAtUtc);
+        DateAddedText = IKEMENLab.Core.Services.DateAddedSort.FormatAddedLabel(entry.DateAddedUtc, entry.DateAddedSource);
     }
 
     public CharacterEntry Entry { get; }
@@ -29,7 +29,7 @@ public sealed class CharacterRowViewModel : ObservableObject
     public string Author => Entry.Author;
     public string PathText { get; }
     public string DateText { get; }
-    /// <summary>"Added Sep 27, 2026" when InstalledAtUtc is known; otherwise null.</summary>
+    /// <summary>"Added Sep 27, 2026" / "Estimated added …" when Date Added is known; otherwise null.</summary>
     public string? DateAddedText { get; }
     public bool HasDateAdded => DateAddedText is not null;
     public string Initial { get; }

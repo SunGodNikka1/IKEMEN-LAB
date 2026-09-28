@@ -51,7 +51,7 @@ public class RealInstallSmokeTests(ITestOutputHelper output)
         }
         foreach (var recent in RecentContent.FromSnapshot(snapshot))
         {
-            output.WriteLine($"  recent {recent.Type} {recent.Name} {recent.InstalledAtUtc:u} {recent.Status}");
+            output.WriteLine($"  recent {recent.Type} {recent.Name} {recent.DateAddedUtc:u} {recent.Status}");
         }
 
         foreach (var (path, stamp) in watched)

@@ -31,10 +31,6 @@ public sealed class CharacterIndexer
                     entry = TryNestedFallback(rootPath, charsRoot, topFolder);
                 }
 
-                if (entry is not null)
-                {
-                    entry = entry with { InstalledAtUtc = SafeCreationTime(topFolder) };
-                }
 
                 if (entry is null)
                 {
@@ -143,13 +139,6 @@ public sealed class CharacterIndexer
             Nested = nested,
             ModifiedAtUtc = SafeLastWrite(defPath)
         };
-    }
-
-    private static DateTime? SafeCreationTime(string directory)
-    {
-        try { return Directory.GetCreationTimeUtc(directory); }
-        catch (IOException) { return null; }
-        catch (UnauthorizedAccessException) { return null; }
     }
 
     private static DateTime? SafeLastWrite(string file)

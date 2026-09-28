@@ -191,8 +191,9 @@ public sealed class CharactersViewModel : ObservableObject
         var ordered = DateAddedSort.Apply(
             filtered,
             SortMode,
-            row => row.Entry.InstalledAtUtc,
-            row => row.DisplayName);
+            row => row.Entry.DateAddedUtc,
+            row => row.DisplayName,
+            row => row.Entry.DefPath);
 
         Characters.Clear();
         foreach (var row in ordered) Characters.Add(row);

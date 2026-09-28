@@ -1,3 +1,5 @@
+using IKEMENLab.Core.Library;
+
 namespace IKEMENLab.Core.Models;
 
 public sealed record CharacterEntry
@@ -15,8 +17,11 @@ public sealed record CharacterEntry
     /// <summary>select.def registration (Unregistered until a select.def index is applied).</summary>
     public ContentStatus Status { get; init; } = ContentStatus.Unregistered;
 
-    /// <summary>Creation time of the top-level folder under chars/ (≈ install time on Windows).</summary>
-    public DateTime? InstalledAtUtc { get; init; }
+    /// <summary>When this character was added to the installation (see <see cref="DateAddedTracker"/>).</summary>
+    public DateTime? DateAddedUtc { get; init; }
+
+    /// <summary>How <see cref="DateAddedUtc"/> was established (exact install, first seen, legacy estimate).</summary>
+    public DateAddedSource? DateAddedSource { get; init; }
 
     /// <summary>Last write time of the character DEF.</summary>
     public DateTime? ModifiedAtUtc { get; init; }

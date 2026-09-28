@@ -24,7 +24,8 @@ public sealed class MainViewModel : ObservableObject
         ISettingsStore settingsStore,
         LibraryIndexService indexService,
         GameLauncher launcher,
-        Services.FolderPicker folderPicker)
+        Services.FolderPicker folderPicker,
+        IKEMENLab.Core.Library.DateAddedTracker? dateAdded = null)
     {
         _settingsStore = settingsStore;
         _indexService = indexService;
@@ -33,11 +34,14 @@ public sealed class MainViewModel : ObservableObject
         var refresh = async () => await RefreshAsync(null);
         var roster = new RosterActivationService();
         var collectionActivation = new CollectionActivationService();
+        var installer = new IKEMENLab.Core.Install.ContentInstallService(dateAdded: dateAdded);
         Dashboard = new DashboardViewModel(
             launcher,
             Artwork,
             page => Navigate(page),
-            refresh);
+            refresh,
+            installer: installer,
+            fullgame: new IKEMENLab.Core.Install.FullgameImporter(installer: installer, dateAdded: dateAdded));
         Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster);
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page), refresh, roster);

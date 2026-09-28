@@ -1,3 +1,5 @@
+using IKEMENLab.Core.Library;
+
 namespace IKEMENLab.Core.Models;
 
 public sealed record StageEntry
@@ -12,8 +14,11 @@ public sealed record StageEntry
     /// <summary>select.def [ExtraStages] registration.</summary>
     public ContentStatus Status { get; init; } = ContentStatus.Unregistered;
 
-    /// <summary>Creation time of the stage DEF (≈ install time on Windows).</summary>
-    public DateTime? InstalledAtUtc { get; init; }
+    /// <summary>When this stage was added to the installation (see <see cref="DateAddedTracker"/>).</summary>
+    public DateTime? DateAddedUtc { get; init; }
+
+    /// <summary>How <see cref="DateAddedUtc"/> was established (exact install, first seen, legacy estimate).</summary>
+    public DateAddedSource? DateAddedSource { get; init; }
 
     /// <summary>Last write time of the stage DEF.</summary>
     public DateTime? ModifiedAtUtc { get; init; }

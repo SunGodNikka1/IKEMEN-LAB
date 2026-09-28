@@ -1,19 +1,21 @@
+using IKEMENLab.Core.Library;
+
 namespace IKEMENLab.Core.Services;
 
-/// <summary>Browser sort modes for Characters / Stages (InstalledAtUtc = approximate date added).</summary>
+/// <summary>Browser sort modes for Characters / Stages, ordered by <see cref="DateAddedTracker"/> dates.</summary>
 public enum BrowserSortMode
 {
     /// <summary>Preserve indexer / snapshot order.</summary>
     Default = 0,
-    /// <summary>InstalledAtUtc descending; nulls last; name ascending tie-break.</summary>
+    /// <summary>DateAddedUtc descending; nulls last; name ascending tie-break.</summary>
     LatestAdded = 1,
-    /// <summary>InstalledAtUtc ascending; nulls last; name ascending tie-break.</summary>
+    /// <summary>DateAddedUtc ascending; nulls last; name ascending tie-break.</summary>
     OldestAdded = 2
 }
 
 public sealed record BrowserSortOption(BrowserSortMode Mode, string Label);
 
-/// <summary>Shared InstalledAtUtc ordering for character and stage browsers.</summary>
+/// <summary>Shared Date Added ordering for the character and stage browsers.</summary>
 public static class DateAddedSort
 {
     public static IReadOnlyList<BrowserSortOption> Options { get; } =
@@ -32,7 +34,8 @@ public static class DateAddedSort
         IEnumerable<T> items,
         BrowserSortMode mode,
         Func<T, DateTime?> installedAtUtc,
-        Func<T, string> displayName)
+        Func<T, string> displayName,
+        Func<T, string>? identity = null)
     {
         ArgumentNullException.ThrowIfNull(items);
         ArgumentNullException.ThrowIfNull(installedAtUtc);
@@ -47,20 +50,26 @@ public static class DateAddedSort
             BrowserSortMode.LatestAdded => material
                 .OrderBy(i => installedAtUtc(i) is null ? 1 : 0)
                 .ThenByDescending(i => installedAtUtc(i) ?? DateTime.MinValue)
-                .ThenBy(i => displayName(i) ?? string.Empty, StringComparer.OrdinalIgnoreCase),
+                .ThenBy(i => displayName(i) ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(i => identity?.Invoke(i) ?? string.Empty, StringComparer.OrdinalIgnoreCase),
             BrowserSortMode.OldestAdded => material
                 .OrderBy(i => installedAtUtc(i) is null ? 1 : 0)
                 .ThenBy(i => installedAtUtc(i) ?? DateTime.MaxValue)
-                .ThenBy(i => displayName(i) ?? string.Empty, StringComparer.OrdinalIgnoreCase),
+                .ThenBy(i => displayName(i) ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(i => identity?.Invoke(i) ?? string.Empty, StringComparer.OrdinalIgnoreCase),
             _ => material
         };
     }
 
-    /// <summary>Formats "Added Sep 27, 2026" in local time; null when timestamp missing.</summary>
-    public static string? FormatAddedLabel(DateTime? installedAtUtc)
+    /// <summary>
+    /// "Added Sep 27, 2026" in local time, or "Estimated added Sep 20, 2026" for content that predates
+    /// tracking (its exact add time is unknowable). Null when no date is known.
+    /// </summary>
+    public static string? FormatAddedLabel(DateTime? installedAtUtc, DateAddedSource? source = null)
     {
         if (installedAtUtc is not { } utc) return null;
         var local = utc.ToLocalTime();
-        return "Added " + local.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        var date = local.ToString("MMM d, yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        return source == DateAddedSource.LegacyEstimate ? "Estimated added " + date : "Added " + date;
     }
 }

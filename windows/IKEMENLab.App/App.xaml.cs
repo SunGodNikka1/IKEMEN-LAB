@@ -8,6 +8,7 @@ using IKEMENLab.App.Services;
 using IKEMENLab.App.ViewModels;
 using IKEMENLab.App.Views;
 using IKEMENLab.Core.Install;
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Parsing;
 using IKEMENLab.Core.Services;
 using IKEMENLab.Core.Settings;
@@ -24,10 +25,12 @@ public partial class App : Application
         AppDataPaths.EnsureAppDataDirectory();
 
         var settingsStore = new JsonSettingsStore();
-        var indexService = new LibraryIndexService();
+        // One Date Added authority shared by the index (browsers + Dashboard) and the installers.
+        var dateAdded = new DateAddedTracker(DateAddedStore.CreateDefault());
+        var indexService = new LibraryIndexService(dateAdded);
         var launcher = new GameLauncher();
         var folderPicker = new FolderPicker();
-        var mainVm = new MainViewModel(settingsStore, indexService, launcher, folderPicker);
+        var mainVm = new MainViewModel(settingsStore, indexService, launcher, folderPicker, dateAdded);
         var options = QaOptions.Parse(e.Args);
 
         if (options.Page is { } page) mainVm.SelectedNav = page;

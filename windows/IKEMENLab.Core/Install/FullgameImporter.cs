@@ -125,10 +125,11 @@ public sealed class FullgameImporter
         IContentInstallService? installer = null,
         ISafeMutationService? mutations = null,
         CollectionStore? collections = null,
-        string? stagingRoot = null)
+        string? stagingRoot = null,
+        IKEMENLab.Core.Library.DateAddedTracker? dateAdded = null)
     {
         _mutations = mutations ?? new SafeMutationService();
-        _installer = installer ?? new ContentInstallService(_mutations);
+        _installer = installer ?? new ContentInstallService(_mutations, dateAdded);
         _collections = collections ?? new CollectionStore();
         _stagingRoot = stagingRoot ?? Path.Combine(AppDataPaths.GetAppDataDirectory(), "fullgame-staging");
         Directory.CreateDirectory(_stagingRoot);

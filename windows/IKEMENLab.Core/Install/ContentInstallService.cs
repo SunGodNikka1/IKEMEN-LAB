@@ -1,3 +1,4 @@
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Mutations;
 using IKEMENLab.Core.Settings;
 
@@ -17,10 +18,16 @@ public interface IContentInstallService
 public sealed class ContentInstallService : IContentInstallService
 {
     private readonly ISafeMutationService _mutations;
+    private readonly DateAddedTracker _dateAdded;
 
-    public ContentInstallService(ISafeMutationService? mutations = null)
+    /// <param name="dateAdded">
+    /// Records the exact Date Added of successful installs. Omit only for tests/tools; the app passes
+    /// the same tracker the library index uses.
+    /// </param>
+    public ContentInstallService(ISafeMutationService? mutations = null, DateAddedTracker? dateAdded = null)
     {
         _mutations = mutations ?? new SafeMutationService();
+        _dateAdded = dateAdded ?? DateAddedTracker.EstimateOnly;
     }
 
     public InspectBatchResult Inspect(IEnumerable<string> inputs, string ikemenRoot, string? stagingRoot = null)
@@ -248,17 +255,33 @@ public sealed class ContentInstallService : IContentInstallService
                     continue;
                 }
 
-                if (item.Package.Kind == InstallContentKind.Stage &&
+                var flatStage = item.Package.Kind == InstallContentKind.Stage &&
                     string.Equals(
                         Path.GetFullPath(item.TargetDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
                         Path.GetFullPath(Path.Combine(root, "stages")).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                        StringComparison.OrdinalIgnoreCase))
+                        StringComparison.OrdinalIgnoreCase);
+
+                // A replacement recreates the folder/files; make sure the existing item has a Date Added
+                // record first so the update keeps its original date.
+                if (!dryRun && item.Decision == InstallItemDecision.Replace)
                 {
-                    ExecuteFlatStage(item, root, dryRun);
-                    continue;
+                    _dateAdded.EnsureRecorded(root, DateAddedIdentities(item, root, flatStage));
                 }
 
-                ExecuteDirectoryPackage(item, root, dryRun);
+                if (flatStage)
+                {
+                    ExecuteFlatStage(item, root, dryRun);
+                }
+                else
+                {
+                    ExecuteDirectoryPackage(item, root, dryRun);
+                }
+
+                // Only a completed install establishes a Date Added (never failed/skipped/dry-run items).
+                if (!dryRun && item.Outcome == InstallItemOutcome.Installed)
+                {
+                    _dateAdded.RecordInstalled(root, DateAddedIdentities(item, root, flatStage));
+                }
             }
             catch (Exception ex)
             {
@@ -419,6 +442,35 @@ public sealed class ContentInstallService : IContentInstallService
         {
             try { _mutations.Rollback(id); }
             catch { /* best effort */ }
+        }
+    }
+
+    /// <summary>Library identities an install item creates or updates (none for screenpacks).</summary>
+    private static IEnumerable<string> DateAddedIdentities(InstallPlanItem item, string root, bool flatStage)
+    {
+        switch (item.Package.Kind)
+        {
+            case InstallContentKind.Character:
+                return [ContentIdentity.ForCharacterFolder(Path.GetFileName(
+                    item.TargetDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)))];
+
+            case InstallContentKind.Stage when flatStage:
+                return Directory.EnumerateFiles(item.Package.PackageRoot, "*.def")
+                    .Where(f => !IsIgnoredFile(f))
+                    .Select(f => ContentIdentity.ForStageDef(Path.GetFileName(f)))
+                    .ToList();
+
+            case InstallContentKind.Stage:
+            {
+                var folder = Path.GetFileName(item.TargetDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+                var source = Directory.Exists(item.TargetDirectory) ? item.TargetDirectory : item.Package.PackageRoot;
+                return Directory.EnumerateFiles(source, "*.def")
+                    .Select(f => ContentIdentity.ForStageDef(folder + "/" + Path.GetFileName(f)))
+                    .ToList();
+            }
+
+            default:
+                return [];
         }
     }
 

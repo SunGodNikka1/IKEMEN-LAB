@@ -23,7 +23,7 @@ public sealed class StageRowViewModel : ObservableObject
         Entry = entry;
         AgeText = entry.ModifiedAtUtc is { } modified ? RecentContent.FormatRelativeAge(modified, nowUtc) : "—";
         AgeToolTip = entry.ModifiedAtUtc is { } m ? "DEF modified " + m.ToLocalTime().ToString("g") : "Modification date unavailable";
-        DateAddedText = DateAddedSort.FormatAddedLabel(entry.InstalledAtUtc);
+        DateAddedText = DateAddedSort.FormatAddedLabel(entry.DateAddedUtc, entry.DateAddedSource);
     }
 
     public StageEntry Entry { get; }
@@ -32,7 +32,7 @@ public sealed class StageRowViewModel : ObservableObject
     public string PathText => Entry.RootRelativeDefPath;
     public string AgeText { get; }
     public string AgeToolTip { get; }
-    /// <summary>"Added Sep 27, 2026" when InstalledAtUtc is known; otherwise null.</summary>
+    /// <summary>"Added Sep 27, 2026" / "Estimated added …" when Date Added is known; otherwise null.</summary>
     public string? DateAddedText { get; }
     public bool HasDateAdded => DateAddedText is not null;
     public bool HasBgm => Entry.HasBgm;
@@ -280,8 +280,9 @@ public sealed class StagesViewModel : ObservableObject
         var ordered = DateAddedSort.Apply(
             filtered,
             SortMode,
-            row => row.Entry.InstalledAtUtc,
-            row => row.Name);
+            row => row.Entry.DateAddedUtc,
+            row => row.Name,
+            row => row.Entry.DefPath);
 
         Stages.Clear();
         foreach (var row in ordered) Stages.Add(row);

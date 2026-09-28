@@ -94,7 +94,6 @@ public sealed class StageIndexer
             Name = StageNameExtractor.Extract(defPath),
             Author = string.IsNullOrWhiteSpace(parsed?.Author) ? "Unknown" : parsed!.Author!,
             DefPath = relative,
-            InstalledAtUtc = SafeTime(() => File.GetCreationTimeUtc(defPath)),
             ModifiedAtUtc = SafeTime(() => File.GetLastWriteTimeUtc(defPath)),
             BgmReference = bgm,
             BgmFound = bgm is not null && ResolveBgm(Path.GetDirectoryName(stagesRoot)!, defPath, bgm),

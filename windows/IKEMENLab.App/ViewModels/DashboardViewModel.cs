@@ -755,7 +755,8 @@ public sealed class RecentItemViewModel : ObservableObject
     public RecentItemViewModel(RecentContentItem item, DateTime nowLocal)
     {
         Item = item;
-        DateText = RecentContent.FormatInstallDate(item.InstalledAtUtc, nowLocal);
+        var date = RecentContent.FormatInstallDate(item.DateAddedUtc, nowLocal);
+        DateText = item.IsEstimated ? "Est. " + date : date;
         Initial = string.IsNullOrEmpty(item.Name) ? "?" : item.Name[..1].ToUpperInvariant();
     }
 
@@ -782,7 +783,12 @@ public sealed class RecentItemViewModel : ObservableObject
         _ => "Not listed in select.def (read-only view)"
     };
 
-    public string ToolTip => $"{Item.DefPath}\nInstalled {Item.InstalledAtUtc.ToLocalTime():g}";
+    public string ToolTip => Item.DateAddedSource switch
+    {
+        IKEMENLab.Core.Library.DateAddedSource.Installed => $"{Item.DefPath}\nInstalled by IKEMEN Lab {Item.DateAddedUtc.ToLocalTime():g}",
+        IKEMENLab.Core.Library.DateAddedSource.FirstSeen => $"{Item.DefPath}\nAdded {Item.DateAddedUtc.ToLocalTime():g} (first detected by IKEMEN Lab)",
+        _ => $"{Item.DefPath}\nEstimated added {Item.DateAddedUtc.ToLocalTime():g} (present before IKEMEN Lab tracked this installation)"
+    };
 }
 
 public sealed class HealthGroupViewModel
