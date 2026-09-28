@@ -12,8 +12,20 @@ public static class AppDataPaths
 
     public static string GetSettingsPath() => Path.Combine(GetAppDataDirectory(), "settings.json");
 
+    public static string GetBackupsDirectory() => Path.Combine(GetAppDataDirectory(), "backups");
+
+    public static string GetMutationOperationsDirectory() =>
+        Path.Combine(GetAppDataDirectory(), "mutations");
+
     public static void EnsureAppDataDirectory()
     {
         Directory.CreateDirectory(GetAppDataDirectory());
+    }
+
+    public static void EnsureBackupInfrastructure()
+    {
+        EnsureAppDataDirectory();
+        Directory.CreateDirectory(GetBackupsDirectory());
+        Directory.CreateDirectory(GetMutationOperationsDirectory());
     }
 }
