@@ -7,6 +7,7 @@ using System.Windows.Media;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Services;
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.SelectDef;
 using IKEMENLab.Core.Services;
 
 namespace IKEMENLab.App.ViewModels;
@@ -14,6 +15,8 @@ namespace IKEMENLab.App.ViewModels;
 public sealed class StageRowViewModel : ObservableObject
 {
     private ImageSource? _preview;
+    private bool _canToggleStatus;
+    private bool _isToggling;
 
     public StageRowViewModel(StageEntry entry, DateTime nowUtc)
     {
@@ -39,6 +42,31 @@ public sealed class StageRowViewModel : ObservableObject
     public bool IsActive => Entry.Status == ContentStatus.Active;
     public bool IsDisabled => Entry.Status == ContentStatus.Disabled;
     public bool IsUnregistered => Entry.Status == ContentStatus.Unregistered;
+    public ContentStatus Status => Entry.Status;
+
+    public bool CanToggleStatus
+    {
+        get => _canToggleStatus && !_isToggling;
+        set
+        {
+            if (SetProperty(ref _canToggleStatus, value))
+                OnPropertyChanged(nameof(StatusToolTip));
+        }
+    }
+
+    public bool IsToggling
+    {
+        get => _isToggling;
+        set
+        {
+            if (SetProperty(ref _isToggling, value))
+            {
+                OnPropertyChanged(nameof(CanToggleStatus));
+                OnPropertyChanged(nameof(StatusToolTip));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
 
     /// <summary>macOS: preview 0.6 active, 0.4 disabled, 0.3 unregistered.</summary>
     public double PreviewOpacity => Entry.Status switch
@@ -48,12 +76,29 @@ public sealed class StageRowViewModel : ObservableObject
         _ => 0.3
     };
 
-    public string StatusToolTip => Entry.Status switch
+    public string StatusToolTip
     {
-        ContentStatus.Active => "Enabled in select.def [ExtraStages] (read-only view)",
-        ContentStatus.Disabled => "Commented out in select.def (read-only view)",
-        _ => "Not in select.def — won't appear in game"
-    };
+        get
+        {
+            if (IsToggling) return "Updating select.def…";
+            if (!CanToggleStatus)
+            {
+                return Entry.Status switch
+                {
+                    ContentStatus.Active => "Enabled in select.def (roster toggle unavailable)",
+                    ContentStatus.Disabled => "Commented out in select.def (roster toggle unavailable)",
+                    _ => "Not in select.def (roster toggle unavailable)"
+                };
+            }
+
+            return Entry.Status switch
+            {
+                ContentStatus.Active => "Enabled — click to disable in select.def",
+                ContentStatus.Disabled => "Disabled — click to re-enable in select.def",
+                _ => "Unregistered — click to add to select.def"
+            };
+        }
+    }
 
     public string SizeText => Entry.BoundLeft is { } l && Entry.BoundRight is { } r
         ? (r - l) switch
@@ -77,29 +122,42 @@ public sealed class StageRowViewModel : ObservableObject
            (q.Equals("bgm", StringComparison.OrdinalIgnoreCase) && HasBgm);
 }
 
-/// <summary>Stage browser: search, Grid/List, SFF previews, BGM badges, select.def status (read-only).</summary>
+/// <summary>Stage browser: search, Grid/List, SFF previews, BGM badges, roster toggles.</summary>
 public sealed class StagesViewModel : ObservableObject
 {
     private readonly ArtworkLoader _artwork;
+    private readonly IRosterActivationService _roster;
+    private readonly Func<Task> _refreshLibrary;
     private readonly List<StageRowViewModel> _all = [];
     private string _searchText = string.Empty;
     private BrowserViewMode _viewMode = BrowserViewMode.List;
     private StageRowViewModel? _selected;
     private string? _root;
+    private bool _rosterAvailable;
     private CancellationTokenSource? _loads;
 
-    public StagesViewModel(ArtworkLoader artwork, Action<NavPage> navigate)
+    public StagesViewModel(
+        ArtworkLoader artwork,
+        Action<NavPage> navigate,
+        Func<Task> refreshLibrary,
+        IRosterActivationService? roster = null)
     {
         _artwork = artwork;
+        _refreshLibrary = refreshLibrary;
+        _roster = roster ?? new RosterActivationService();
         GoHomeCommand = new RelayCommand(() => navigate(NavPage.Dashboard));
         OpenFolderCommand = new RelayCommand(p => OpenFolder(p as StageRowViewModel ?? Selected));
         CopyPathCommand = new RelayCommand(p => CopyPath(p as StageRowViewModel ?? Selected));
+        ToggleStatusCommand = new AsyncRelayCommand(
+            p => ToggleStatusAsync(p as StageRowViewModel),
+            p => p is StageRowViewModel row && row.CanToggleStatus);
     }
 
     public ObservableCollection<StageRowViewModel> Stages { get; } = [];
     public ICommand GoHomeCommand { get; }
     public ICommand OpenFolderCommand { get; }
     public ICommand CopyPathCommand { get; }
+    public ICommand ToggleStatusCommand { get; }
 
     public string SearchText
     {
@@ -142,15 +200,53 @@ public sealed class StagesViewModel : ObservableObject
         _all.Clear();
         Stages.Clear();
         _root = snapshot?.Installation.RootPath;
+        _rosterAvailable = snapshot is { Installation.CanBrowse: true, SelectDef.IsAvailable: true };
         var now = DateTime.UtcNow;
         if (snapshot is not null)
         {
-            foreach (var stage in snapshot.Stages) _all.Add(new StageRowViewModel(stage, now));
+            foreach (var stage in snapshot.Stages)
+            {
+                _all.Add(new StageRowViewModel(stage, now) { CanToggleStatus = _rosterAvailable });
+            }
         }
 
         ApplyFilter();
         OnPropertyChanged(nameof(HasNoStages));
         if (snapshot is { Installation.CanBrowse: true }) _ = LoadPreviewsAsync(_all.ToList(), _loads.Token);
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private async Task ToggleStatusAsync(StageRowViewModel? row)
+    {
+        if (row is null || _root is null || !row.CanToggleStatus) return;
+
+        var enable = row.Status != ContentStatus.Active;
+        row.IsToggling = true;
+        try
+        {
+            var root = _root;
+            var defPath = row.Entry.RootRelativeDefPath;
+            var result = await Task.Run(() => _roster.SetStageEnabled(root, defPath, enable));
+            if (!result.Success)
+            {
+                MessageBox.Show(
+                    result.Error ?? "Could not update select.def.",
+                    "Roster",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            await _refreshLibrary();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Roster", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            row.IsToggling = false;
+        }
     }
 
     private void ApplyFilter()

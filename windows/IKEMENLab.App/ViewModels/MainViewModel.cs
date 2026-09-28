@@ -3,6 +3,7 @@ using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Services;
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.SelectDef;
 using IKEMENLab.Core.Services;
 using IKEMENLab.Core.Settings;
 
@@ -28,14 +29,16 @@ public sealed class MainViewModel : ObservableObject
         _indexService = indexService;
 
         Artwork = new ArtworkLoader();
+        var refresh = async () => await RefreshAsync(null);
+        var roster = new RosterActivationService();
         Dashboard = new DashboardViewModel(
             launcher,
             Artwork,
             page => Navigate(page),
-            async () => await RefreshAsync(null));
-        Characters = new CharactersViewModel(Artwork, page => Navigate(page));
+            refresh);
+        Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster);
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
-        Stages = new StagesViewModel(Artwork, page => Navigate(page));
+        Stages = new StagesViewModel(Artwork, page => Navigate(page), refresh, roster);
         Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page));
         Collections = new CollectionsViewModel(Artwork);
 

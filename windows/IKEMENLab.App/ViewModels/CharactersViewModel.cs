@@ -7,6 +7,7 @@ using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Services;
 using IKEMENLab.Core.Characters;
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.SelectDef;
 
 namespace IKEMENLab.App.ViewModels;
 
@@ -16,27 +17,39 @@ public enum BrowserViewMode
     List
 }
 
-/// <summary>Character browser: search, Grid/List, portraits, feature badges and the read-only inspector.</summary>
+/// <summary>Character browser: search, Grid/List, portraits, feature badges and roster toggles.</summary>
 public sealed class CharactersViewModel : ObservableObject
 {
     private readonly ArtworkLoader _artwork;
     private readonly Action<NavPage> _navigate;
+    private readonly IRosterActivationService _roster;
+    private readonly Func<Task> _refreshLibrary;
     private readonly List<CharacterRowViewModel> _all = [];
     private string _searchText = string.Empty;
     private BrowserViewMode _viewMode = BrowserViewMode.List;
     private CharacterRowViewModel? _selected;
     private CharacterInspectorViewModel? _inspector;
     private string? _root;
+    private bool _rosterAvailable;
     private CancellationTokenSource? _scan;
 
-    public CharactersViewModel(ArtworkLoader artwork, Action<NavPage> navigate)
+    public CharactersViewModel(
+        ArtworkLoader artwork,
+        Action<NavPage> navigate,
+        Func<Task> refreshLibrary,
+        IRosterActivationService? roster = null)
     {
         _artwork = artwork;
         _navigate = navigate;
+        _refreshLibrary = refreshLibrary;
+        _roster = roster ?? new RosterActivationService();
         GoHomeCommand = new RelayCommand(() => _navigate(NavPage.Dashboard));
         OpenFolderCommand = new RelayCommand(p => OpenFolder(p as CharacterRowViewModel ?? Selected));
         CopyPathCommand = new RelayCommand(p => CopyPath(p as CharacterRowViewModel ?? Selected));
         ClearSearchCommand = new RelayCommand(() => SearchText = string.Empty);
+        ToggleStatusCommand = new AsyncRelayCommand(
+            p => ToggleStatusAsync(p as CharacterRowViewModel),
+            p => p is CharacterRowViewModel row && row.CanToggleStatus);
     }
 
     public ObservableCollection<CharacterRowViewModel> Characters { get; } = [];
@@ -45,6 +58,7 @@ public sealed class CharactersViewModel : ObservableObject
     public ICommand OpenFolderCommand { get; }
     public ICommand CopyPathCommand { get; }
     public ICommand ClearSearchCommand { get; }
+    public ICommand ToggleStatusCommand { get; }
 
     public string SearchText
     {
@@ -99,12 +113,13 @@ public sealed class CharactersViewModel : ObservableObject
         Characters.Clear();
         Selected = null;
         _root = snapshot?.Installation.RootPath;
+        _rosterAvailable = snapshot is { Installation.CanBrowse: true, SelectDef.IsAvailable: true };
 
         if (snapshot is not null)
         {
             foreach (var entry in snapshot.Characters)
             {
-                _all.Add(new CharacterRowViewModel(entry));
+                _all.Add(new CharacterRowViewModel(entry) { CanToggleStatus = _rosterAvailable });
             }
         }
 
@@ -118,6 +133,40 @@ public sealed class CharactersViewModel : ObservableObject
         }
 
         Selected = Characters.FirstOrDefault();
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private async Task ToggleStatusAsync(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null || !row.CanToggleStatus) return;
+
+        var enable = row.Status != ContentStatus.Active;
+        row.IsToggling = true;
+        try
+        {
+            var root = _root;
+            var defPath = row.Entry.DefPath;
+            var result = await Task.Run(() => _roster.SetCharacterEnabled(root, defPath, enable));
+            if (!result.Success)
+            {
+                MessageBox.Show(
+                    result.Error ?? "Could not update select.def.",
+                    "Roster",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            await _refreshLibrary();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Roster", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        finally
+        {
+            row.IsToggling = false;
+        }
     }
 
     private void ApplyFilter()
@@ -194,7 +243,6 @@ public sealed class CharactersViewModel : ObservableObject
         if (row is null || _root is null) return;
         var def = Path.GetFullPath(Path.Combine(_root, row.Entry.DefPath));
         if (!File.Exists(def)) return;
-        // Explorer only reveals the file; nothing is modified.
         Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{def}\"") { UseShellExecute = true });
     }
 
@@ -207,7 +255,6 @@ public sealed class CharactersViewModel : ObservableObject
         }
         catch (System.Runtime.InteropServices.ExternalException)
         {
-            // Clipboard busy; ignore.
         }
     }
 }

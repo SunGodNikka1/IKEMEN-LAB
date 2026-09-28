@@ -351,6 +351,12 @@
         </Setter>
     </Style>
 
+    <!-- Interactive roster switch (Characters / Stages). Dashboard keeps the read-only StatusToggle. -->
+    <Style x:Key="InteractiveStatusToggle" TargetType="CheckBox" BasedOn="{StaticResource ToggleSwitch}">
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True"/>
+    </Style>
+
     <!-- Read-only status switch: looks like the Mac row toggle but cannot be flipped.
          Wrap it in an element that carries the explanatory tooltip. -->
     <Style x:Key="StatusToggle" TargetType="CheckBox" BasedOn="{StaticResource ToggleSwitch}">

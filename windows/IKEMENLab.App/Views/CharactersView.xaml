@@ -84,8 +84,13 @@
                                    FontFamily="{StaticResource CaptionFont}" Foreground="{DynamicResource TextTertiary}"/>
 
                         <Border Grid.Column="5" Background="Transparent" ToolTip="{Binding StatusToolTip}"
-                                HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <CheckBox Style="{StaticResource StatusToggle}" IsChecked="{Binding IsActive, Mode=OneWay}"/>
+                                HorizontalAlignment="Left" VerticalAlignment="Center"
+                                ToolTipService.ShowOnDisabled="True">
+                            <CheckBox Style="{StaticResource InteractiveStatusToggle}"
+                                      IsChecked="{Binding IsActive, Mode=OneWay}"
+                                      IsEnabled="{Binding CanToggleStatus}"
+                                      Command="{Binding DataContext.ToggleStatusCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                      CommandParameter="{Binding}"/>
                         </Border>
 
                         <Button Grid.Column="6" Style="{StaticResource GhostIconButton}" Content="{StaticResource Glyph.More}"

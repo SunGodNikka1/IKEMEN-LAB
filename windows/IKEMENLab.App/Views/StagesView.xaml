@@ -124,8 +124,12 @@
 
                         <Border Grid.Column="4" Background="Transparent" ToolTip="{Binding StatusToolTip}"
                                 HorizontalAlignment="Left" VerticalAlignment="Center"
-                                Visibility="{Binding IsUnregistered, Converter={StaticResource BoolToVis}, ConverterParameter=invert}">
-                            <CheckBox Style="{StaticResource StatusToggle}" IsChecked="{Binding IsActive, Mode=OneWay}"/>
+                                ToolTipService.ShowOnDisabled="True">
+                            <CheckBox Style="{StaticResource InteractiveStatusToggle}"
+                                      IsChecked="{Binding IsActive, Mode=OneWay}"
+                                      IsEnabled="{Binding CanToggleStatus}"
+                                      Command="{Binding DataContext.ToggleStatusCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                      CommandParameter="{Binding}"/>
                         </Border>
 
                         <Button Grid.Column="5" Style="{StaticResource GhostIconButton}" Content="{StaticResource Glyph.More}"

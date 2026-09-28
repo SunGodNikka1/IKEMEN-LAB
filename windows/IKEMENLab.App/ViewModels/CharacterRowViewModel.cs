@@ -1,3 +1,4 @@
+using System.Windows.Input;
 using System.Windows.Media;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.Core.Characters;
@@ -10,6 +11,8 @@ public sealed class CharacterRowViewModel : ObservableObject
 {
     private ImageSource? _thumbnail;
     private string _featuresText = string.Empty;
+    private bool _canToggleStatus;
+    private bool _isToggling;
 
     public CharacterRowViewModel(CharacterEntry entry)
     {
@@ -31,6 +34,30 @@ public sealed class CharacterRowViewModel : ObservableObject
     public bool IsDisabled => Entry.Status == ContentStatus.Disabled;
     public bool IsUnregistered => Entry.Status == ContentStatus.Unregistered;
 
+    public bool CanToggleStatus
+    {
+        get => _canToggleStatus && !_isToggling;
+        set
+        {
+            if (SetProperty(ref _canToggleStatus, value))
+                OnPropertyChanged(nameof(StatusToolTip));
+        }
+    }
+
+    public bool IsToggling
+    {
+        get => _isToggling;
+        set
+        {
+            if (SetProperty(ref _isToggling, value))
+            {
+                OnPropertyChanged(nameof(CanToggleStatus));
+                OnPropertyChanged(nameof(StatusToolTip));
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+    }
+
     /// <summary>macOS row dimming: active 1.0, disabled 0.7, unregistered 0.6.</summary>
     public double RowOpacity => Entry.Status switch
     {
@@ -39,12 +66,29 @@ public sealed class CharacterRowViewModel : ObservableObject
         _ => 0.6
     };
 
-    public string StatusToolTip => Entry.Status switch
+    public string StatusToolTip
     {
-        ContentStatus.Active => "Enabled in select.def (read-only view)",
-        ContentStatus.Disabled => "Commented out in select.def (read-only view)",
-        _ => "Not listed in select.def (read-only view)"
-    };
+        get
+        {
+            if (IsToggling) return "Updating select.def…";
+            if (!CanToggleStatus)
+            {
+                return Entry.Status switch
+                {
+                    ContentStatus.Active => "Enabled in select.def (roster toggle unavailable)",
+                    ContentStatus.Disabled => "Commented out in select.def (roster toggle unavailable)",
+                    _ => "Not listed in select.def (roster toggle unavailable)"
+                };
+            }
+
+            return Entry.Status switch
+            {
+                ContentStatus.Active => "Enabled — click to disable in select.def",
+                ContentStatus.Disabled => "Disabled — click to re-enable in select.def",
+                _ => "Unregistered — click to add to select.def"
+            };
+        }
+    }
 
     public ImageSource? Thumbnail
     {
