@@ -1,4 +1,5 @@
 using IKEMENLab.Core.Collections;
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Mutations;
 using IKEMENLab.Core.Parsing;
 using IKEMENLab.Core.Settings;
@@ -156,7 +157,7 @@ public sealed class FullgameImporter
             {
                 var name = Path.GetFileName(dir);
                 if (IsJunk(name)) continue;
-                var def = FindCharacterDef(dir);
+                var def = FindCharacterDef(dir, name);
                 if (def is null) continue;
                 var collision = ikemenRootForCollision is null
                     ? FullgameItemCollision.New
@@ -374,9 +375,7 @@ public sealed class FullgameImporter
                     var entries = result.CharactersInstalled.Select(name =>
                     {
                         var folder = Path.Combine(root, "chars", name);
-                        var def = Directory.Exists(folder)
-                            ? Directory.EnumerateFiles(folder, "*.def").FirstOrDefault()
-                            : null;
+                        var def = Directory.Exists(folder) ? FindCharacterDef(folder, name) : null;
                         var rel = def is null
                             ? $"chars/{name}/{name}.def"
                             : Path.GetRelativePath(root, def).Replace('\\', '/');
@@ -556,16 +555,12 @@ public sealed class FullgameImporter
         return action;
     }
 
-    private static string? FindCharacterDef(string folder)
-    {
-        foreach (var def in Directory.EnumerateFiles(folder, "*.def"))
-        {
-            if (DefContentClassifier.IsValidCharacterDefFile(def))
-                return def;
-        }
-
-        return null;
-    }
+    /// <summary>
+    /// The character folder keeps its name; which DEF labels it comes from the shared resolver (an
+    /// ambiguous folder is still imported, and the library asks which DEF to use when it is enabled).
+    /// </summary>
+    private static string? FindCharacterDef(string folder, string folderName)
+        => PrimaryDefResolver.Resolve(folder, folderName).DisplayCandidate?.FullPath;
 
     private static void RejectForbiddenContent(string packageRoot)
     {

@@ -119,7 +119,13 @@ public static partial class PrimaryDefResolver
     public static PrimaryDefDecision Resolve(string folder, string folderName, PrimaryDefHints? hints = null)
     {
         hints ??= new PrimaryDefHints();
-        var candidates = FindCandidates(folder, hints);
+        return Decide(FindCandidates(folder, hints), folderName, hints);
+    }
+
+    /// <summary>Applies the rules to an explicit candidate list (e.g. DEFs found deeper in a package).</summary>
+    public static PrimaryDefDecision Decide(IReadOnlyList<DefCandidate> candidates, string folderName, PrimaryDefHints? hints = null)
+    {
+        hints ??= new PrimaryDefHints();
         PrimaryDefDecision Decide(DefCandidate? primary, PrimaryDefRule rule) => new(candidates, primary, rule, folderName);
         if (candidates.Count == 0) return Decide(null, PrimaryDefRule.None);
 

@@ -52,6 +52,19 @@ public sealed class FullgameImporterTests : IDisposable
     }
 
     [Fact]
+    public void CharacterFoldersKeepTheirNamesAndUseTheSharedPrimaryDef()
+    {
+        var muzan = Path.Combine(_package, "chars", "Muzan");
+        PrimaryDefResolverTests.WriteKfmPlaceholder(muzan);
+        PrimaryDefResolverTests.WriteDef(muzan, "Muzan.def", "Muzan");
+        PrimaryDefResolverTests.WriteDef(muzan, "Muzan_AI.def", "Muzan");
+
+        var item = _importer.Scan(_package, _fixture).Characters.Single(c => c.FolderName == "Muzan");
+
+        Assert.Equal("Muzan.def", Path.GetFileName(item.DefPath));
+    }
+
+    [Fact]
     public void DetectsFullgameManifest()
     {
         var manifest = _importer.Scan(_package, _fixture);

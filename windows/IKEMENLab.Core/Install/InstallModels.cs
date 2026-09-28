@@ -1,3 +1,4 @@
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Mutations;
 
 namespace IKEMENLab.Core.Install;
@@ -40,19 +41,69 @@ public sealed class DetectedPackage
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> MissingAssets { get; init; } = Array.Empty<string>();
     public int FileCount { get; init; }
+
+    /// <summary>Characters: where <see cref="SuggestedFolderName"/> came from (never a DEF file name).</summary>
+    public FolderNameSource NameSource { get; init; } = FolderNameSource.Detected;
+
+    /// <summary>Characters: every character DEF in the package, with the facts used to pick one.</summary>
+    public IReadOnlyList<DefCandidate> DefCandidates { get; init; } = Array.Empty<DefCandidate>();
+
+    /// <summary>Characters: the resolver's primary DEF (null when the choice is ambiguous).</summary>
+    public DefCandidate? PrimaryDef { get; init; }
+
+    public PrimaryDefRule PrimaryRule { get; init; } = PrimaryDefRule.OnlyCandidate;
+
+    /// <summary>Packaging folders above the character folder that are not installed.</summary>
+    public IReadOnlyList<string> Wrappers { get; init; } = Array.Empty<string>();
+
+    /// <summary>Documentation outside the character folder that is not installed.</summary>
+    public IReadOnlyList<string> LeftOutDocs { get; init; } = Array.Empty<string>();
+
+    /// <summary>Other files outside the character folder; installing without them must be confirmed.</summary>
+    public IReadOnlyList<string> LeftOutFiles { get; init; } = Array.Empty<string>();
+
+    public bool RequiresDefChoice => PrimaryRule == PrimaryDefRule.Ambiguous;
+    public bool RequiresLayoutConfirmation => LeftOutFiles.Count > 0;
 }
 
 public sealed class InstallPlanItem
 {
     public required DetectedPackage Package { get; init; }
-    public required string TargetDirectory { get; init; }
-    public required bool DestinationExists { get; init; }
+    /// <summary>Destination folder; changed only through <see cref="InstallPlanRules.Rename"/>.</summary>
+    public required string TargetDirectory { get; set; }
+
+    public required bool DestinationExists { get; set; }
     public InstallItemDecision Decision { get; set; }
     public InstallItemOutcome Outcome { get; set; } = InstallItemOutcome.Pending;
     public string? Error { get; set; }
     public OperationPlan? MutationPlan { get; set; }
     public string? OperationId { get; set; }
     public IReadOnlyList<string> AffectedPaths { get; init; } = Array.Empty<string>();
+
+    /// <summary>Folder name under chars/ (or data/, stages/) this item installs to.</summary>
+    public string DestinationName =>
+        Path.GetFileName(TargetDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+
+    /// <summary>
+    /// The DEF the user picked, relative to the package folder. Null means the resolver's primary;
+    /// an ambiguous package cannot be installed until one is picked.
+    /// </summary>
+    public string? SelectedDef { get; set; }
+
+    /// <summary>The user accepted installing without the loose files outside the character folder.</summary>
+    public bool LayoutConfirmed { get; set; }
+
+    /// <summary>Why this item cannot be installed as planned (invalid name, same destination twice).</summary>
+    public string? Problem { get; set; }
+
+    /// <summary>Warnings about replacing the existing folder (e.g. a DEF select.def uses would disappear).</summary>
+    public IReadOnlyList<string> ReplaceWarnings { get; set; } = Array.Empty<string>();
+
+    public bool NeedsDefChoice => Package.RequiresDefChoice && SelectedDef is null;
+    public bool NeedsLayoutConfirmation => Package.RequiresLayoutConfirmation && !LayoutConfirmed;
+
+    /// <summary>The DEF this install will use, relative to the package folder.</summary>
+    public string? EffectiveDef => SelectedDef ?? Package.PrimaryDef?.RelativePath;
 
     public string KindLabel => Package.Kind switch
     {

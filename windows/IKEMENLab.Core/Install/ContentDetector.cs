@@ -1,3 +1,4 @@
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Parsing;
 
 namespace IKEMENLab.Core.Install;
@@ -5,6 +6,8 @@ namespace IKEMENLab.Core.Install;
 /// <summary>
 /// Detects character / stage / screenpack packages from extracted folders with bounded wrapper-folder handling.
 /// Uses Windows DefContentClassifier semantics. Rejects ambiguous mixes rather than guessing.
+/// Character folders follow extraction structure (<see cref="CharacterLayoutAnalyzer"/>) and their primary
+/// DEF is decided separately (<see cref="PrimaryDefResolver"/>); a DEF file name never names a folder.
 /// </summary>
 public static class ContentDetector
 {
@@ -17,22 +20,24 @@ public static class ContentDetector
             throw new DirectoryNotFoundException(directory);
 
         var cleaned = StripJunk(directory);
-        var candidates = FindPackageCandidates(cleaned);
+        var candidates = FindPackageCandidates(cleaned, out var characterDefFolders);
 
-        if (candidates.Count == 0)
+        if (candidates.Count == 0 && characterDefFolders.Count == 0)
             throw new InvalidOperationException(
                 "Could not determine content type. Need a character DEF, stage DEF, or screenpack system.def with UI evidence.");
 
-        var charPkgs = candidates.Where(c => c.Kind == InstallContentKind.Character).ToList();
         var stagePkgs = candidates.Where(c => c.Kind == InstallContentKind.Stage).ToList();
         var screenPkgs = candidates.Where(c => c.Kind == InstallContentKind.Screenpack).ToList();
 
-        var kindCount = (charPkgs.Count > 0 ? 1 : 0) + (stagePkgs.Count > 0 ? 1 : 0) + (screenPkgs.Count > 0 ? 1 : 0);
+        var kindCount = (characterDefFolders.Count > 0 ? 1 : 0) + (stagePkgs.Count > 0 ? 1 : 0) + (screenPkgs.Count > 0 ? 1 : 0);
         if (kindCount > 1)
         {
             throw new InvalidOperationException(
                 "Ambiguous content: archive/folder mixes character, stage, and/or screenpack packages.");
         }
+
+        if (characterDefFolders.Count > 0)
+            return DetectCharacters(cleaned, sourceInput, characterDefFolders);
 
         var byRoot = new Dictionary<string, DetectedPackage>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in candidates)
@@ -42,6 +47,72 @@ public static class ContentDetector
         }
 
         return byRoot.Values.ToList();
+    }
+
+    /// <summary>
+    /// Characters: one package per unit found by extraction structure. A dropped folder is its own
+    /// "archive"; an archive's loose files take the archive's name.
+    /// </summary>
+    private static IReadOnlyList<DetectedPackage> DetectCharacters(string payloadRoot, string sourceInput, IReadOnlyList<string> defFolders)
+    {
+        var payloadIsFolder = !File.Exists(sourceInput);
+        var payloadName = payloadIsFolder
+            ? Path.GetFileName(Path.TrimEndingDirectorySeparator(payloadRoot))
+            : CharacterLayoutAnalyzer.ArchiveBaseName(sourceInput);
+
+        var packages = new List<DetectedPackage>();
+        foreach (var unit in CharacterLayoutAnalyzer.Analyze(payloadRoot, payloadName, payloadIsFolder, defFolders))
+        {
+            var decision = PrimaryDefResolver.Resolve(unit.UnitRoot, unit.DestinationName);
+            if (decision.Candidates.Count == 0)
+            {
+                // A unit grown to include shared files can hold its DEFs deeper than one level.
+                var unitPrefix = unit.UnitRoot + Path.DirectorySeparatorChar;
+                var deep = defFolders
+                    .Where(d => Path.GetFullPath(d).StartsWith(unitPrefix, StringComparison.OrdinalIgnoreCase))
+                    .SelectMany(d => Directory.EnumerateFiles(d, "*.def").Where(DefContentClassifier.IsValidCharacterDefFile))
+                    .Select(p => PrimaryDefResolver.Describe(Path.GetFullPath(p), unit.UnitRoot))
+                    .OrderBy(c => c.RelativePath, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                decision = PrimaryDefResolver.Decide(deep, unit.DestinationName);
+            }
+
+            var display = decision.DisplayCandidate;
+            if (display is null) continue;
+
+            var warnings = new List<string>();
+            if (decision.Primary is { IsComplete: false } incomplete)
+                warnings.Add("Missing referenced file(s): " + string.Join(", ", incomplete.MissingFiles));
+
+            packages.Add(new DetectedPackage
+            {
+                Kind = InstallContentKind.Character,
+                DisplayName = display.CharacterName,
+                SuggestedFolderName = unit.DestinationName,
+                PackageRoot = unit.UnitRoot,
+                DefPath = display.FullPath,
+                SourceInput = sourceInput,
+                Warnings = warnings,
+                FileCount = SafeFileCount(unit.UnitRoot),
+                NameSource = unit.NameSource,
+                DefCandidates = decision.Candidates,
+                PrimaryDef = decision.Primary,
+                PrimaryRule = decision.Rule,
+                Wrappers = unit.Wrappers,
+                LeftOutDocs = unit.LeftOutDocs,
+                LeftOutFiles = unit.LeftOutFiles
+            });
+        }
+
+        if (packages.Count == 0)
+            throw new InvalidOperationException("Could not determine content type. No usable character DEF was found.");
+        return packages;
+    }
+
+    private static int SafeFileCount(string dir)
+    {
+        try { return Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Count(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return 0; }
     }
 
     private static DetectedPackage Enrich(DetectedPackage draft, string sourceInput)
@@ -80,9 +151,10 @@ public static class ContentDetector
         };
     }
 
-    private static List<DetectedPackage> FindPackageCandidates(string root)
+    private static List<DetectedPackage> FindPackageCandidates(string root, out IReadOnlyList<string> characterDefFolders)
     {
         var results = new List<DetectedPackage>();
+        var charFolders = new List<string>();
         var defsScanned = 0;
 
         void Walk(string dir, int depth)
@@ -116,7 +188,7 @@ public static class ContentDetector
 
                 if (DefContentClassifier.IsValidCharacterDefFile(def))
                 {
-                    results.Add(BuildCharacterCandidate(def, dir));
+                    if (!charFolders.Contains(dir, StringComparer.OrdinalIgnoreCase)) charFolders.Add(dir);
                     continue;
                 }
 
@@ -145,6 +217,7 @@ public static class ContentDetector
         }
 
         Walk(root, 0);
+        characterDefFolders = charFolders;
 
         // Prefer shallower package roots: if both parent and child match same kind with child
         // containing the only DEF, keep child. If parent has DEF, keep parent.
@@ -177,22 +250,6 @@ public static class ContentDetector
         }
 
         return keep;
-    }
-
-    private static DetectedPackage BuildCharacterCandidate(string defPath, string defDirectory)
-    {
-        var parsed = DefParser.ParseFile(defPath);
-        var folderName = Path.GetFileNameWithoutExtension(defPath);
-        var display = parsed?.EffectiveName ?? folderName;
-        return new DetectedPackage
-        {
-            Kind = InstallContentKind.Character,
-            DisplayName = display,
-            SuggestedFolderName = folderName,
-            PackageRoot = defDirectory,
-            DefPath = defPath,
-            SourceInput = string.Empty
-        };
     }
 
     private static DetectedPackage BuildStageCandidate(string defPath, string defDirectory)

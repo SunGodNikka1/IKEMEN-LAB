@@ -19,15 +19,19 @@ public sealed class ContentInstallService : IContentInstallService
 {
     private readonly ISafeMutationService _mutations;
     private readonly DateAddedTracker _dateAdded;
+    private readonly PrimaryDefStore? _primaryDefs;
 
     /// <param name="dateAdded">
     /// Records the exact Date Added of successful installs. Omit only for tests/tools; the app passes
     /// the same tracker the library index uses.
     /// </param>
-    public ContentInstallService(ISafeMutationService? mutations = null, DateAddedTracker? dateAdded = null)
+    /// <param name="primaryDefs">Where an explicit DEF choice is saved (app data, never the IKEMEN root).</param>
+    public ContentInstallService(ISafeMutationService? mutations = null, DateAddedTracker? dateAdded = null,
+        PrimaryDefStore? primaryDefs = null)
     {
         _mutations = mutations ?? new SafeMutationService();
         _dateAdded = dateAdded ?? DateAddedTracker.EstimateOnly;
+        _primaryDefs = primaryDefs;
     }
 
     public InspectBatchResult Inspect(IEnumerable<string> inputs, string ikemenRoot, string? stagingRoot = null)
@@ -94,6 +98,7 @@ public sealed class ContentInstallService : IContentInstallService
             }
         }
 
+        InstallPlanRules.Refresh(items, root);
         return new InspectBatchResult
         {
             Items = items,
@@ -237,6 +242,7 @@ public sealed class ContentInstallService : IContentInstallService
     public InstallBatchResult Execute(IReadOnlyList<InstallPlanItem> items, string ikemenRoot, bool dryRun = false)
     {
         var root = IkemenPathGuard.NormalizeRoot(ikemenRoot);
+        InstallPlanRules.Refresh(items, root);
 
         foreach (var item in items)
         {
@@ -245,6 +251,35 @@ public sealed class ContentInstallService : IContentInstallService
                 if (item.Decision == InstallItemDecision.Skip)
                 {
                     item.Outcome = InstallItemOutcome.Skipped;
+                    continue;
+                }
+
+                if (item.Problem is { } problem)
+                {
+                    item.Outcome = InstallItemOutcome.Rejected;
+                    item.Error = problem;
+                    continue;
+                }
+
+                if (item.NeedsDefChoice)
+                {
+                    item.Outcome = InstallItemOutcome.Rejected;
+                    item.Error = "This package has several possible DEFs. Choose which one the character uses.";
+                    continue;
+                }
+
+                if (item.NeedsLayoutConfirmation)
+                {
+                    item.Outcome = InstallItemOutcome.Rejected;
+                    item.Error = "Files outside the character folder would not be installed. Confirm to install without them.";
+                    continue;
+                }
+
+                if (item.SelectedDef is { } selected &&
+                    !item.Package.DefCandidates.Any(c => string.Equals(c.RelativePath, selected, StringComparison.OrdinalIgnoreCase)))
+                {
+                    item.Outcome = InstallItemOutcome.Rejected;
+                    item.Error = $"'{selected}' is not one of this package's DEFs.";
                     continue;
                 }
 
@@ -281,6 +316,7 @@ public sealed class ContentInstallService : IContentInstallService
                 if (!dryRun && item.Outcome == InstallItemOutcome.Installed)
                 {
                     _dateAdded.RecordInstalled(root, DateAddedIdentities(item, root, flatStage));
+                    if (item.Package.Kind == InstallContentKind.Character) SaveDefChoice(item, root);
                 }
             }
             catch (Exception ex)
@@ -442,6 +478,34 @@ public sealed class ContentInstallService : IContentInstallService
         {
             try { _mutations.Rollback(id); }
             catch { /* best effort */ }
+        }
+    }
+
+    /// <summary>
+    /// Saves the DEF the user picked when the resolver alone would not have chosen it (ambiguous package or
+    /// a different DEF). A saved choice the installed files no longer contain is dropped.
+    /// </summary>
+    private void SaveDefChoice(InstallPlanItem item, string root)
+    {
+        if (_primaryDefs is null) return;
+        var folder = item.DestinationName;
+        try
+        {
+            if (item.SelectedDef is { } selected &&
+                (item.Package.RequiresDefChoice ||
+                 !string.Equals(selected, item.Package.PrimaryDef?.RelativePath, StringComparison.OrdinalIgnoreCase)))
+            {
+                _primaryDefs.Set(root, folder, selected);
+                return;
+            }
+
+            var saved = _primaryDefs.Get(root, folder);
+            if (saved is not null && !File.Exists(Path.Combine(item.TargetDirectory, saved.Replace('/', Path.DirectorySeparatorChar))))
+                _primaryDefs.Remove(root, folder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            item.Error = "Installed, but the DEF choice could not be saved: " + ex.Message;
         }
     }
 
