@@ -273,7 +273,8 @@ public class RosterActivationServiceTests : IDisposable
     public void PreferredCharacterRosterNameHelpers()
     {
         Assert.Equal("kfm", SelectDefRosterEditor.PreferredCharacterRosterName("chars/kfm/kfm.def"));
-        Assert.Equal("Pack/Ken/Ken", SelectDefRosterEditor.PreferredCharacterRosterName("chars/Pack/Ken/Ken.def"));
+        Assert.Equal("Pack/Ken/Ken.def", SelectDefRosterEditor.PreferredCharacterRosterName("chars/Pack/Ken/Ken.def"));
+        Assert.Equal("Muzan V3/char.def", SelectDefRosterEditor.PreferredCharacterRosterName("chars/Muzan V3/char.def"));
         Assert.Equal("stages/foo.def", SelectDefRosterEditor.PreferredStageRosterName("stages/foo.def"));
     }
 

@@ -413,7 +413,10 @@ public static class SelectDefRosterEditor
             }
         }
 
-        return string.Join('/', parts);
+        // Keep the .def extension whenever short form does not apply. Paths like
+        // "Muzan V3/char" resolve, but "Muzan V3/char.def" is what authors write and
+        // what a flat archive install must list when the DEF name ≠ the folder name.
+        return withDef;
     }
 
     public static string PreferredStageRosterName(string rootRelativeDefPath)
