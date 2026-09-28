@@ -32,11 +32,7 @@ public sealed class MainViewModel : ObservableObject
         Characters = new CharactersViewModel(Artwork, page => Navigate(page));
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page));
-        ScreenpacksPlaceholder = new PlaceholderViewModel
-        {
-            Title = "Screenpacks",
-            Message = "Screenpack management is deferred past WIN-1."
-        };
+        Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page));
         CollectionsPlaceholder = new PlaceholderViewModel
         {
             Title = "Collections",
@@ -69,7 +65,7 @@ public sealed class MainViewModel : ObservableObject
     public CharactersViewModel Characters { get; }
     public SettingsViewModel Settings { get; }
     public StagesViewModel Stages { get; }
-    public PlaceholderViewModel ScreenpacksPlaceholder { get; }
+    public ScreenpacksViewModel Screenpacks { get; }
     public PlaceholderViewModel CollectionsPlaceholder { get; }
 
     // SYSTEM > GPU readout. Neutral until a real reading exists (never a fabricated value).
@@ -157,6 +153,7 @@ public sealed class MainViewModel : ObservableObject
             Dashboard.ApplySnapshot(snapshot);
             Characters.ApplySnapshot(snapshot);
             Stages.ApplySnapshot(snapshot);
+            Screenpacks.ApplySnapshot(snapshot);
             Settings.LoadFrom(_settingsStore.Load(), snapshot?.Installation);
 
             UpdateBadges(snapshot);
@@ -257,7 +254,7 @@ public sealed class MainViewModel : ObservableObject
             NavPage.Dashboard => Dashboard,
             NavPage.Characters => Characters,
             NavPage.Stages => Stages,
-            NavPage.Screenpacks => ScreenpacksPlaceholder,
+            NavPage.Screenpacks => Screenpacks,
             NavPage.Collections => CollectionsPlaceholder,
             NavPage.Settings => Settings,
             _ => Dashboard

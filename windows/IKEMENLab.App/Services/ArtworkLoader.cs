@@ -46,6 +46,10 @@ public sealed class ArtworkLoader
         => _thumbnails.GetOrAdd("s:" + stage.DefPath,
             _ => LoadAsync(s => s.StagePreviewPng(stage), decodeWidth: StageThumbnailDecodeWidth));
 
+    public Task<ImageSource?> ScreenpackPreviewAsync(IKEMENLab.Core.Screenpacks.ScreenpackEntry screenpack)
+        => _thumbnails.GetOrAdd("p:" + screenpack.DefPath,
+            _ => LoadAsync(s => s.ScreenpackPreviewPng(screenpack), decodeWidth: StageThumbnailDecodeWidth));
+
     public Task<ImageSource?> StagePreviewAsync(StageEntry stage)
         => LoadAsync(s => s.StagePreviewPng(stage));
 

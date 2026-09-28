@@ -1,5 +1,6 @@
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.Parsing;
+using IKEMENLab.Core.Screenpacks;
 using IKEMENLab.Core.Validation;
 
 namespace IKEMENLab.Core.Sprites;
@@ -57,6 +58,20 @@ public sealed class ArtworkService
         {
             var extracted = SpriteExtractor.ExtractCharacterPortrait(paths.Folder, paths.DefPath, paths.SpriteFile, paths.Pal1);
             return extracted is null ? null : SpriteImageOps.FitWithin(extracted.Image, PortraitMaxSize, PortraitMaxSize);
+        });
+    }
+
+    /// <summary>PNG bytes of a screenpack preview (largest detailed sprite of its SFF), or null.</summary>
+    public byte[]? ScreenpackPreviewPng(ScreenpackEntry screenpack)
+    {
+        if (screenpack.SpriteFile is null) return null;
+        var def = Path.Combine(_root, screenpack.DefPath);
+        return _cache.GetOrCreate("screenpack", [def, screenpack.SpriteFile], () =>
+        {
+            var extracted = SpriteExtractor.ExtractStagePreview(screenpack.SpriteFile);
+            return extracted is null
+                ? null
+                : SpriteImageOps.FitWithin(extracted.Image, StagePreviewMaxWidth, StagePreviewMaxHeight);
         });
     }
 

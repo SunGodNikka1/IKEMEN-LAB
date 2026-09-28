@@ -1,5 +1,6 @@
 using IKEMENLab.Core.Config;
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.Screenpacks;
 using IKEMENLab.Core.SelectDef;
 
 namespace IKEMENLab.Core.Services;
@@ -61,7 +62,8 @@ public sealed class LibraryIndexService
             Warnings = warnings,
             IndexedAt = DateTimeOffset.UtcNow,
             Config = config,
-            SelectDef = selectDef
+            SelectDef = selectDef,
+            Screenpacks = ScreenpackIndexer.Index(root, config.Motif)
         };
     }
 }
