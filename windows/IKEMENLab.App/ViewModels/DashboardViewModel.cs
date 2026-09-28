@@ -29,6 +29,7 @@ public sealed class DashboardViewModel : ObservableObject
     private readonly Action<NavPage> _navigate;
     private readonly Func<Task> _refreshLibrary;
     private readonly IContentInstallService _installer;
+    private readonly FullgameImporter _fullgame;
     private readonly Services.ArtworkLoader _artwork;
     private LibrarySnapshot? _snapshot;
     private CancellationTokenSource? _backgroundWork;
@@ -70,13 +71,15 @@ public sealed class DashboardViewModel : ObservableObject
         Action<NavPage> navigate,
         Func<Task> refreshLibrary,
         IContentInstallService? installer = null,
-        IIkemenConfigMutationService? configWriter = null)
+        IIkemenConfigMutationService? configWriter = null,
+        FullgameImporter? fullgame = null)
     {
         _launcher = launcher;
         _artwork = artwork;
         _navigate = navigate;
         _refreshLibrary = refreshLibrary;
         _installer = installer ?? new ContentInstallService();
+        _fullgame = fullgame ?? new FullgameImporter();
         _configWriter = configWriter ?? new IkemenConfigMutationService();
         LaunchCommand = new RelayCommand(Launch, () => CanLaunch && !IsGameRunning);
         OpenCharactersCommand = new RelayCommand(() => _navigate(NavPage.Characters));
@@ -287,7 +290,7 @@ public sealed class DashboardViewModel : ObservableObject
 
         var dialog = new OpenFileDialog
         {
-            Title = "Select character or stage archives",
+            Title = "Select content archives (character, stage, screenpack, or fullgame)",
             Multiselect = true,
             Filter = "Archives (*.zip;*.rar;*.7z)|*.zip;*.rar;*.7z|All files (*.*)|*.*"
         };
@@ -306,7 +309,7 @@ public sealed class DashboardViewModel : ObservableObject
 
         var dialog = new OpenFolderDialog
         {
-            Title = "Select character or stage folder",
+            Title = "Select content folder (character, stage, screenpack, or fullgame)",
             Multiselect = true
         };
 
@@ -327,6 +330,24 @@ public sealed class DashboardViewModel : ObservableObject
         DropNotice = "Inspecting content…";
         CommandManager.InvalidateRequerySuggested();
 
+        // Prefer fullgame when a package looks like a multi-content dump.
+        try
+        {
+            var handled = await TryFullgameInstallAsync(paths);
+            if (handled)
+            {
+                _installBusy = false;
+                CommandManager.InvalidateRequerySuggested();
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            DropNotice = "Fullgame inspect failed: " + ex.Message;
+            _installBusy = false;
+            return;
+        }
+
         InspectBatchResult inspect;
         try
         {
@@ -344,7 +365,7 @@ public sealed class DashboardViewModel : ObservableObject
         {
             DropNotice = inspect.Failures.Count > 0
                 ? string.Join(" · ", inspect.Failures.Select(f => f.Reason).Take(3))
-                : "No character or stage packages detected.";
+                : "No character, stage, or screenpack packages detected.";
             _installer.CleanupStaging(inspect.StagingDirectories);
             _installBusy = false;
             return;
@@ -405,6 +426,108 @@ public sealed class DashboardViewModel : ObservableObject
 
         _installBusy = false;
         CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>Returns true when a fullgame package was previewed (and optionally imported).</summary>
+    private async Task<bool> TryFullgameInstallAsync(IReadOnlyList<string> paths)
+    {
+        var staging = new List<string>();
+        FullgameManifest? chosen = null;
+        try
+        {
+            foreach (var input in paths)
+            {
+                if (string.IsNullOrWhiteSpace(input)) continue;
+                var full = Path.GetFullPath(input);
+                string packageDir;
+                if (Directory.Exists(full))
+                {
+                    packageDir = full;
+                }
+                else if (File.Exists(full) && ArchiveExtractor.IsArchiveFile(full))
+                {
+                    packageDir = await Task.Run(() => ArchiveExtractor.ExtractToStaging(full));
+                    staging.Add(packageDir);
+                }
+                else continue;
+
+                var manifest = await Task.Run(() => _fullgame.Scan(packageDir, RootPath));
+                if (manifest.IsFullgame)
+                {
+                    chosen = manifest;
+                    break;
+                }
+            }
+
+            if (chosen is null)
+            {
+                _installer.CleanupStaging(staging);
+                return false;
+            }
+
+            var msg =
+                $"Fullgame package detected: {chosen.SourceFolderName}\n\n" +
+                $"Characters: {chosen.Characters.Count}\n" +
+                $"Stages: {chosen.Stages.Count}\n" +
+                $"Screenpack: {(chosen.Screenpack is null ? "No" : chosen.Screenpack.DisplayName)}\n" +
+                $"Fonts: {chosen.Fonts.Count}\n" +
+                $"Sounds: {chosen.Sounds.Count}\n\n" +
+                $"Collection: {chosen.SuggestedCollectionName}\n\n" +
+                "Import into the current IKEMEN install?\n" +
+                "(select.def and Motif will not change. Engine binaries are never copied.)";
+
+            DropNotice = null;
+            var confirm = MessageBox.Show(
+                Application.Current?.MainWindow,
+                msg,
+                "Fullgame import",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Question,
+                MessageBoxResult.Cancel);
+            if (confirm != MessageBoxResult.OK)
+            {
+                DropNotice = "Fullgame import cancelled.";
+                _installer.CleanupStaging(staging);
+                return true;
+            }
+
+            DropNotice = "Importing fullgame…";
+            var root = RootPath;
+            var manifestToInstall = chosen;
+            var result = await Task.Run(() => _fullgame.Install(manifestToInstall, root, (name, type) =>
+            {
+                var answer = MessageBox.Show(
+                    Application.Current?.MainWindow,
+                    $"\"{name}\" ({type}) already exists.\n\nYes = Replace\nNo = Skip\nCancel = Skip all remaining",
+                    "Duplicate content",
+                    MessageBoxButton.YesNoCancel,
+                    MessageBoxImage.Warning,
+                    MessageBoxResult.No);
+                return answer switch
+                {
+                    MessageBoxResult.Yes => FullgameDuplicateAction.Replace,
+                    MessageBoxResult.Cancel => FullgameDuplicateAction.SkipAll,
+                    _ => FullgameDuplicateAction.Skip
+                };
+            }));
+
+            DropNotice = result.Summary +
+                (result.CollectionCreated is { } c ? $" · Collection \"{c.Name}\" created." : "") +
+                (result.TotalFailed > 0 ? " · Some items failed — see details in status." : "");
+            if (result.TotalInstalled > 0)
+            {
+                try { await _refreshLibrary(); }
+                catch (Exception ex) { DropNotice += " · Refresh failed: " + ex.Message; }
+            }
+
+            _installer.CleanupStaging(staging);
+            return true;
+        }
+        catch
+        {
+            _installer.CleanupStaging(staging);
+            throw;
+        }
     }
 
     private void ApplyQuickSettings(LibrarySnapshot? snapshot)
