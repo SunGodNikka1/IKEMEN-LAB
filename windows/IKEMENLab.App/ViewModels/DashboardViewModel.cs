@@ -373,7 +373,7 @@ public sealed class DashboardViewModel : ObservableObject
         }
 
         DropNotice = null;
-        var previewVm = new InstallPreviewViewModel(inspect);
+        var previewVm = new InstallPreviewViewModel(inspect, RootPath);
         var window = new InstallPreviewWindow(previewVm)
         {
             Owner = Application.Current?.MainWindow

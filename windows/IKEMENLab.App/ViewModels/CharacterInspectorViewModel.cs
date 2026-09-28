@@ -1,3 +1,4 @@
+using System.Windows.Input;
 using System.Windows.Media;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.Core.Characters;
@@ -15,7 +16,7 @@ public sealed record DefSegment(string Text, Brush Foreground, bool Bold);
 
 public sealed record DefLine(IReadOnlyList<DefSegment> Segments);
 
-/// <summary>Right-hand inspector for the selected character. All data is read-only.</summary>
+/// <summary>Right-hand inspector for the selected character. Read-only except primary DEF choice.</summary>
 public sealed class CharacterInspectorViewModel : ObservableObject
 {
     private static readonly Brush LifeBrush = Frozen(Colors.White);
@@ -30,15 +31,77 @@ public sealed class CharacterInspectorViewModel : ObservableObject
     private ImageSource? _portrait;
     private bool _isLoading = true;
     private CharacterDetails? _details;
+    private string? _selectedDef;
+    private readonly Func<CharacterRowViewModel?, string?, Task>? _setPrimaryDef;
+    private bool _suppressDefChange;
 
-    public CharacterInspectorViewModel(CharacterRowViewModel row)
+    public CharacterInspectorViewModel(
+        CharacterRowViewModel row,
+        Func<CharacterRowViewModel?, string?, Task>? setPrimaryDef = null)
     {
         Row = row;
+        _setPrimaryDef = setPrimaryDef;
+        _selectedDef = CurrentDefRelative();
+        DefFileChoices = row.Entry.DefCandidates
+            .Select(c =>
+            {
+                var prefix = "chars/" + row.Entry.Id + "/";
+                return c.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                    ? c[prefix.Length..]
+                    : System.IO.Path.GetFileName(c);
+            })
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(c => c, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public CharacterRowViewModel Row { get; }
     public string Name => Row.DisplayName;
     public string Author => Row.Author;
+
+    public IReadOnlyList<string> DefFileChoices { get; }
+    public bool ShowDefPicker => DefFileChoices.Count > 1;
+    public bool NeedsDefChoice => Row.Entry.NeedsDefChoice;
+
+    public string? SelectedDef
+    {
+        get => _selectedDef;
+        set
+        {
+            if (_suppressDefChange) return;
+            if (!SetProperty(ref _selectedDef, value) || value is null || _setPrimaryDef is null) return;
+            if (string.Equals(value, CurrentDefRelative(), StringComparison.OrdinalIgnoreCase)) return;
+            _ = ApplyPrimaryDefAsync(value);
+        }
+    }
+
+    public string DefChoiceHint => NeedsDefChoice
+        ? "Several DEFs could be primary — pick one. The character folder name does not change."
+        : "Switching the primary DEF does not rename the character folder.";
+
+    private async Task ApplyPrimaryDefAsync(string relative)
+    {
+        try
+        {
+            await _setPrimaryDef!(Row, relative);
+        }
+        catch
+        {
+            _suppressDefChange = true;
+            _selectedDef = CurrentDefRelative();
+            OnPropertyChanged(nameof(SelectedDef));
+            _suppressDefChange = false;
+        }
+    }
+
+    private string CurrentDefRelative()
+    {
+        var path = Row.Entry.DefPath.Replace('\\', '/');
+        var prefix = "chars/" + Row.Entry.Id + "/";
+        return path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? path[prefix.Length..]
+            : System.IO.Path.GetFileName(path);
+    }
 
     public ImageSource? Portrait
     {
@@ -52,9 +115,9 @@ public sealed class CharacterInspectorViewModel : ObservableObject
         private set => SetProperty(ref _isLoading, value);
     }
 
-    public string EngineLabel => _details?.EngineLabel ?? "…";
+    public string EngineLabel => _details?.EngineLabel ?? "\u2026";
     public string UpdatedText => string.IsNullOrEmpty(_details?.VersionDate) ? string.Empty : "Updated " + _details!.VersionDate;
-    public string VersionText => string.IsNullOrEmpty(_details?.VersionDate) ? "—" : _details!.VersionDate;
+    public string VersionText => string.IsNullOrEmpty(_details?.VersionDate) ? "\u2014" : _details!.VersionDate;
 
     public bool HasStats => _details?.Stats is not null;
     public string StatsNote => _details is null ? string.Empty : HasStats ? "Based on CNS data" : "CNS not found — stats unavailable";
@@ -95,7 +158,7 @@ public sealed class CharacterInspectorViewModel : ObservableObject
         MorePalettesText = details.Palettes.Count > 6 ? $"+{details.Palettes.Count - 6}" : null;
 
         Moves = details.Moves.Take(10).Select(m => new MoveRow(m.DisplayName, m.Notation, m.IsHyper)).ToList();
-        MoreMovesText = details.Moves.Count > 10 ? $"+{details.Moves.Count - 10} more moves…" : null;
+        MoreMovesText = details.Moves.Count > 10 ? $"+{details.Moves.Count - 10} more moves\u2026" : null;
 
         DefLines = Highlight(details.DefText);
         IsLoading = false;
@@ -104,7 +167,7 @@ public sealed class CharacterInspectorViewModel : ObservableObject
 
     private static AttributeRow Attr(string label, CnsValue value, int max, Brush fill)
         => new(label, value.Value.ToString(), Math.Clamp((double)value.Value / max, 0.01, 1), fill,
-            value.IsEngineDefault ? $"{label}: not set in [Data]; engine default {value.Value}" : $"{label}: {value.Value} from [Data]");
+            value.IsEngineDefault ? (label + ": not set in [Data]; engine default " + value.Value) : (label + ": " + value.Value + " from [Data]"));
 
     /// <summary>macOS-style DEF highlighting: sections blue, keys purple, comments grey.</summary>
     public static IReadOnlyList<DefLine> Highlight(string? text)

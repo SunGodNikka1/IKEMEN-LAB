@@ -110,6 +110,8 @@ public sealed class CharacterRowViewModel : ObservableObject
             if (IsToggling) return "Updating select.def…";
             if (!CanToggleStatus)
             {
+                if (Entry.NeedsDefChoice)
+                    return "Several DEFs could be primary — choose one in the inspector before enabling.";
                 return Entry.Status switch
                 {
                     ContentStatus.Active => "Enabled in select.def (roster toggle unavailable)",

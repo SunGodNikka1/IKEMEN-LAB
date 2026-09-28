@@ -41,6 +41,21 @@
             </Grid>
 
             <StackPanel Margin="24,20,24,24">
+                <!-- ============ Primary DEF ============ -->
+                <Border Style="{StaticResource Card}" Padding="12" CornerRadius="8" Margin="0,0,0,16"
+                        Visibility="{Binding ShowDefPicker, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="PRIMARY DEF" FontSize="10" FontWeight="Medium"
+                                   Foreground="{DynamicResource TextTertiary}"/>
+                        <ComboBox Margin="0,8,0,0" ItemsSource="{Binding DefFileChoices}"
+                                  SelectedItem="{Binding SelectedDef, Mode=TwoWay}"
+                                  AutomationProperties.Name="Primary DEF"/>
+                        <TextBlock Margin="0,8,0,0" FontSize="11" TextWrapping="Wrap"
+                                   Foreground="{DynamicResource TextSecondary}"
+                                   Text="{Binding DefChoiceHint}"/>
+                    </StackPanel>
+                </Border>
+
                 <!-- ============ Author / Version ============ -->
                 <UniformGrid Columns="2" Margin="-6,0">
                     <Border Style="{StaticResource Card}" Padding="12" Margin="6,0" CornerRadius="8">

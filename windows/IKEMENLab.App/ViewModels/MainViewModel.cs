@@ -3,6 +3,7 @@ using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Services;
 using IKEMENLab.Core.Collections;
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.SelectDef;
 using IKEMENLab.Core.Services;
@@ -25,7 +26,8 @@ public sealed class MainViewModel : ObservableObject
         LibraryIndexService indexService,
         GameLauncher launcher,
         Services.FolderPicker folderPicker,
-        IKEMENLab.Core.Library.DateAddedTracker? dateAdded = null)
+        DateAddedTracker? dateAdded = null,
+        PrimaryDefStore? primaryDefs = null)
     {
         _settingsStore = settingsStore;
         _indexService = indexService;
@@ -34,8 +36,9 @@ public sealed class MainViewModel : ObservableObject
         var refresh = async () => await RefreshAsync(null);
         var roster = new RosterActivationService();
         var collectionActivation = new CollectionActivationService();
-        var installer = new IKEMENLab.Core.Install.ContentInstallService(dateAdded: dateAdded);
+        var installer = new IKEMENLab.Core.Install.ContentInstallService(dateAdded: dateAdded, primaryDefs: primaryDefs);
         Installer = installer;
+        PrimaryDefs = primaryDefs;
         Dashboard = new DashboardViewModel(
             launcher,
             Artwork,
@@ -43,7 +46,7 @@ public sealed class MainViewModel : ObservableObject
             refresh,
             installer: installer,
             fullgame: new IKEMENLab.Core.Install.FullgameImporter(installer: installer, dateAdded: dateAdded));
-        Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster);
+        Characters = new CharactersViewModel(Artwork, page => Navigate(page), refresh, roster, primaryDefs);
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page), refresh, roster);
         Screenpacks = new ScreenpacksViewModel(Artwork, page => Navigate(page), refresh);
@@ -74,6 +77,9 @@ public sealed class MainViewModel : ObservableObject
 
     /// <summary>The Install Content service the Dashboard uses (shared Date Added tracker).</summary>
     public IKEMENLab.Core.Install.IContentInstallService Installer { get; }
+
+    /// <summary>Saved primary-DEF choices (app data). Null only in tests that omit the store.</summary>
+    public PrimaryDefStore? PrimaryDefs { get; }
     public NavItem SettingsNav { get; }
     public DashboardViewModel Dashboard { get; }
     public CharactersViewModel Characters { get; }

@@ -27,10 +27,12 @@ public partial class App : Application
         var settingsStore = new JsonSettingsStore();
         // One Date Added authority shared by the index (browsers + Dashboard) and the installers.
         var dateAdded = new DateAddedTracker(DateAddedStore.CreateDefault());
-        var indexService = new LibraryIndexService(dateAdded);
+        // One primary-DEF choice store shared by the library index and Install Content.
+        var primaryDefs = PrimaryDefStore.CreateDefault();
+        var indexService = new LibraryIndexService(dateAdded, primaryDefs);
         var launcher = new GameLauncher();
         var folderPicker = new FolderPicker();
-        var mainVm = new MainViewModel(settingsStore, indexService, launcher, folderPicker, dateAdded);
+        var mainVm = new MainViewModel(settingsStore, indexService, launcher, folderPicker, dateAdded, primaryDefs);
         var options = QaOptions.Parse(e.Args);
 
         if (options.Page is { } page) mainVm.SelectedNav = page;
@@ -117,9 +119,9 @@ public partial class App : Application
             return;
         }
 
-        var installer = new ContentInstallService();
+        var installer = mainVm.Installer;
         var inspect = installer.Inspect([inputPath], root);
-        var previewVm = new InstallPreviewViewModel(inspect);
+        var previewVm = new InstallPreviewViewModel(inspect, root);
         var preview = new InstallPreviewWindow(previewVm)
         {
             Owner = owner,

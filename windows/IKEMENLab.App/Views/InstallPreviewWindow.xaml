@@ -2,16 +2,16 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="clr-namespace:IKEMENLab.App.ViewModels"
-        Title="Install Content" Height="520" Width="720"
+        Title="Install Content" Height="620" Width="760"
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResizeWithGrip"
-        MinHeight="360" MinWidth="560"
+        MinHeight="420" MinWidth="600"
         Background="{DynamicResource WindowBackgroundBrush}">
     <DockPanel Margin="20">
         <DockPanel DockPanel.Dock="Bottom" LastChildFill="False" Margin="0,16,0,0">
             <TextBlock DockPanel.Dock="Left" Text="{Binding StatusMessage}" FontSize="12"
                        Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"
-                       TextWrapping="Wrap" MaxWidth="420"/>
+                       TextWrapping="Wrap" MaxWidth="460"/>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Cancel" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                         MinWidth="88" Command="{Binding CancelCommand}" IsCancel="True"/>
@@ -26,7 +26,7 @@
             <TextBlock Text="{Binding Summary}" Margin="0,6,0,0" FontSize="12"
                        Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
             <TextBlock Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource TextTertiary}" TextWrapping="Wrap"
-                       Text="select.def and config.ini are not modified. Duplicates require Replace or Skip."/>
+                       Text="select.def and config.ini are not modified. Character folders keep the author's name; the primary DEF is chosen separately."/>
 
             <Border Margin="0,14,0,0" CornerRadius="8" Padding="10,8"
                     Background="{DynamicResource InfoBackgroundBrush}"
@@ -45,7 +45,7 @@
                        Margin="0,24,0,0" FontSize="13" Foreground="{DynamicResource TextTertiary}"
                        Visibility="{Binding HasRows, Converter={StaticResource BoolToVis}, ConverterParameter=invert}"/>
 
-            <ScrollViewer Margin="0,12,0,0" VerticalScrollBarVisibility="Auto" MaxHeight="320"
+            <ScrollViewer Margin="0,12,0,0" VerticalScrollBarVisibility="Auto" MaxHeight="420"
                           Visibility="{Binding HasRows, Converter={StaticResource BoolToVis}}">
                 <ItemsControl ItemsSource="{Binding Rows}">
                     <ItemsControl.ItemTemplate>
@@ -53,46 +53,103 @@
                             <Border Margin="0,0,0,8" Padding="12" CornerRadius="8"
                                     Background="{DynamicResource CardBackgroundBrush}"
                                     BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="Auto"/>
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel>
-                                        <StackPanel Orientation="Horizontal">
-                                            <Border CornerRadius="4" Padding="6,2" Margin="0,0,8,0"
-                                                    Background="{DynamicResource SelectedBackgroundBrush}">
-                                                <TextBlock Text="{Binding KindLabel}" FontSize="11"
-                                                           Foreground="{DynamicResource TextSecondary}"/>
-                                            </Border>
-                                            <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="Medium"
-                                                       Foreground="{DynamicResource TextPrimary}"/>
-                                            <Border CornerRadius="4" Padding="6,2" Margin="8,0,0,0"
-                                                    Background="{DynamicResource SelectedBackgroundBrush}">
-                                                <TextBlock Text="{Binding StatusText}" FontSize="11"
-                                                           Foreground="{DynamicResource TextTertiary}"/>
-                                            </Border>
-                                        </StackPanel>
-                                        <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource TextTertiary}"
-                                                   Text="{Binding DefName, StringFormat=DEF: {0}}"/>
-                                        <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
-                                                   Foreground="{DynamicResource TextTertiary}"
-                                                   Text="{Binding Source, StringFormat=Source: {0}}"/>
-                                        <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
-                                                   Foreground="{DynamicResource TextTertiary}"
-                                                   Text="{Binding Target, StringFormat=Target: {0}}"/>
-                                        <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
-                                                   Foreground="{DynamicResource WarningBrush}"
-                                                   Text="{Binding WarningsText}"
-                                                   Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVis}}"/>
-                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
-                                                    Visibility="{Binding NeedsDecision, Converter={StaticResource BoolToVis}}">
-                                            <CheckBox Content="Replace existing" IsChecked="{Binding ReplaceSelected}" Margin="0,0,16,0"/>
-                                            <CheckBox Content="Skip" IsChecked="{Binding SkipSelected}"/>
-                                        </StackPanel>
+                                <StackPanel>
+                                    <StackPanel Orientation="Horizontal">
+                                        <Border CornerRadius="4" Padding="6,2" Margin="0,0,8,0"
+                                                Background="{DynamicResource SelectedBackgroundBrush}">
+                                            <TextBlock Text="{Binding KindLabel}" FontSize="11"
+                                                       Foreground="{DynamicResource TextSecondary}"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="Medium"
+                                                   Foreground="{DynamicResource TextPrimary}"/>
+                                        <Border CornerRadius="4" Padding="6,2" Margin="8,0,0,0"
+                                                Background="{DynamicResource SelectedBackgroundBrush}">
+                                            <TextBlock Text="{Binding StatusText}" FontSize="11"
+                                                       Foreground="{DynamicResource TextTertiary}"/>
+                                        </Border>
                                     </StackPanel>
-                                </Grid>
+
+                                    <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextTertiary}"
+                                               Text="{Binding DestinationFolder, StringFormat=Folder: {0}}"
+                                               Visibility="{Binding IsCharacter, Converter={StaticResource BoolToVis}}"/>
+                                    <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextTertiary}"
+                                               Text="{Binding DefLabel, StringFormat=DEF: {0}}"/>
+                                    <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextTertiary}"
+                                               Text="{Binding NameSourceText}"
+                                               Visibility="{Binding HasNameSource, Converter={StaticResource BoolToVis}}"/>
+                                    <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextTertiary}"
+                                               Text="{Binding WrappersText}"
+                                               Visibility="{Binding HasWrappers, Converter={StaticResource BoolToVis}}"/>
+                                    <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextTertiary}"
+                                               Text="{Binding Source, StringFormat=Source: {0}}"/>
+                                    <TextBlock Margin="0,2,0,0" FontSize="11" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                               Foreground="{DynamicResource TextTertiary}"
+                                               Text="{Binding Target, StringFormat=Target: {0}}"/>
+
+                                    <TextBlock Margin="0,6,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               Text="{Binding ProblemText}"
+                                               Visibility="{Binding HasProblem, Converter={StaticResource BoolToVis}}"/>
+                                    <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               Text="{Binding ReplaceWarningsText}"
+                                               Visibility="{Binding HasReplaceWarnings, Converter={StaticResource BoolToVis}}"/>
+                                    <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource WarningBrush}"
+                                               Text="{Binding WarningsText}"
+                                               Visibility="{Binding HasWarnings, Converter={StaticResource BoolToVis}}"/>
+                                    <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap"
+                                               Foreground="{DynamicResource TextSecondary}"
+                                               Text="{Binding LeftOutFilesText}"
+                                               Visibility="{Binding HasLeftOutFiles, Converter={StaticResource BoolToVis}}"/>
+
+                                    <!-- DEF choice -->
+                                    <StackPanel Margin="0,8,0,0"
+                                                Visibility="{Binding ShowDefChoice, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="Primary DEF" FontSize="11"
+                                                   Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+                                        <ComboBox ItemsSource="{Binding DefChoices}"
+                                                  SelectedItem="{Binding SelectedDefRelative, Mode=TwoWay}"
+                                                  Width="280" HorizontalAlignment="Left"
+                                                  AutomationProperties.Name="Primary DEF"/>
+                                        <TextBlock Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource WarningBrush}"
+                                                   Text="Several DEFs could be primary — pick one. The folder name stays the same."
+                                                   Visibility="{Binding NeedsDefChoice, Converter={StaticResource BoolToVis}}"/>
+                                    </StackPanel>
+
+                                    <!-- Layout confirmation -->
+                                    <CheckBox Margin="0,8,0,0" Content="Install without the loose files outside the character folder"
+                                              IsChecked="{Binding LayoutConfirmed}"
+                                              Visibility="{Binding HasLeftOutFiles, Converter={StaticResource BoolToVis}}"/>
+
+                                    <!-- Collision / rename -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0"
+                                                Visibility="{Binding NeedsDecision, Converter={StaticResource BoolToVis}}">
+                                        <CheckBox Content="Replace existing" IsChecked="{Binding ReplaceSelected}" Margin="0,0,16,0"/>
+                                        <CheckBox Content="Skip" IsChecked="{Binding SkipSelected}"/>
+                                    </StackPanel>
+
+                                    <StackPanel Margin="0,8,0,0"
+                                                Visibility="{Binding ShowRename, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="Rename destination folder" FontSize="11"
+                                                   Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBox Width="200" Height="28" VerticalContentAlignment="Center"
+                                                     Text="{Binding RenameText, UpdateSourceTrigger=PropertyChanged}"
+                                                     Margin="0,0,8,0"/>
+                                            <Button Content="Apply name" Style="{StaticResource SecondaryButton}"
+                                                    Command="{Binding ApplyRenameCommand}" MinWidth="88"/>
+                                        </StackPanel>
+                                        <TextBlock Margin="0,4,0,0" FontSize="11" Foreground="{DynamicResource WarningBrush}"
+                                                   Text="{Binding RenameError}"
+                                                   Visibility="{Binding RenameError, Converter={StaticResource HasValueToVis}}"/>
+                                    </StackPanel>
+                                </StackPanel>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>

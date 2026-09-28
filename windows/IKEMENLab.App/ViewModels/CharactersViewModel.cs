@@ -6,6 +6,7 @@ using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Services;
 using IKEMENLab.Core.Characters;
+using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.SelectDef;
 using IKEMENLab.Core.Services;
@@ -25,6 +26,7 @@ public sealed class CharactersViewModel : ObservableObject
     private readonly Action<NavPage> _navigate;
     private readonly IRosterActivationService _roster;
     private readonly Func<Task> _refreshLibrary;
+    private readonly PrimaryDefStore? _primaryDefs;
     private readonly List<CharacterRowViewModel> _all = [];
     private string _searchText = string.Empty;
     private BrowserSortMode _sortMode = BrowserSortMode.Default;
@@ -39,12 +41,14 @@ public sealed class CharactersViewModel : ObservableObject
         ArtworkLoader artwork,
         Action<NavPage> navigate,
         Func<Task> refreshLibrary,
-        IRosterActivationService? roster = null)
+        IRosterActivationService? roster = null,
+        PrimaryDefStore? primaryDefs = null)
     {
         _artwork = artwork;
         _navigate = navigate;
         _refreshLibrary = refreshLibrary;
         _roster = roster ?? new RosterActivationService();
+        _primaryDefs = primaryDefs;
         GoHomeCommand = new RelayCommand(() => _navigate(NavPage.Dashboard));
         OpenFolderCommand = new RelayCommand(p => OpenFolder(p as CharacterRowViewModel ?? Selected));
         CopyPathCommand = new RelayCommand(p => CopyPath(p as CharacterRowViewModel ?? Selected));
@@ -136,7 +140,7 @@ public sealed class CharactersViewModel : ObservableObject
             {
                 _all.Add(new CharacterRowViewModel(entry)
                 {
-                    CanToggleStatus = _rosterAvailable,
+                    CanToggleStatus = _rosterAvailable && !entry.NeedsDefChoice,
                     ShowDateAdded = SortMode != BrowserSortMode.Default
                 });
             }
@@ -159,6 +163,13 @@ public sealed class CharactersViewModel : ObservableObject
     public async Task ToggleStatusAsync(CharacterRowViewModel? row)
     {
         if (row is null || _root is null || !row.CanToggleStatus) return;
+        if (row.Entry.NeedsDefChoice)
+        {
+            UserDialogs.Warn(
+                "This character folder has several possible DEFs. Choose the primary DEF in the inspector first.",
+                "Roster");
+            return;
+        }
 
         var enable = row.Status != ContentStatus.Active;
         row.IsToggling = true;
@@ -183,6 +194,40 @@ public sealed class CharactersViewModel : ObservableObject
         {
             row.IsToggling = false;
             row.RefreshStatusBinding();
+        }
+    }
+
+    /// <summary>Saves which DEF this character folder uses (app data only; never renames the folder).</summary>
+    public async Task SetPrimaryDefAsync(CharacterRowViewModel? row, string? relativeDef)
+    {
+        if (row is null || _root is null || _primaryDefs is null || string.IsNullOrWhiteSpace(relativeDef)) return;
+        if (!row.Entry.DefCandidates.Any(c => string.Equals(c, relativeDef, StringComparison.OrdinalIgnoreCase) ||
+                                              string.Equals(System.IO.Path.GetFileName(c), relativeDef, StringComparison.OrdinalIgnoreCase)))
+        {
+            UserDialogs.Warn("That DEF is not part of this character folder.", "Primary DEF");
+            return;
+        }
+
+        var folder = row.Entry.Id;
+        var relative = relativeDef.Contains('/') || relativeDef.Contains('\\')
+            ? relativeDef.Replace('\\', '/')
+            : relativeDef;
+        // Candidates are stored root-relative (chars/Folder/File.def); the store wants folder-relative.
+        if (relative.StartsWith("chars/", StringComparison.OrdinalIgnoreCase))
+        {
+            var prefix = "chars/" + folder + "/";
+            if (relative.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                relative = relative[prefix.Length..];
+        }
+
+        try
+        {
+            await Task.Run(() => _primaryDefs.Set(_root, folder, relative));
+            await _refreshLibrary();
+        }
+        catch (Exception ex)
+        {
+            UserDialogs.Warn(ex.Message, "Primary DEF");
         }
     }
 
@@ -241,7 +286,7 @@ public sealed class CharactersViewModel : ObservableObject
             return;
         }
 
-        var inspector = new CharacterInspectorViewModel(row) { Portrait = row.Thumbnail };
+        var inspector = new CharacterInspectorViewModel(row, SetPrimaryDefAsync) { Portrait = row.Thumbnail };
         Inspector = inspector;
         var root = _root;
 
