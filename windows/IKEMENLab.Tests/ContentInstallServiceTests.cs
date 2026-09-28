@@ -30,7 +30,7 @@ public class ContentInstallServiceTests : IDisposable
         Directory.CreateDirectory(_backupRoot);
         Directory.CreateDirectory(_stagingRoot);
         File.WriteAllText(Path.Combine(_fixtureRoot, "data", "select.def"), "; roster\n");
-        File.WriteAllText(Path.Combine(_fixtureRoot, "save", "config.ini"), "[Config]\nMasterVolume = 50\n");
+        File.WriteAllText(Path.Combine(_fixtureRoot, "save", "config.ini"), "[Config]\nMotif = data/system.def\nMasterVolume = 50\n");
         _mutations = new SafeMutationService(_opsRoot, _backupRoot);
         _installer = new ContentInstallService(_mutations);
     }
@@ -390,7 +390,118 @@ public class ContentInstallServiceTests : IDisposable
     private void AssertSelectAndConfigUnchanged()
     {
         Assert.Equal("; roster\n", File.ReadAllText(Path.Combine(_fixtureRoot, "data", "select.def")));
-        Assert.Equal("[Config]\nMasterVolume = 50\n", File.ReadAllText(Path.Combine(_fixtureRoot, "save", "config.ini")));
+        var cfg = File.ReadAllText(Path.Combine(_fixtureRoot, "save", "config.ini"));
+        Assert.Contains("Motif = data/system.def", cfg);
+        Assert.Contains("MasterVolume = 50", cfg);
+    }
+
+    [Fact]
+    public void ScreenpackFolderInstallAndReplaceRollback()
+    {
+        var folder = CreateScreenpackFolder("NeonPack");
+        try
+        {
+            var inspect = _installer.Inspect([folder], _fixtureRoot, _stagingRoot);
+            Assert.Single(inspect.Items);
+            Assert.Equal(InstallContentKind.Screenpack, inspect.Items[0].Package.Kind);
+            Assert.Contains("NeonPack", inspect.Items[0].TargetDirectory, StringComparison.OrdinalIgnoreCase);
+
+            var result = _installer.Execute(inspect.Items, _fixtureRoot);
+            Assert.Equal(1, result.InstalledCount);
+            Assert.True(File.Exists(Path.Combine(_fixtureRoot, "data", "NeonPack", "system.def")));
+            AssertSelectAndConfigUnchanged();
+
+            File.WriteAllText(Path.Combine(folder, "marker.txt"), "v2");
+            var inspect2 = _installer.Inspect([folder], _fixtureRoot, _stagingRoot);
+            Assert.True(inspect2.Items[0].DestinationExists);
+            inspect2.Items[0].Decision = InstallItemDecision.Replace;
+            var replaced = _installer.Execute(inspect2.Items, _fixtureRoot);
+            Assert.Equal(1, replaced.InstalledCount);
+            Assert.True(File.Exists(Path.Combine(_fixtureRoot, "data", "NeonPack", "marker.txt")));
+            Assert.True(_mutations.Rollback(replaced.Items[0].OperationId!).Success);
+            Assert.False(File.Exists(Path.Combine(_fixtureRoot, "data", "NeonPack", "marker.txt")));
+            AssertSelectAndConfigUnchanged();
+        }
+        finally
+        {
+            TryDelete(Path.GetDirectoryName(folder)!);
+        }
+    }
+
+    [Fact]
+    public void ScreenpackZipInstall()
+    {
+        var zip = CreateScreenpackZip("ZipPack");
+        var inspect = _installer.Inspect([zip], _fixtureRoot, _stagingRoot);
+        Assert.Single(inspect.Items);
+        Assert.Equal(InstallContentKind.Screenpack, inspect.Items[0].Package.Kind);
+        var result = _installer.Execute(inspect.Items, _fixtureRoot);
+        Assert.Equal(1, result.InstalledCount);
+        Assert.True(Directory.Exists(Path.Combine(_fixtureRoot, "data", "ZipPack")));
+        AssertSelectAndConfigUnchanged();
+        _installer.CleanupStaging(inspect.StagingDirectories);
+    }
+
+    [Fact]
+    public void BareSystemDefWithoutEvidenceRejected()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "bare-sys-" + Guid.NewGuid().ToString("N"), "EmptySys");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "system.def"), "[Info]\nname = Empty\n");
+        try
+        {
+            var inspect = _installer.Inspect([folder], _fixtureRoot, _stagingRoot);
+            Assert.Empty(inspect.Items);
+            Assert.NotEmpty(inspect.Failures);
+        }
+        finally
+        {
+            TryDelete(Path.GetDirectoryName(folder)!);
+        }
+    }
+
+    private static string CreateScreenpackFolder(string name)
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "sp-" + Guid.NewGuid().ToString("N"), name);
+        Directory.CreateDirectory(folder);
+        WriteScreenpackFiles(folder, name);
+        return folder;
+    }
+
+    private static string CreateScreenpackZip(string name)
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "spzip-" + Guid.NewGuid().ToString("N"));
+        var folder = Path.Combine(parent, name);
+        Directory.CreateDirectory(folder);
+        WriteScreenpackFiles(folder, name);
+        var zipPath = Path.Combine(Path.GetTempPath(), name + "-" + Guid.NewGuid().ToString("N") + ".zip");
+        if (File.Exists(zipPath)) File.Delete(zipPath);
+        ZipFile.CreateFromDirectory(parent, zipPath);
+        TryDelete(parent);
+        return zipPath;
+    }
+
+    private static void WriteScreenpackFiles(string folder, string name)
+    {
+        File.WriteAllText(Path.Combine(folder, "system.def"), $"""
+            [Info]
+            name = {name}
+            author = Test
+            localcoord = 1280,720
+            [Files]
+            spr = system.sff
+            fight = fight.def
+            select = select.def
+            [Title Info]
+            [Select Info]
+            rows = 2
+            columns = 3
+            [VS Screen]
+            [Option Info]
+            """);
+        File.WriteAllBytes(Path.Combine(folder, "system.sff"), [0]);
+        File.WriteAllText(Path.Combine(folder, "fight.def"), "[Info]\nname=f\n");
+        File.WriteAllText(Path.Combine(folder, "select.def"), "[Characters]\n");
     }
 
     private string CreateCharacterZip(string name)

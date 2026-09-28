@@ -3,7 +3,7 @@ using IKEMENLab.Core.Parsing;
 namespace IKEMENLab.Core.Install;
 
 /// <summary>
-/// Detects character / stage packages from extracted folders with bounded wrapper-folder handling.
+/// Detects character / stage / screenpack packages from extracted folders with bounded wrapper-folder handling.
 /// Uses Windows DefContentClassifier semantics. Rejects ambiguous mixes rather than guessing.
 /// </summary>
 public static class ContentDetector
@@ -21,30 +21,19 @@ public static class ContentDetector
 
         if (candidates.Count == 0)
             throw new InvalidOperationException(
-                "Could not determine content type. Need a character DEF ([Files] + .cmd/.cns/.air) or stage DEF ([StageInfo]/[BGdef]/[BG ...]).");
+                "Could not determine content type. Need a character DEF, stage DEF, or screenpack system.def with UI evidence.");
 
-        // Ambiguous: same package root claims both kinds, or overlapping roots of different kinds.
         var charPkgs = candidates.Where(c => c.Kind == InstallContentKind.Character).ToList();
         var stagePkgs = candidates.Where(c => c.Kind == InstallContentKind.Stage).ToList();
+        var screenPkgs = candidates.Where(c => c.Kind == InstallContentKind.Screenpack).ToList();
 
-        if (charPkgs.Count > 0 && stagePkgs.Count > 0)
+        var kindCount = (charPkgs.Count > 0 ? 1 : 0) + (stagePkgs.Count > 0 ? 1 : 0) + (screenPkgs.Count > 0 ? 1 : 0);
+        if (kindCount > 1)
         {
-            // If character and stage share the same root, reject.
-            var shared = charPkgs.Select(c => c.PackageRoot)
-                .Intersect(stagePkgs.Select(s => s.PackageRoot), StringComparer.OrdinalIgnoreCase)
-                .Any();
-            if (shared)
-                throw new InvalidOperationException(
-                    "Ambiguous content: folder contains both character and stage DEF semantics.");
-
-            // Prefer characters when both exist in one archive (common mixed dumps are rejected
-            // unless they are clearly separate package roots — still reject to avoid guessing).
             throw new InvalidOperationException(
-                "Ambiguous content: archive/folder contains both character and stage packages.");
+                "Ambiguous content: archive/folder mixes character, stage, and/or screenpack packages.");
         }
 
-        // Multiple packages of the same kind at distinct roots are OK (batch from one archive).
-        // Deduplicate by package root (keep first DEF found).
         var byRoot = new Dictionary<string, DetectedPackage>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in candidates)
         {
@@ -117,6 +106,13 @@ public static class ContentDetector
 
                 var name = Path.GetFileName(def);
                 if (name.StartsWith(".", StringComparison.Ordinal)) continue;
+
+                // Screenpack before character/stage — system.def with motif evidence.
+                if (DefContentClassifier.IsValidScreenpackDefFile(def))
+                {
+                    results.Add(BuildScreenpackCandidate(def, dir));
+                    continue;
+                }
 
                 if (DefContentClassifier.IsValidCharacterDefFile(def))
                 {
@@ -206,6 +202,26 @@ public static class ContentDetector
         return new DetectedPackage
         {
             Kind = InstallContentKind.Stage,
+            DisplayName = display,
+            SuggestedFolderName = folderName,
+            PackageRoot = defDirectory,
+            DefPath = defPath,
+            SourceInput = string.Empty
+        };
+    }
+
+    private static DetectedPackage BuildScreenpackCandidate(string defPath, string defDirectory)
+    {
+        var parsed = DefParser.ParseFile(defPath);
+        var folderName = Path.GetFileName(defDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+        if (string.IsNullOrWhiteSpace(folderName) || folderName.Equals("data", StringComparison.OrdinalIgnoreCase))
+            folderName = parsed?.Value("name", "info")?.Trim() ?? "screenpack";
+        var display = string.IsNullOrWhiteSpace(parsed?.Value("name", "info"))
+            ? folderName.Replace('_', ' ')
+            : parsed!.Value("name", "info")!.Trim();
+        return new DetectedPackage
+        {
+            Kind = InstallContentKind.Screenpack,
             DisplayName = display,
             SuggestedFolderName = folderName,
             PackageRoot = defDirectory,

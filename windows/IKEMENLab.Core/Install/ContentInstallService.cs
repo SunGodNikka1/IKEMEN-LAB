@@ -138,6 +138,40 @@ public sealed class ContentInstallService : IContentInstallService
             };
         }
 
+        if (package.Kind == InstallContentKind.Screenpack)
+        {
+            var target = Path.Combine(ikemenRoot, "data", package.SuggestedFolderName);
+            var exists = Directory.Exists(target);
+            var warnings = new List<string>(package.Warnings);
+            if (!warnings.Any(w => w.Contains("activate", StringComparison.OrdinalIgnoreCase)))
+                warnings.Add("Screenpack will not be activated automatically after install.");
+            var enriched = new DetectedPackage
+            {
+                Kind = package.Kind,
+                DisplayName = package.DisplayName,
+                SuggestedFolderName = package.SuggestedFolderName,
+                PackageRoot = package.PackageRoot,
+                DefPath = package.DefPath,
+                SourceInput = package.SourceInput,
+                Warnings = warnings,
+                MissingAssets = package.MissingAssets,
+                FileCount = package.FileCount
+            };
+            var plan = exists
+                ? _mutations.PlanReplaceDirectory(ikemenRoot, target, package.PackageRoot)
+                : _mutations.PlanCreateDirectory(ikemenRoot, target, package.PackageRoot);
+
+            return new InstallPlanItem
+            {
+                Package = enriched,
+                TargetDirectory = target,
+                DestinationExists = exists,
+                Decision = exists ? InstallItemDecision.NeedsDecision : InstallItemDecision.InstallNew,
+                MutationPlan = plan,
+                AffectedPaths = plan.AffectedPaths
+            };
+        }
+
         // Stage
         var flat = ContentDetector.IsFlatStageLayout(package, scanRoot);
         if (flat)

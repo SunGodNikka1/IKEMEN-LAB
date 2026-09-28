@@ -5,7 +5,8 @@ namespace IKEMENLab.Core.Install;
 public enum InstallContentKind
 {
     Character,
-    Stage
+    Stage,
+    Screenpack
 }
 
 public enum InstallItemDecision
@@ -53,7 +54,13 @@ public sealed class InstallPlanItem
     public string? OperationId { get; set; }
     public IReadOnlyList<string> AffectedPaths { get; init; } = Array.Empty<string>();
 
-    public string KindLabel => Package.Kind == InstallContentKind.Character ? "Character" : "Stage";
+    public string KindLabel => Package.Kind switch
+    {
+        InstallContentKind.Character => "Character",
+        InstallContentKind.Stage => "Stage",
+        InstallContentKind.Screenpack => "Screenpack",
+        _ => Package.Kind.ToString()
+    };
     public string StatusLabel => Decision switch
     {
         InstallItemDecision.InstallNew => "New",
