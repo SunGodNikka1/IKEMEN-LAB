@@ -6,6 +6,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using IKEMENLab.App.Services;
 using IKEMENLab.App.ViewModels;
+using IKEMENLab.App.Views;
+using IKEMENLab.Core.Install;
 using IKEMENLab.Core.Parsing;
 using IKEMENLab.Core.Services;
 using IKEMENLab.Core.Settings;
@@ -50,13 +52,13 @@ public partial class App : Application
             window.WindowStartupLocation = WindowStartupLocation.Manual;
             window.Left = SystemParameters.VirtualScreenLeft + 20;
             window.Top = SystemParameters.VirtualScreenTop + 20;
-            window.Loaded += (_, _) => ScheduleSnapshot(window, options);
+            window.Loaded += (_, _) => ScheduleSnapshot(window, options, mainVm);
         }
 
         window.Show();
     }
 
-    private void ScheduleSnapshot(Window window, QaOptions options)
+    private void ScheduleSnapshot(Window window, QaOptions options, MainViewModel mainVm)
     {
         var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(options.SnapshotDelaySeconds) };
         timer.Tick += (_, _) =>
@@ -64,9 +66,16 @@ public partial class App : Application
             timer.Stop();
             try
             {
-                if (options.AfterLoad is { } action) action(window);
-                window.UpdateLayout();
-                SaveSnapshot((FrameworkElement)window.Content, options.SnapshotPath!);
+                if (options.InstallPreviewPath is { } previewPath)
+                {
+                    ShowInstallPreviewForQa(window, mainVm, previewPath, options.SnapshotPath!);
+                }
+                else
+                {
+                    if (options.AfterLoad is { } action) action(window);
+                    window.UpdateLayout();
+                    SaveSnapshot((FrameworkElement)window.Content, options.SnapshotPath!);
+                }
             }
             finally
             {
@@ -76,10 +85,35 @@ public partial class App : Application
         timer.Start();
     }
 
+    private static void ShowInstallPreviewForQa(Window owner, MainViewModel mainVm, string inputPath, string snapshotPath)
+    {
+        var root = mainVm.Snapshot?.Installation.RootPath;
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            SaveSnapshot((FrameworkElement)owner.Content, snapshotPath);
+            return;
+        }
+
+        var installer = new ContentInstallService();
+        var inspect = installer.Inspect([inputPath], root);
+        var previewVm = new InstallPreviewViewModel(inspect);
+        var preview = new InstallPreviewWindow(previewVm)
+        {
+            Owner = owner,
+            ShowActivated = false,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner
+        };
+        preview.Show();
+        preview.UpdateLayout();
+        SaveSnapshot(preview, snapshotPath);
+        preview.Close();
+        installer.CleanupStaging(inspect.StagingDirectories);
+    }
+
     private static void SaveSnapshot(FrameworkElement root, string path)
     {
-        var width = (int)Math.Ceiling(root.ActualWidth);
-        var height = (int)Math.Ceiling(root.ActualHeight);
+        var width = (int)Math.Ceiling(Math.Max(root.ActualWidth, 1));
+        var height = (int)Math.Ceiling(Math.Max(root.ActualHeight, 1));
         var bitmap = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
@@ -101,6 +135,7 @@ public partial class App : Application
         public NavPage? Page { get; private set; }
         public BrowserViewMode? View { get; private set; }
         public string? SnapshotPath { get; private set; }
+        public string? InstallPreviewPath { get; private set; }
         public double SnapshotDelaySeconds { get; private set; } = 8;
         public int Width { get; private set; }
         public int Height { get; private set; }
@@ -125,6 +160,9 @@ public partial class App : Application
                         break;
                     case "snapshot":
                         o.SnapshotPath = value;
+                        break;
+                    case "install-preview":
+                        o.InstallPreviewPath = value;
                         break;
                     case "snapshot-delay" when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var d):
                         o.SnapshotDelaySeconds = Math.Clamp(d, 0.5, 120);

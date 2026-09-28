@@ -89,8 +89,10 @@
                     <TextBlock Text="INSTALL CONTENT" Style="{StaticResource SectionLabel}" FontFamily="{StaticResource CaptionFont}"/>
 
                     <Grid x:Name="DropZone" Height="170" Margin="0,12,0,0" AllowDrop="True" Background="Transparent"
+                          Cursor="Hand"
                           DragEnter="DropZone_DragEnter" DragLeave="DropZone_DragLeave" Drop="DropZone_Drop"
-                          ToolTip="Drop archives or folders to preview. Installing is not enabled yet; nothing is changed.">
+                          MouseLeftButtonUp="DropZone_Click"
+                          ToolTip="Drop archives/folders or click to browse. Preview before install.">
                         <Border x:Name="DropFill" CornerRadius="12" Background="{DynamicResource CardBackgroundBrush}"/>
                         <Rectangle x:Name="DropStroke" RadiusX="12" RadiusY="12" StrokeThickness="1.5" StrokeDashArray="5 4"
                                    Stroke="{DynamicResource BorderActive}" SnapsToDevicePixels="True"/>
@@ -106,7 +108,11 @@
                                        FontSize="14" FontWeight="Medium" Foreground="{DynamicResource TextPrimary}"/>
                             <TextBlock HorizontalAlignment="Center" TextAlignment="Center" Margin="0,6,0,0"
                                        Style="{StaticResource CaptionText}" TextWrapping="Wrap" MaxWidth="420"
-                                       Text="Drag and drop .zip, .rar, .7z or folders here to install characters or stages."/>
+                                       Text="Drag and drop .zip, .rar, .7z or folders — or click to browse archives."/>
+                            <Button Content="Browse folder…" Margin="0,10,0,0" HorizontalAlignment="Center"
+                                    Style="{StaticResource LinkButton}"
+                                    Command="{Binding BrowseInstallFolderCommand}"
+                                    Click="BrowseFolder_Click"/>
                         </StackPanel>
                     </Grid>
 

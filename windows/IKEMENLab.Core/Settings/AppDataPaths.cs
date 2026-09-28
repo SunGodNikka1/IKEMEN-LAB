@@ -17,6 +17,9 @@ public static class AppDataPaths
     public static string GetMutationOperationsDirectory() =>
         Path.Combine(GetAppDataDirectory(), "mutations");
 
+    public static string GetInstallStagingDirectory() =>
+        Path.Combine(GetAppDataDirectory(), "install-staging");
+
     public static void EnsureAppDataDirectory()
     {
         Directory.CreateDirectory(GetAppDataDirectory());
@@ -27,5 +30,6 @@ public static class AppDataPaths
         EnsureAppDataDirectory();
         Directory.CreateDirectory(GetBackupsDirectory());
         Directory.CreateDirectory(GetMutationOperationsDirectory());
+        Directory.CreateDirectory(GetInstallStagingDirectory());
     }
 }

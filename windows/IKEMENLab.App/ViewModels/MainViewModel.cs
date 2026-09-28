@@ -28,7 +28,11 @@ public sealed class MainViewModel : ObservableObject
         _indexService = indexService;
 
         Artwork = new ArtworkLoader();
-        Dashboard = new DashboardViewModel(launcher, Artwork, page => Navigate(page));
+        Dashboard = new DashboardViewModel(
+            launcher,
+            Artwork,
+            page => Navigate(page),
+            async () => await RefreshAsync(null));
         Characters = new CharactersViewModel(Artwork, page => Navigate(page));
         Settings = new SettingsViewModel(settingsStore, folderPicker, root => _ = RefreshAsync(root));
         Stages = new StagesViewModel(Artwork, page => Navigate(page));

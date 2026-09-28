@@ -1,12 +1,12 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using IKEMENLab.App.ViewModels;
 
 namespace IKEMENLab.App.Views;
 
 public partial class DashboardView : UserControl
 {
-    // Content widths (excluding the sidebar) where the layout reflows.
     private const double TwoColumnMinWidth = 860;
     private const double FourCardMinWidth = 720;
 
@@ -41,8 +41,6 @@ public partial class DashboardView : UserControl
         }
     }
 
-    // ---- Drop zone: visual feedback only. Installation is a later safe-write phase. ----
-
     private void DropZone_DragEnter(object sender, DragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) ? DragDropEffects.Copy : DragDropEffects.None;
@@ -61,6 +59,32 @@ public partial class DashboardView : UserControl
         }
 
         e.Handled = true;
+    }
+
+    private void DropZone_Click(object sender, MouseButtonEventArgs e)
+    {
+        // Ignore clicks that originated on the nested Browse folder button.
+        if (e.OriginalSource is DependencyObject d && FindAncestorButton(d) is not null)
+            return;
+
+        if (DataContext is DashboardViewModel vm && vm.BrowseInstallFilesCommand.CanExecute(null))
+            vm.BrowseInstallFilesCommand.Execute(null);
+    }
+
+    private void BrowseFolder_Click(object sender, RoutedEventArgs e)
+    {
+        e.Handled = true;
+    }
+
+    private static Button? FindAncestorButton(DependencyObject? current)
+    {
+        while (current is not null)
+        {
+            if (current is Button b) return b;
+            current = System.Windows.Media.VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
     }
 
     private void ResetDropStroke()

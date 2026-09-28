@@ -4,9 +4,12 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
+using IKEMENLab.App.Views;
+using IKEMENLab.Core.Install;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.Services;
 using IKEMENLab.Core.Validation;
+using Microsoft.Win32;
 
 namespace IKEMENLab.App.ViewModels;
 
@@ -23,6 +26,8 @@ public sealed class DashboardViewModel : ObservableObject
 {
     private readonly IGameLauncher _launcher;
     private readonly Action<NavPage> _navigate;
+    private readonly Func<Task> _refreshLibrary;
+    private readonly IContentInstallService _installer;
     private readonly Services.ArtworkLoader _artwork;
     private LibrarySnapshot? _snapshot;
     private CancellationTokenSource? _backgroundWork;
@@ -50,12 +55,20 @@ public sealed class DashboardViewModel : ObservableObject
     private bool _healthExpanded;
 
     private string? _dropNotice;
+    private bool _installBusy;
 
-    public DashboardViewModel(IGameLauncher launcher, Services.ArtworkLoader artwork, Action<NavPage> navigate)
+    public DashboardViewModel(
+        IGameLauncher launcher,
+        Services.ArtworkLoader artwork,
+        Action<NavPage> navigate,
+        Func<Task> refreshLibrary,
+        IContentInstallService? installer = null)
     {
         _launcher = launcher;
         _artwork = artwork;
         _navigate = navigate;
+        _refreshLibrary = refreshLibrary;
+        _installer = installer ?? new ContentInstallService();
         LaunchCommand = new RelayCommand(Launch, () => CanLaunch && !IsGameRunning);
         OpenCharactersCommand = new RelayCommand(() => _navigate(NavPage.Characters));
         OpenStagesCommand = new RelayCommand(() => _navigate(NavPage.Stages));
@@ -71,6 +84,8 @@ public sealed class DashboardViewModel : ObservableObject
             }
         });
         DismissDropNoticeCommand = new RelayCommand(() => DropNotice = null);
+        BrowseInstallFilesCommand = new AsyncRelayCommand(BrowseFilesAsync, () => !_installBusy && CanInstall);
+        BrowseInstallFolderCommand = new AsyncRelayCommand(BrowseFolderAsync, () => !_installBusy && CanInstall);
     }
 
     public ICommand LaunchCommand { get; }
@@ -80,6 +95,8 @@ public sealed class DashboardViewModel : ObservableObject
     public ICommand ToggleHealthDetailsCommand { get; }
     public ICommand OpenRecentCommand { get; }
     public ICommand DismissDropNoticeCommand { get; }
+    public ICommand BrowseInstallFilesCommand { get; }
+    public ICommand BrowseInstallFolderCommand { get; }
 
     public ObservableCollection<RecentItemViewModel> RecentItems { get; } = [];
     public ObservableCollection<HealthGroupViewModel> HealthGroups { get; } = [];
@@ -92,6 +109,8 @@ public sealed class DashboardViewModel : ObservableObject
     public string StorageToolTip { get => _storageToolTip; private set => SetProperty(ref _storageToolTip, value); }
     public string StatusMessage { get => _statusMessage; private set => SetProperty(ref _statusMessage, value); }
     public string LaunchSubtitle { get => _launchSubtitle; private set => SetProperty(ref _launchSubtitle, value); }
+
+    public bool CanInstall => !string.IsNullOrWhiteSpace(RootPath) && _snapshot is { Installation.CanBrowse: true };
 
     public bool CanLaunch
     {
@@ -113,7 +132,6 @@ public sealed class DashboardViewModel : ObservableObject
 
     public bool HasRecentItems => RecentItems.Count > 0;
 
-    // ---- Quick settings (read-only mirror of save/config.ini) ----
     public bool QuickSettingsAvailable { get => _quickSettingsAvailable; private set => SetProperty(ref _quickSettingsAvailable, value); }
     public bool VSync { get => _vSync; private set => SetProperty(ref _vSync, value); }
     public bool Fullscreen { get => _fullscreen; private set => SetProperty(ref _fullscreen, value); }
@@ -130,7 +148,6 @@ public sealed class DashboardViewModel : ObservableObject
     public string MasterVolumeText => QuickSettingsAvailable ? $"{Math.Round(MasterVolume):0}%" : "—";
     public string QuickSettingsNote { get => _quickSettingsNote; private set => SetProperty(ref _quickSettingsNote, value); }
 
-    // ---- Content health ----
     public HealthState HealthState
     {
         get => _healthState;
@@ -145,7 +162,6 @@ public sealed class DashboardViewModel : ObservableObject
     public int HealthIssueCount { get => _healthIssueCount; private set => SetProperty(ref _healthIssueCount, value); }
     public bool HealthExpanded { get => _healthExpanded; set => SetProperty(ref _healthExpanded, value); }
 
-    // ---- Drop zone ----
     public string? DropNotice { get => _dropNotice; private set => SetProperty(ref _dropNotice, value); }
 
     public void ApplySnapshot(LibrarySnapshot? snapshot)
@@ -171,6 +187,8 @@ public sealed class DashboardViewModel : ObservableObject
             StatusMessage = "Choose an IKEMEN GO root in Settings.";
             ApplyQuickSettings(null);
             OnPropertyChanged(nameof(HasRecentItems));
+            OnPropertyChanged(nameof(CanInstall));
+            CommandManager.InvalidateRequerySuggested();
             return;
         }
 
@@ -194,6 +212,8 @@ public sealed class DashboardViewModel : ObservableObject
         }
 
         OnPropertyChanged(nameof(HasRecentItems));
+        OnPropertyChanged(nameof(CanInstall));
+        CommandManager.InvalidateRequerySuggested();
         ApplyQuickSettings(snapshot);
 
         if (snapshot.Installation.CanBrowse)
@@ -217,13 +237,140 @@ public sealed class DashboardViewModel : ObservableObject
         if (ReferenceEquals(snapshot, _snapshot)) row.Thumbnail = image;
     }
 
-    /// <summary>Called by the drop zone. Installing is a later safe-write phase; nothing is touched.</summary>
     public void HandleDroppedPaths(IReadOnlyList<string> paths)
     {
         if (paths.Count == 0) return;
-        var names = string.Join(", ", paths.Take(3).Select(Path.GetFileName));
-        if (paths.Count > 3) names += $" +{paths.Count - 3} more";
-        DropNotice = $"Received {names}. Installing content is not enabled in this build yet, so nothing was copied or changed.";
+        _ = BeginInstallFlowAsync(paths);
+    }
+
+    private async Task BrowseFilesAsync()
+    {
+        if (!CanInstall)
+        {
+            DropNotice = "Select a valid IKEMEN GO folder in Settings first.";
+            return;
+        }
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select character or stage archives",
+            Multiselect = true,
+            Filter = "Archives (*.zip;*.rar;*.7z)|*.zip;*.rar;*.7z|All files (*.*)|*.*"
+        };
+
+        if (dialog.ShowDialog() != true || dialog.FileNames.Length == 0) return;
+        await BeginInstallFlowAsync(dialog.FileNames);
+    }
+
+    private async Task BrowseFolderAsync()
+    {
+        if (!CanInstall)
+        {
+            DropNotice = "Select a valid IKEMEN GO folder in Settings first.";
+            return;
+        }
+
+        var dialog = new OpenFolderDialog
+        {
+            Title = "Select character or stage folder",
+            Multiselect = true
+        };
+
+        if (dialog.ShowDialog() != true || dialog.FolderNames.Length == 0) return;
+        await BeginInstallFlowAsync(dialog.FolderNames);
+    }
+
+    private async Task BeginInstallFlowAsync(IReadOnlyList<string> paths)
+    {
+        if (_installBusy) return;
+        if (!CanInstall || string.IsNullOrWhiteSpace(RootPath))
+        {
+            DropNotice = "Select a valid IKEMEN GO folder in Settings before installing.";
+            return;
+        }
+
+        _installBusy = true;
+        DropNotice = "Inspecting content…";
+        CommandManager.InvalidateRequerySuggested();
+
+        InspectBatchResult inspect;
+        try
+        {
+            var root = RootPath;
+            inspect = await Task.Run(() => _installer.Inspect(paths, root));
+        }
+        catch (Exception ex)
+        {
+            DropNotice = "Inspect failed: " + ex.Message;
+            _installBusy = false;
+            return;
+        }
+
+        if (inspect.Items.Count == 0)
+        {
+            DropNotice = inspect.Failures.Count > 0
+                ? string.Join(" · ", inspect.Failures.Select(f => f.Reason).Take(3))
+                : "No character or stage packages detected.";
+            _installer.CleanupStaging(inspect.StagingDirectories);
+            _installBusy = false;
+            return;
+        }
+
+        DropNotice = null;
+        var previewVm = new InstallPreviewViewModel(inspect);
+        var window = new InstallPreviewWindow(previewVm)
+        {
+            Owner = Application.Current?.MainWindow
+        };
+
+        var confirmed = window.ShowDialog() == true;
+        if (!confirmed)
+        {
+            _installer.CleanupStaging(inspect.StagingDirectories);
+            DropNotice = "Install cancelled.";
+            _installBusy = false;
+            return;
+        }
+
+        previewVm.ApplyDecisionsToItems();
+        DropNotice = "Installing…";
+
+        InstallBatchResult result;
+        try
+        {
+            var root = RootPath;
+            result = await Task.Run(() => _installer.Execute(inspect.Items, root, dryRun: false));
+        }
+        catch (Exception ex)
+        {
+            DropNotice = "Install failed: " + ex.Message;
+            _installer.CleanupStaging(inspect.StagingDirectories);
+            _installBusy = false;
+            return;
+        }
+
+        _installer.CleanupStaging(inspect.StagingDirectories);
+
+        var parts = new List<string>();
+        if (result.InstalledCount > 0) parts.Add($"{result.InstalledCount} installed");
+        if (result.SkippedCount > 0) parts.Add($"{result.SkippedCount} skipped");
+        if (result.FailedCount > 0)
+        {
+            var firstFail = result.Items.FirstOrDefault(i =>
+                i.Outcome is InstallItemOutcome.Failed or InstallItemOutcome.Rejected);
+            parts.Add($"{result.FailedCount} failed" + (firstFail?.Error is { } err ? $": {err}" : string.Empty));
+        }
+
+        DropNotice = parts.Count == 0 ? "Nothing installed." : string.Join(" · ", parts);
+
+        if (result.InstalledCount > 0)
+        {
+            try { await _refreshLibrary(); }
+            catch (Exception ex) { DropNotice += " · Refresh failed: " + ex.Message; }
+        }
+
+        _installBusy = false;
+        CommandManager.InvalidateRequerySuggested();
     }
 
     private void ApplyQuickSettings(LibrarySnapshot? snapshot)
@@ -252,7 +399,6 @@ public sealed class DashboardViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            // Superseded by a newer snapshot.
         }
         catch (Exception ex)
         {
@@ -290,9 +436,7 @@ public sealed class DashboardViewModel : ObservableObject
 
         HealthGroups.Clear();
         foreach (var result in results)
-        {
             HealthGroups.Add(new HealthGroupViewModel(result));
-        }
 
         var errors = results.Sum(r => r.ErrorCount);
         var warnings = results.Sum(r => r.WarningCount);
@@ -350,7 +494,6 @@ public sealed class DashboardViewModel : ObservableObject
         }
         catch (ArgumentException)
         {
-            // Process already exited.
             IsGameRunning = false;
         }
         catch (InvalidOperationException)
@@ -378,6 +521,7 @@ public sealed class RecentItemViewModel : ObservableObject
         get => _thumbnail;
         set => SetProperty(ref _thumbnail, value);
     }
+
     public string Name => Item.Name;
     public string Author => Item.Author;
     public bool IsCharacter => Item.Type == RecentContentType.Character;
@@ -405,9 +549,9 @@ public sealed class HealthGroupViewModel
         Path = result.ContentPath;
         TypeGlyph = result.ContentType switch
         {
-            "character" => "",
-            "stage" => "",
-            _ => ""
+            "character" => "\uE77B",
+            "stage" => "\uE91B",
+            _ => "\uE8B7"
         };
         Issues = result.Issues
             .Where(i => i.Severity != ValidationSeverity.Info)
