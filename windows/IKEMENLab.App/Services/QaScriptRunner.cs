@@ -2,11 +2,14 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Automation.Peers;
+using System.Windows.Automation.Provider;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using IKEMENLab.App.ViewModels;
+using IKEMENLab.App.Views;
 using IKEMENLab.Core.Collections;
 using IKEMENLab.Core.Services;
 
@@ -21,7 +24,12 @@ namespace IKEMENLab.App.Services;
 /// select character|stage ID, delete character ID [cancel] (Delete Character with the confirmation
 /// answered yes, or no with "cancel"), refresh-button (the sidebar Refresh command),
 /// vsync on|off, volume N, collection-create NAME|id,id, activate-collection NAME,
-/// install [replace] PATH, hold PATH, release, dump PATH, snapshot PATH, sleep MS.
+/// install [replace] PATH, hold PATH, release, dump PATH, snapshot PATH, sleep MS,
+/// ui-click NAME (real Button Click by AutomationProperties.Name),
+/// open-sprites / close-sprites / sprite-filter TEXT / sprite-zoom N / sprite-select GROUP,NUMBER /
+/// sprite-palette INDEX / sprite-axis on|off / sprite-export PATH / sprite-minmax /
+/// open-tuning / close-tuning / tune-set LABEL VALUE / tune-scale FACTOR / tune-save / tune-undo /
+/// tune-external-set KEY VALUE (mutates the open CNS on disk for conflict tests).
 /// Lines starting with '#' are ignored.
 /// </summary>
 public sealed class QaScriptRunner(MainViewModel main, Window window)
@@ -138,6 +146,73 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 break;
             case "snapshot":
                 Snapshot(rest);
+                break;
+            case "ui-click":
+                await UiClickAsync(rest);
+                break;
+            case "open-sprites":
+                await OpenSpritesAsync();
+                break;
+            case "close-sprites":
+                CloseWindows<SpriteInspectorWindow>();
+                break;
+            case "sprite-filter":
+                SpriteVm().Filter = rest;
+                await Task.Delay(200);
+                _log.Add($"  sprite-filter: shown={SpriteVm().Sprites.Count}");
+                break;
+            case "sprite-zoom":
+                SpriteVm().Zoom = double.Parse(rest, CultureInfo.InvariantCulture);
+                await Task.Delay(100);
+                _log.Add($"  sprite-zoom: {SpriteVm().ZoomText}");
+                break;
+            case "sprite-select":
+                SpriteSelect(rest);
+                await Task.Delay(400);
+                _log.Add($"  sprite-select: {SpriteVm().DetailText}");
+                break;
+            case "sprite-palette":
+                SpritePalette(int.Parse(rest, CultureInfo.InvariantCulture));
+                await Task.Delay(400);
+                _log.Add($"  sprite-palette: {SpriteVm().SelectedPalette.Label}");
+                break;
+            case "sprite-axis":
+                SpriteVm().ShowAxis = rest.Equals("on", StringComparison.OrdinalIgnoreCase);
+                _log.Add($"  sprite-axis: {SpriteVm().ShowAxis}");
+                break;
+            case "sprite-export":
+                await SpriteExportAsync(rest);
+                break;
+            case "sprite-minmax":
+                await SpriteMinMaxAsync();
+                break;
+            case "open-tuning":
+                await OpenTuningAsync();
+                break;
+            case "close-tuning":
+                CloseWindows<CharacterTuningWindow>();
+                break;
+            case "tune-set":
+                TuneSet(rest);
+                await Task.Delay(150);
+                break;
+            case "tune-scale":
+                TuneVm().ScaleCommand.Execute(rest);
+                await Task.Delay(150);
+                _log.Add($"  tune-scale: {rest} x={TuneRow("Width scale")?.Text} y={TuneRow("Height scale")?.Text}");
+                break;
+            case "tune-save":
+                await UiClickAsync("Save tuning");
+                await WaitTuningIdleAsync();
+                _log.Add($"  tune-save: status='{TuneVm().Status}' canUndo={TuneVm().CanUndo} life={TuneRow("Life")?.Text}");
+                break;
+            case "tune-undo":
+                await UiClickAsync("Undo last save");
+                await WaitTuningIdleAsync();
+                _log.Add($"  tune-undo: status='{TuneVm().Status}' life={TuneRow("Life")?.Text} x={TuneRow("Width scale")?.Text}");
+                break;
+            case "tune-external-set":
+                TuneExternalSet(rest);
                 break;
             default:
                 throw new InvalidOperationException("Unknown QA command: " + verb);
@@ -293,6 +368,219 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
             var row = main.Stages.Stages.FirstOrDefault(r => r.Entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
                       ?? throw new InvalidOperationException("No stage row " + id);
             await main.Stages.ToggleStatusAsync(row);
+        }
+    }
+
+    private async Task UiClickAsync(string name)
+    {
+        window.UpdateLayout();
+        await Task.Delay(50);
+        var until = DateTime.UtcNow.AddSeconds(10);
+        Button? button = null;
+        while (DateTime.UtcNow < until)
+        {
+            button = AllButtons().FirstOrDefault(b =>
+                b.IsVisible && b.IsEnabled &&
+                string.Equals(System.Windows.Automation.AutomationProperties.GetName(b), name, StringComparison.Ordinal));
+            if (button is not null) break;
+            await Task.Delay(50);
+        }
+
+        button ??= AllButtons().FirstOrDefault(b =>
+                        b.IsVisible &&
+                        string.Equals(System.Windows.Automation.AutomationProperties.GetName(b), name, StringComparison.Ordinal));
+        if (button is null)
+            throw new InvalidOperationException("No visible button named '" + name + "'");
+        if (!button.IsEnabled)
+            throw new InvalidOperationException("Button '" + name + "' is disabled");
+
+        // RaiseEvent(ClickEvent) alone does not call ButtonBase.OnClick, so Command never runs.
+        // Invoke via the automation peer — same path as a real UI Automation click.
+        var peer = new ButtonAutomationPeer(button);
+        if (peer.GetPattern(PatternInterface.Invoke) is IInvokeProvider invoke)
+            invoke.Invoke();
+        else if (button.Command is { } cmd && cmd.CanExecute(button.CommandParameter))
+            cmd.Execute(button.CommandParameter);
+        else
+            throw new InvalidOperationException("Button '" + name + "' is not invokable");
+        await Task.Delay(250);
+        _log.Add($"  ui-click: '{name}' ok");
+    }
+
+    private async Task WaitTuningIdleAsync()
+    {
+        var until = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < until)
+        {
+            var status = TuneVm().Status ?? "";
+            if (status.StartsWith("Saved ", StringComparison.Ordinal) ||
+                status.StartsWith("Restored ", StringComparison.Ordinal) ||
+                status.Contains("could not", StringComparison.OrdinalIgnoreCase) ||
+                status.Contains("changed in the CNS", StringComparison.OrdinalIgnoreCase) ||
+                status.Contains("Fix the highlighted", StringComparison.OrdinalIgnoreCase))
+            {
+                await Task.Delay(150);
+                return;
+            }
+
+            await Task.Delay(50);
+        }
+    }
+
+    private async Task OpenSpritesAsync()
+    {
+        var before = Application.Current.Windows.OfType<SpriteInspectorWindow>().Count();
+        await UiClickAsync("Inspect Sprites");
+        // Large SFFs with verifyDecode can take a while on cold disk.
+        var until = DateTime.UtcNow.AddSeconds(90);
+        SpriteInspectorWindow? win = null;
+        while (DateTime.UtcNow < until)
+        {
+            win = Application.Current.Windows.OfType<SpriteInspectorWindow>().LastOrDefault();
+            if (win is not null && win.DataContext is SpriteInspectorViewModel vm && !vm.IsLoading) break;
+            await Task.Delay(100);
+        }
+
+        if (win?.DataContext is not SpriteInspectorViewModel loaded || loaded.IsLoading)
+            throw new TimeoutException("Sprite Inspector did not finish loading.");
+        _log.Add($"  open-sprites: before={before} title='{win.Title}' summary='{loaded.Summary}' sprites={loaded.Sprites.Count} findings={loaded.Findings.Count}");
+    }
+
+    private async Task OpenTuningAsync()
+    {
+        await UiClickAsync("Edit Size and Stats");
+        var until = DateTime.UtcNow.AddSeconds(15);
+        CharacterTuningWindow? win = null;
+        while (DateTime.UtcNow < until)
+        {
+            win = Application.Current.Windows.OfType<CharacterTuningWindow>().LastOrDefault();
+            if (win is not null && win.DataContext is CharacterTuningViewModel) break;
+            await Task.Delay(50);
+        }
+
+        if (win?.DataContext is not CharacterTuningViewModel vm)
+            throw new TimeoutException("Size & Stats window did not open.");
+        _log.Add($"  open-tuning: cns='{vm.CnsFile}' hasSnapshot={vm.HasSnapshot} intro='{vm.Intro}'");
+    }
+
+    private void CloseWindows<T>() where T : Window
+    {
+        var open = Application.Current.Windows.OfType<T>().ToList();
+        foreach (var w in open) w.Close();
+        _log.Add($"  close: {typeof(T).Name} count={open.Count}");
+    }
+
+    private SpriteInspectorViewModel SpriteVm() =>
+        Application.Current.Windows.OfType<SpriteInspectorWindow>().LastOrDefault()?.DataContext as SpriteInspectorViewModel
+        ?? throw new InvalidOperationException("Sprite Inspector is not open.");
+
+    private CharacterTuningViewModel TuneVm() =>
+        Application.Current.Windows.OfType<CharacterTuningWindow>().LastOrDefault()?.DataContext as CharacterTuningViewModel
+        ?? throw new InvalidOperationException("Size & Stats is not open.");
+
+    private TuningRowViewModel? TuneRow(string label) =>
+        TuneVm().StatRows.Concat(TuneVm().SizeRows).FirstOrDefault(r => r.Label.Equals(label, StringComparison.OrdinalIgnoreCase));
+
+    private void SpriteSelect(string spec)
+    {
+        var vm = SpriteVm();
+        if (spec.Contains(','))
+        {
+            var parts = spec.Split(',');
+            var g = int.Parse(parts[0].Trim(), CultureInfo.InvariantCulture);
+            var n = int.Parse(parts[1].Trim(), CultureInfo.InvariantCulture);
+            vm.SelectedSprite = vm.Sprites.FirstOrDefault(s => s.Group == g && s.Number == n)
+                                ?? throw new InvalidOperationException("No filtered sprite " + spec);
+        }
+        else
+        {
+            var index = int.Parse(spec, CultureInfo.InvariantCulture);
+            vm.SelectedSprite = vm.Sprites.ElementAtOrDefault(index)
+                                ?? throw new InvalidOperationException("No sprite index " + spec);
+        }
+    }
+
+    private void SpritePalette(int index)
+    {
+        var vm = SpriteVm();
+        if (index < 0 || index >= vm.Palettes.Count) throw new InvalidOperationException("Palette index out of range");
+        vm.SelectedPalette = vm.Palettes[index];
+    }
+
+    private async Task SpriteExportAsync(string path)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        SpriteInspectorViewModel.QaExportPath = path;
+        try
+        {
+            await UiClickAsync("Export PNG");
+            await Task.Delay(300);
+            var vm = SpriteVm();
+            _log.Add($"  sprite-export: path='{vm.LastExportPath}' exists={File.Exists(path)} bytes={(File.Exists(path) ? new FileInfo(path).Length : 0)}");
+            if (!File.Exists(path)) throw new InvalidOperationException("Export did not write " + path);
+        }
+        finally
+        {
+            SpriteInspectorViewModel.QaExportPath = null;
+        }
+    }
+
+    private async Task SpriteMinMaxAsync()
+    {
+        var win = Application.Current.Windows.OfType<SpriteInspectorWindow>().LastOrDefault()
+                  ?? throw new InvalidOperationException("Sprite Inspector is not open.");
+        win.WindowState = WindowState.Minimized;
+        await Task.Delay(200);
+        win.WindowState = WindowState.Normal;
+        await Task.Delay(200);
+        var w = win.Width;
+        var h = win.Height;
+        win.Width = Math.Max(win.MinWidth, w - 40);
+        win.Height = Math.Max(win.MinHeight, h - 40);
+        await Task.Delay(150);
+        win.Width = w;
+        win.Height = h;
+        _log.Add("  sprite-minmax: ok");
+    }
+
+    private void TuneSet(string rest)
+    {
+        // tune-set LABEL VALUE — label may contain spaces ("Attack distance 160").
+        var split = rest.LastIndexOf(' ');
+        if (split <= 0) throw new InvalidOperationException("tune-set needs LABEL VALUE");
+        var label = rest[..split].Trim();
+        var value = rest[(split + 1)..].Trim();
+        var row = TuneRow(label) ?? throw new InvalidOperationException("No tuning row " + label);
+        row.Text = value;
+        _log.Add($"  tune-set: {label}='{row.Text}' error='{row.Error}' changed={row.IsChanged}");
+    }
+
+    private void TuneExternalSet(string rest)
+    {
+        var split = rest.IndexOf(' ');
+        if (split <= 0) throw new InvalidOperationException("tune-external-set needs KEY VALUE");
+        var key = rest[..split].Trim();
+        var value = rest[(split + 1)..].Trim();
+        var root = main.Snapshot?.Installation.RootPath ?? throw new InvalidOperationException("No root");
+        var selected = main.Characters.Selected ?? throw new InvalidOperationException("No selected character");
+        var cns = IKEMENLab.Core.Characters.CharacterDetailsReader.ResolveCns(root, selected.Entry)
+                  ?? throw new InvalidOperationException("No CNS");
+        var text = File.ReadAllText(cns);
+        var replaced = System.Text.RegularExpressions.Regex.Replace(
+            text, $@"(?im)^\s*{System.Text.RegularExpressions.Regex.Escape(key)}\s*=\s*.*$", $"{key} = {value}",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        if (replaced == text)
+            throw new InvalidOperationException("Key not found in CNS: " + key);
+        File.WriteAllText(cns, replaced);
+        _log.Add($"  tune-external-set: {key}={value} path='{cns}'");
+    }
+
+    private IEnumerable<Button> AllButtons()
+    {
+        foreach (Window w in Application.Current.Windows)
+        {
+            foreach (var b in Descendants(w).OfType<Button>())
+                yield return b;
         }
     }
 

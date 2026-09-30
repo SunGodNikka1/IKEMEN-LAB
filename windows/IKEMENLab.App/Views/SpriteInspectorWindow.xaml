@@ -126,7 +126,8 @@
                     <CheckBox DockPanel.Dock="Left" Content="Show axis" IsChecked="{Binding ShowAxis}" VerticalAlignment="Center"
                               Foreground="{DynamicResource TextSecondary}"/>
                     <Button DockPanel.Dock="Right" Content="Export PNG…" Style="{StaticResource SecondaryButton}"
-                            Command="{Binding ExportCommand}"/>
+                            Command="{Binding ExportCommand}"
+                            AutomationProperties.Name="Export PNG"/>
                 </DockPanel>
 
                 <Border Grid.Row="1" CornerRadius="8" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"

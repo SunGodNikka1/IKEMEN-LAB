@@ -251,22 +251,35 @@ public sealed class SpriteInspectorViewModel : ObservableObject, IDisposable
     private void Export()
     {
         if (_previewPng is null || _selected is not { } s) return;
-        var dialog = new SaveFileDialog
+        string? path = QaExportPath;
+        if (path is null)
         {
-            Title = "Export sprite",
-            Filter = "PNG image (*.png)|*.png",
-            FileName = $"{System.IO.Path.GetFileNameWithoutExtension(_sffPath)}_{s.Group}_{s.Number}.png"
-        };
-        if (dialog.ShowDialog() != true) return;
+            var dialog = new SaveFileDialog
+            {
+                Title = "Export sprite",
+                Filter = "PNG image (*.png)|*.png",
+                FileName = $"{System.IO.Path.GetFileNameWithoutExtension(_sffPath)}_{s.Group}_{s.Number}.png"
+            };
+            if (dialog.ShowDialog() != true) return;
+            path = dialog.FileName;
+        }
+
         try
         {
-            File.WriteAllBytes(dialog.FileName, _previewPng);
+            File.WriteAllBytes(path, _previewPng);
+            LastExportPath = path;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             UserDialogs.Warn("The sprite could not be saved: " + e.Message, "Export sprite");
         }
     }
+
+    /// <summary>When set (QA scripts), Export writes here instead of opening a Save dialog.</summary>
+    public static string? QaExportPath { get; set; }
+
+    /// <summary>Path of the last successful PNG export (tests/QA).</summary>
+    public string? LastExportPath { get; private set; }
 
     public void Dispose()
     {

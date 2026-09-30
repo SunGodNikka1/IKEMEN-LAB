@@ -52,6 +52,19 @@ public class CharacterTuningTests : IDisposable
     }
 
     [Fact]
+    public void AttackDistHelpDescribesProximityGuard_NotAiTrigger()
+    {
+        var attack = TuningFields.Find("Size.attack.dist")!;
+        var proj = TuningFields.Find("Size.proj.attack.dist")!;
+        Assert.Contains("proximity guard", attack.Help, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AI starts", attack.Help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("legacy", attack.Help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("width/height/depth", attack.Help, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("proximity guard", proj.Help, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("AI starts", proj.Help, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void MissingCnsGivesNoSnapshot()
     {
         File.Delete(_cns);

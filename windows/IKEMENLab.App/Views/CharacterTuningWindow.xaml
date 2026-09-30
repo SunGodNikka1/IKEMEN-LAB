@@ -39,11 +39,14 @@
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="Undo last save" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                         Command="{Binding UndoCommand}"
+                        AutomationProperties.Name="Undo last save"
                         Visibility="{Binding CanUndo, Converter={StaticResource BoolToVis}}"/>
                 <Button Content="Reset" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
-                        Command="{Binding ResetCommand}"/>
+                        Command="{Binding ResetCommand}"
+                        AutomationProperties.Name="Reset tuning"/>
                 <Button Content="Save" Style="{StaticResource PrimaryButton}" MinWidth="88"
-                        Command="{Binding SaveCommand}" IsDefault="True"/>
+                        Command="{Binding SaveCommand}" IsDefault="True"
+                        AutomationProperties.Name="Save tuning"/>
             </StackPanel>
         </DockPanel>
 
@@ -65,15 +68,20 @@
                                 <TextBlock Text="Scale by" VerticalAlignment="Center" FontSize="12" Margin="0,0,12,0"
                                            Foreground="{DynamicResource TextSecondary}"/>
                                 <Button Content="0.75&#215;" CommandParameter="0.75" Command="{Binding ScaleCommand}"
-                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"/>
+                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"
+                                        AutomationProperties.Name="Scale by 0.75"/>
                                 <Button Content="0.9&#215;" CommandParameter="0.9" Command="{Binding ScaleCommand}"
-                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"/>
+                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"
+                                        AutomationProperties.Name="Scale by 0.9"/>
                                 <Button Content="1.1&#215;" CommandParameter="1.1" Command="{Binding ScaleCommand}"
-                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"/>
+                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"
+                                        AutomationProperties.Name="Scale by 1.1"/>
                                 <Button Content="1.25&#215;" CommandParameter="1.25" Command="{Binding ScaleCommand}"
-                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"/>
+                                        Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"
+                                        AutomationProperties.Name="Scale by 1.25"/>
                                 <Button Content="1.5&#215;" CommandParameter="1.5" Command="{Binding ScaleCommand}"
-                                        Style="{StaticResource SecondaryButton}"/>
+                                        Style="{StaticResource SecondaryButton}"
+                                        AutomationProperties.Name="Scale by 1.5"/>
                             </StackPanel>
                             <TextBlock Text="{Binding ScaleHint}" Margin="0,10,0,0" FontSize="11" TextWrapping="Wrap"
                                        Foreground="{DynamicResource TextTertiary}"/>

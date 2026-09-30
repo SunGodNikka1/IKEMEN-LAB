@@ -51,6 +51,7 @@
         <ListBox x:Name="CharacterList" Grid.Row="1" Style="{StaticResource BrowserListBox}"
                  ItemsSource="{Binding Characters}" SelectedItem="{Binding Selected, Mode=TwoWay}"
                  ItemContainerStyle="{StaticResource BrowserRowItem}"
+                 AutomationProperties.Name="Character list"
                  Visibility="{Binding IsListMode, Converter={StaticResource BoolToVis}}">
             <ListBox.ItemTemplate>
                 <DataTemplate DataType="{x:Type vm:CharacterRowViewModel}">

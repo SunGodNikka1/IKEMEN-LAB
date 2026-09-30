@@ -429,7 +429,10 @@ public sealed class CharactersViewModel : ObservableObject
         var viewModel = new CharacterTuningViewModel(_root, row.Entry, row.DisplayName);
         // The attribute bars come from the same CNS, so refresh them after a save or undo.
         viewModel.Changed += () => { if (ReferenceEquals(Selected, row)) _ = LoadInspectorAsync(row); };
-        new CharacterTuningWindow(viewModel) { Owner = Application.Current?.MainWindow }.ShowDialog();
+        var window = new CharacterTuningWindow(viewModel) { Owner = Application.Current?.MainWindow };
+        // QA scripts must keep the dispatcher free to drive the open editor; ShowDialog would deadlock them.
+        if (UserDialogs.QaMode) window.Show();
+        else window.ShowDialog();
     }
 
     private void OpenFolder(CharacterRowViewModel? row)
