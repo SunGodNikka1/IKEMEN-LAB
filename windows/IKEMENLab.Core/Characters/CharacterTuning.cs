@@ -70,8 +70,8 @@ public static class TuningFields
         new(Size, "Size", "air.back", "Air back", TuningKind.Integer, 12, 0, 1000, "Push-box width behind the character, airborne."),
         new(Size, "Size", "air.front", "Air front", TuningKind.Integer, 12, 0, 1000, "Push-box width in front of the character, airborne."),
         new(Size, "Size", "height", "Height", TuningKind.Integer, 60, 1, 1000, "Height used for the camera and target checks."),
-        new(Size, "Size", "attack.dist", "Attack distance", TuningKind.Integer, 160, 0, 2000, "Distance at which the AI starts attacking."),
-        new(Size, "Size", "proj.attack.dist", "Projectile distance", TuningKind.Integer, 90, 0, 2000, "Distance at which the AI starts projectiles.")
+        new(Size, "Size", "attack.dist", "Attack distance", TuningKind.Integer, 160, 0, 2000, "Default attack distance the engine uses for proximity guard (the legacy single value; IKEMEN's width/height/depth variants are not edited here)."),
+        new(Size, "Size", "proj.attack.dist", "Projectile distance", TuningKind.Integer, 90, 0, 2000, "Default projectile attack distance the engine uses for proximity guard.")
     ];
 
     public static TuningField? Find(string id) =>
