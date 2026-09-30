@@ -26,6 +26,11 @@ public static class CliApp
           rules                                    the evidence rules behind every confidence level
           combos       ...                         (milestone 2)
 
+          runtime-prepare --root R --subject <folder> --dummy <folder> --stage <stages/x.def> [--frames N]
+                       builds a disposable sandbox with the Lua probe (never touches R) and prints how to launch it
+          runtime-report  <character> --trace <file.jsonl>   parses a trace and links its states to the static index
+          runtime-clean   <sandbox dir>            deletes a sandbox (only folders carrying the sandbox marker)
+
         <character> is a character folder or its .def. Confidence: StaticProven (literal in the files),
         Inferred (heuristic), Unknown. RuntimeVerified is reserved for a later milestone.
         """;
@@ -44,6 +49,7 @@ public static class CliApp
             var command = opts.Positional[1].ToLowerInvariant();
             if (command == "rules") { output.WriteLine(XRayJson.Rules()); return 0; }
             if (command == "combos") return Fail(output, error, 2, "Combo search is milestone 2 and is not implemented yet.");
+            if (command.StartsWith("runtime-", StringComparison.Ordinal)) return RuntimeCommands.Run(command, opts, output, error);
 
             if (opts.Positional.Count < 3) { error.WriteLine(Usage); return 2; }
             var loaded = Load(opts.Positional[2], opts, output, error, out var index);
@@ -163,11 +169,14 @@ public static class CliApp
         return sb.ToString();
     }
 
-    private sealed record Options(List<string> Positional, string? Root, bool Text, bool NoCommon)
+    internal sealed record Options(List<string> Positional, string? Root, bool Text, bool NoCommon, Dictionary<string, string> Named)
     {
+        public string? Get(string name) => Named.TryGetValue(name, out var v) ? v : null;
+
         public static Options Parse(string[] args)
         {
             var pos = new List<string>();
+            var named = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string? root = null;
             var text = false;
             var noCommon = false;
@@ -178,13 +187,18 @@ public static class CliApp
                     case "--root" when i + 1 < args.Length: root = args[++i]; break;
                     case "--text": text = true; break;
                     case "--no-common": noCommon = true; break;
+                    case var a when a.StartsWith("--", StringComparison.Ordinal) && i + 1 < args.Length:
+                        named[a[2..]] = args[++i];
+                        break;
                     default: pos.Add(args[i]); break;
                 }
             }
 
-            return new Options(pos, root, text, noCommon);
+            return new Options(pos, root, text, noCommon, named);
         }
     }
+
+    internal static int FailWith(TextWriter output, TextWriter error, int code, string message) => Fail(output, error, code, message);
 }
 
 /// <summary>Finds the IKEMEN root and character DEF for a folder or DEF path.</summary>
