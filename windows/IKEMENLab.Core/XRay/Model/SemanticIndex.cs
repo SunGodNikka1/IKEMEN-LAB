@@ -9,7 +9,7 @@ public sealed record ExplainSection(string Title, IReadOnlyList<ExplainItem> Ite
 public sealed record Explanation(SemanticObject Subject, IReadOnlyList<ExplainSection> Sections);
 
 /// <summary>A ChangesState edge seen as a transition between states. Milestone 2 turns these into combo candidates.</summary>
-public sealed record Transition(string FromState, string ToState, string ControllerId, Confidence Confidence, Gate? Gate, string RelationshipId);
+public sealed record Transition(string FromState, string ToState, string ControllerId, RelationKind Kind, Confidence Confidence, Gate? Gate, string RelationshipId);
 
 public sealed record VarUse(Relationship Relationship, SemanticObject Controller, SemanticObject? State);
 

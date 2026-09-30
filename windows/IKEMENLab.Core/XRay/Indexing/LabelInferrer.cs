@@ -40,6 +40,11 @@ internal static class LabelInferrer
                 (members.TryGetValue(r.To, out var l) ? l : members[r.To] = []).Add(r.From);
 
         var byId = ctx.States.States.ToDictionary(s => s.Id, StringComparer.Ordinal);
+        var controllersById = ctx.States.Controllers.ToDictionary(c => c.Id, StringComparer.Ordinal);
+        var readerCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var r in b.Relationships)
+            if (r.Kind == RelationKind.ReadsVar) readerCounts[r.To] = readerCounts.TryGetValue(r.To, out var rc) ? rc + 1 : 1;
+
         foreach (var ability in b.Objects.Values.Where(o => o.Kind == ObjectKind.Ability).ToList())
         {
             var memberIds = members.TryGetValue(ability.Id, out var m) ? m : [];
@@ -58,7 +63,7 @@ internal static class LabelInferrer
             var hitOverrideState = controllers.Any(c => c.Type == "hitoverride" && c.Params.ContainsKey("stateno"));
             var movement = controllers.Any(c => MovementTypes.Contains(c.Type));
 
-            var costsSuper = controllers.Concat(entryControllers.Select(id => ControllerById(ctx, id)).OfType<ControllerData>())
+            var costsSuper = controllers.Concat(entryControllers.Where(controllersById.ContainsKey).Select(id => controllersById[id]))
                 .SelectMany(c => b.From(c.Id))
                 .Any(r => (r.Kind == RelationKind.GatedByPower && r.Prop("op") is ">=" or ">" && Num(r.Prop("value")) >= 1000) ||
                           (r.Kind == RelationKind.ResourceCost && Num(r.Prop("amount")) <= -1000))
@@ -74,7 +79,7 @@ internal static class LabelInferrer
             }
 
             var writesWidely = memberIds.Where(id => b.Find(id)?.Kind == ObjectKind.Variable)
-                .Any(v => b.Relationships.Count(r => r.Kind == RelationKind.ReadsVar && r.To == v) >= 5);
+                .Any(v => readerCounts.TryGetValue(v, out var n) && n >= 5);
 
             var cats = new List<(string Name, string Rule)>();
             if (costsSuper) cats.Add(("Super", "cat.super"));
@@ -96,9 +101,6 @@ internal static class LabelInferrer
             ability.Props["category"] = primary;
         }
     }
-
-    private static ControllerData? ControllerById(LinkContext ctx, string id) =>
-        ctx.States.Controllers.FirstOrDefault(c => c.Id == id);
 
     private static bool HelperHasHitDef(LinkContext ctx, Dictionary<string, StateData> byId, string helperId)
     {

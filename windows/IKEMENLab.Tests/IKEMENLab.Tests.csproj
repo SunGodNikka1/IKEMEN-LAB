@@ -14,5 +14,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\IKEMENLab.Core\IKEMENLab.Core.csproj" />
+    <ProjectReference Include="..\IKEMENLab.Cli\IKEMENLab.Cli.csproj" />
   </ItemGroup>
 </Project>

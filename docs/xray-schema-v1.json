@@ -1,0 +1,441 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ikemenlab/xray/1",
+  "title": "IKEMEN Lab Character X-Ray index",
+  "description": "Output of `ikemenlab xray index`. Deterministic: objects and relationships are sorted by id and property bags by key. Ids are stable across line shifts (they come from content ordinals, never line numbers).",
+  "type": "object",
+  "required": [
+    "schema",
+    "character",
+    "files",
+    "objects",
+    "relationships",
+    "diagnostics"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ikemenlab.xray/1"
+    },
+    "character": {
+      "type": "string",
+      "description": "Root object id, char:<folder>."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/file"
+      }
+    },
+    "objects": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/object"
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/relationship"
+      }
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/diagnostic"
+      }
+    }
+  },
+  "definitions": {
+    "confidence": {
+      "enum": [
+        "StaticProven",
+        "Inferred",
+        "Unknown",
+        "RuntimeVerified"
+      ],
+      "description": "StaticProven: the files literally say it (not that it is reachable). Inferred: heuristic or non-literal. Unknown: could not be determined. RuntimeVerified: reserved for milestone 3; never emitted by milestone 1."
+    },
+    "objectKind": {
+      "enum": [
+        "Character",
+        "File",
+        "Command",
+        "State",
+        "Controller",
+        "HitDef",
+        "Helper",
+        "Projectile",
+        "Variable",
+        "Animation",
+        "AnimFrame",
+        "Clsn",
+        "Sprite",
+        "Ability",
+        "Entity",
+        "Resource"
+      ]
+    },
+    "relationKind": {
+      "enum": [
+        "Contains",
+        "ChangesState",
+        "SetsVictimState",
+        "SetsAttackerState",
+        "Binds",
+        "AffectsTarget",
+        "SpawnsHelper",
+        "HelperRunsState",
+        "SpawnsProjectile",
+        "ReferencesCommand",
+        "ReadsVar",
+        "WritesVar",
+        "ResetsVar",
+        "UsesAnim",
+        "AnimUsesSprite",
+        "HasClsn",
+        "DefinesHitDef",
+        "GatedByPower",
+        "ResourceCost",
+        "EntryPoint",
+        "PartOf",
+        "ActiveAtFrame"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "file",
+        "startLine",
+        "endLine"
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "startLine": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "file": {
+      "type": "object",
+      "required": [
+        "id",
+        "path",
+        "role",
+        "common",
+        "hash"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "def",
+            "cmd",
+            "cns",
+            "st",
+            "air",
+            "common"
+          ]
+        },
+        "common": {
+          "type": "boolean"
+        },
+        "hash": {
+          "type": "string"
+        }
+      }
+    },
+    "label": {
+      "type": "object",
+      "required": [
+        "text",
+        "category",
+        "confidence",
+        "rule"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/definitions/confidence"
+        },
+        "rule": {
+          "type": "string"
+        }
+      },
+      "description": "Labels are interpretations and are never StaticProven."
+    },
+    "triggerLine": {
+      "type": "object",
+      "required": [
+        "text",
+        "expr"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "expr": {
+          "type": "string",
+          "description": "S-expression form of the parsed trigger; (raw \"\u2026\") when it could not be parsed."
+        },
+        "line": {
+          "type": "integer"
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": [
+        "triggerAll",
+        "branches"
+      ],
+      "description": "A controller fires when every triggerAll line holds and at least one branch holds. Branch facets already include the triggerAll conjuncts.",
+      "properties": {
+        "triggerAll": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/triggerLine"
+          }
+        },
+        "branches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "trigger",
+              "lines",
+              "facets"
+            ],
+            "properties": {
+              "trigger": {
+                "type": "integer"
+              },
+              "lines": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/definitions/triggerLine"
+                }
+              },
+              "facets": {
+                "type": "object",
+                "required": [
+                  "commands",
+                  "negatedCommands",
+                  "contact",
+                  "power",
+                  "time",
+                  "animElem",
+                  "ctrlRequired",
+                  "stateTypes",
+                  "moveTypes",
+                  "readsAILevel",
+                  "otherConditions"
+                ],
+                "properties": {
+                  "commands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "negatedCommands": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "contact": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "power": {
+                    "type": "array"
+                  },
+                  "time": {
+                    "type": "array"
+                  },
+                  "animElem": {
+                    "type": "array"
+                  },
+                  "ctrlRequired": {
+                    "type": "boolean"
+                  },
+                  "stateTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "moveTypes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "readsAILevel": {
+                    "type": "boolean"
+                  },
+                  "otherConditions": {
+                    "type": "integer",
+                    "description": "Conjuncts that are not a recognised literal shape. Greater than 0 means the other facets are incomplete."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "object": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/objectKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string"
+        },
+        "unresolved": {
+          "type": "boolean",
+          "description": "Referenced but not defined (missing state, undefined command\u2026)."
+        },
+        "source": {
+          "$ref": "#/definitions/source"
+        },
+        "props": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/label"
+          }
+        },
+        "gate": {
+          "$ref": "#/definitions/gate"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "rule"
+      ],
+      "properties": {
+        "rule": {
+          "type": "string",
+          "description": "Id from `ikemenlab xray rules`."
+        },
+        "source": {
+          "$ref": "#/definitions/source"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "from",
+        "to",
+        "confidence",
+        "evidence"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/definitions/relationKind"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "confidence": {
+          "$ref": "#/definitions/confidence"
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/evidence"
+          }
+        },
+        "props": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "gateOf": {
+          "type": "string",
+          "description": "Id of the controller whose gate guards this edge; read its `gate` from the objects list."
+        }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": [
+        "severity",
+        "code",
+        "message"
+      ],
+      "properties": {
+        "severity": {
+          "enum": [
+            "Info",
+            "Warning",
+            "Error"
+          ]
+        },
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/source"
+        }
+      }
+    }
+  }
+}
