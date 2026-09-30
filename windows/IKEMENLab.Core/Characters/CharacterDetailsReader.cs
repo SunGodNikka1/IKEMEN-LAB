@@ -75,6 +75,18 @@ public static class CharacterDetailsReader
         };
     }
 
+    /// <summary>
+    /// Any file the DEF's [Files] section names (cmd, cns, st, st0..st9, stcommon, anim, sprite…), resolved in
+    /// IKEMEN's lookup order. Null when the key is absent or the file cannot be found.
+    /// </summary>
+    public static string? ResolveFile(string root, CharacterEntry character, string key)
+    {
+        var def = Path.GetFullPath(Path.Combine(root, character.DefPath));
+        var text = ReadDefText(def);
+        var parsed = text is null ? null : DefParser.Parse(text);
+        return Resolve(root, def, parsed?.Value(key, "files"));
+    }
+
     /// <summary>The CNS the DEF's [Files] cns= names, resolved in IKEMEN's lookup order (null when absent).</summary>
     public static string? ResolveCns(string root, CharacterEntry character)
     {
