@@ -18,7 +18,6 @@ public sealed class ComboLens : XRayLens
     private XRayRow? _selectedEdge;
     private XRayRow? _selectedRoute;
     private XRayRow? _selectedStep;
-    private bool _suppress;
     private bool _busy;
     private int _maxMoves = 4;
     private string _meterText = "0";
@@ -65,7 +64,7 @@ public sealed class ComboLens : XRayLens
         get => _selectedEdge;
         set
         {
-            if (SetProperty(ref _selectedEdge, value) && !_suppress && value is not null && value.Id.StartsWith("state:", StringComparison.Ordinal))
+            if (SetProperty(ref _selectedEdge, value) && value is not null && value.Id.StartsWith("state:", StringComparison.Ordinal))
                 Owner.Select(value.Id);
         }
     }
@@ -85,7 +84,7 @@ public sealed class ComboLens : XRayLens
         get => _selectedStep;
         set
         {
-            if (SetProperty(ref _selectedStep, value) && !_suppress && value is not null && value.Id.StartsWith("state:", StringComparison.Ordinal))
+            if (SetProperty(ref _selectedStep, value) && value is not null && value.Id.StartsWith("state:", StringComparison.Ordinal))
                 Owner.Select(value.Id);
         }
     }

@@ -195,6 +195,24 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
             case "xray-shot":
                 XRayShot(rest);
                 break;
+            case "xray-combos-find":
+                ComboFind();
+                break;
+            case "xray-combos-config":
+                ComboConfig(rest);
+                break;
+            case "xray-combo-edge":
+                ComboPick((o, r) => o.Combos.SelectedEdge = r, ComboLens().Edges, rest);
+                break;
+            case "xray-combo-route":
+                ComboPick((o, r) => o.Combos.SelectedRoute = r, ComboLens().Routes, rest);
+                break;
+            case "xray-combo-step":
+                ComboPick((o, r) => o.Combos.SelectedStep = r, ComboLens().RouteSteps, rest);
+                break;
+            case "xray-combos-dump":
+                DumpCombos(rest);
+                break;
             default:
                 throw new InvalidOperationException("Unknown QA command: " + verb);
         }
@@ -470,6 +488,95 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         var win = XRayWin();
         win.UpdateLayout();
         Render((FrameworkElement)win.Content, path);
+    }
+
+    // ------------------------------------------------------------------ Combos lens
+
+    private ComboLens ComboLens() => XRayVm().Combos;
+
+    private void ComboFind()
+    {
+        var lens = ComboLens();
+        lens.FindRoutesCommand.Execute(null);
+        // FindAsync resumes on the UI dispatcher after Task.Run. Sleep would block that same dispatcher
+        // and deadlock the continuation, so pump the queue instead of waiting on it.
+        var until = DateTime.UtcNow.AddSeconds(120);
+        while (DateTime.UtcNow < until)
+        {
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.Invoke(
+                () => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            if (lens.FindRoutesCommand.CanExecute(null) && lens.RouteStatus != "Searching…") break;
+        }
+
+        XRayWin().UpdateLayout();
+        _log.Add($"  xray-combos-find: status='{lens.RouteStatus}' edges={lens.Edges.Count} routes={lens.Routes.Count} steps={lens.RouteSteps.Count}");
+    }
+
+    /// <summary>xray-combos-config "meter=1000 moves=6 hitConfirm=false links=true fromSelected=false"</summary>
+    private void ComboConfig(string spec)
+    {
+        var lens = ComboLens();
+        foreach (var part in spec.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var kv = part.Split('=', 2);
+            switch (kv[0])
+            {
+                case "meter": lens.MeterText = kv[1]; break;
+                case "moves": lens.MaxMoves = int.Parse(kv[1], CultureInfo.InvariantCulture); break;
+                case "hitConfirm": lens.HitConfirmOnly = bool.Parse(kv[1]); break;
+                case "links": lens.AllowLinks = bool.Parse(kv[1]); break;
+                case "fromSelected": lens.FromSelected = bool.Parse(kv[1]); break;
+                default: throw new InvalidOperationException("Unknown combo config key " + kv[0]);
+            }
+        }
+
+        _log.Add($"  xray-combos-config: meter='{lens.MeterText}' moves={lens.MaxMoves} hitConfirm={lens.HitConfirmOnly} links={lens.AllowLinks} fromSelected={lens.FromSelected}");
+    }
+
+    private void ComboPick(Action<XRayViewModel, XRayRow?> set, ObservableCollection<XRayRow> rows, string needle)
+    {
+        var row = rows.FirstOrDefault(r => r.Id.Contains(needle, StringComparison.OrdinalIgnoreCase))
+                   ?? throw new InvalidOperationException($"no row matching '{needle}' among {rows.Count}");
+        set(XRayVm(), row);
+        XRayWin().UpdateLayout();
+        _log.Add($"  picked '{row.Title}' id={row.Id}; shared selection is now {XRayVm().SelectedId}");
+    }
+
+    private void DumpCombos(string path)
+    {
+        var win = XRayWin();
+        var lens = ComboLens();
+        win.UpdateLayout();
+        var state = new
+        {
+            character = XRayVm().CharacterName,
+            lens = XRayVm().ActiveLens.ToString(),
+            caption = lens.Caption,
+            readiness = lens.Readiness,
+            routeStatus = lens.RouteStatus,
+            controls = new
+            {
+                maxMoves = lens.MaxMoves,
+                meterText = lens.MeterText,
+                hitConfirmOnly = lens.HitConfirmOnly,
+                allowLinks = lens.AllowLinks,
+                fromSelected = lens.FromSelected
+            },
+            edges = lens.Edges.Select(r => new { r.Id, r.Title, r.Subtitle, r.Glyph, r.HasConfidence, r.IsHighlighted }),
+            routes = lens.Routes.Select(r => new { r.Id, r.Title, r.Subtitle, r.Glyph, r.HasConfidence }),
+            routeSteps = lens.RouteSteps.Select(r => new { r.Id, r.Title, r.Glyph, r.HasConfidence, r.IsHighlighted }),
+            selected = new
+            {
+                edge = lens.SelectedEdge?.Id,
+                route = lens.SelectedRoute?.Id,
+                step = lens.SelectedStep?.Id,
+                shared = XRayVm().SelectedId
+            },
+            window = new { width = win.ActualWidth, height = win.ActualHeight, state = win.WindowState.ToString() }
+        };
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        File.WriteAllText(path, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
     }
 
     /// <summary>
