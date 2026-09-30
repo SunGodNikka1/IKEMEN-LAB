@@ -108,7 +108,7 @@ public sealed partial class SemanticIndex
     {
         var o = Get(id);
         return new ExplainItem(id, o?.Name ?? id, o?.Kind ?? ObjectKind.Entity, via?.Confidence, via?.Kind.ToString(),
-            via?.Evidence.FirstOrDefault()?.Source ?? o?.Source, note);
+            via?.Evidence.FirstOrDefault()?.Source ?? o?.Source, note, via?.Evidence.FirstOrDefault()?.RuleId);
     }
 
     private IEnumerable<ExplainItem> Items(IEnumerable<Relationship> rels, bool target, Func<Relationship, string?>? note = null) =>

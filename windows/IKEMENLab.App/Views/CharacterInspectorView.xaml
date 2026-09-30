@@ -81,9 +81,13 @@
                     <Button Content="Inspect Sprites&#x2026;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                             Command="{Binding OpenSpritesCommand}" CommandParameter="{Binding Row}"
                             AutomationProperties.Name="Inspect Sprites"/>
-                    <Button Content="Edit Size &amp; Stats&#x2026;" Style="{StaticResource SecondaryButton}"
+                    <Button Content="Edit Size &amp; Stats&#x2026;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                             Command="{Binding OpenTuningCommand}" CommandParameter="{Binding Row}"
                             AutomationProperties.Name="Edit Size and Stats"/>
+                    <Button Content="X-Ray&#x2026;" Style="{StaticResource SecondaryButton}"
+                            Command="{Binding OpenXRayCommand}" CommandParameter="{Binding Row}"
+                            ToolTip="Abilities, triggers, state graph, variables, helpers and animations of this character"
+                            AutomationProperties.Name="Open Character X-Ray"/>
                 </StackPanel>
 
                 <!-- ============ Attributes ============ -->

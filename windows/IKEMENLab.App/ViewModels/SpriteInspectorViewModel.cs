@@ -56,6 +56,10 @@ public sealed class SpriteInspectorViewModel : ObservableObject, IDisposable
     private static readonly PaletteChoice OriginalPalette = new("Original palette", null);
 
     public string Title { get; }
+
+    /// <summary>Sprite to select once the table loads (used when opening from the X-Ray timeline).</summary>
+    public (int Group, int Number)? InitialSprite { get; init; }
+
     public string FileName => System.IO.Path.GetFileName(_sffPath);
     public ICommand ExportCommand { get; }
 
@@ -150,7 +154,8 @@ public sealed class SpriteInspectorViewModel : ObservableObject, IDisposable
             }
 
             ApplyFilter();
-            SelectedSprite = _all.FirstOrDefault(s => s.Group == 0 && s.Number == 0) ?? _all.FirstOrDefault();
+            SelectedSprite = (InitialSprite is { } want ? _all.FirstOrDefault(s => s.Group == want.Group && s.Number == want.Number) : null)
+                             ?? _all.FirstOrDefault(s => s.Group == 0 && s.Number == 0) ?? _all.FirstOrDefault();
         }
         finally
         {

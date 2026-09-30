@@ -40,11 +40,13 @@ public sealed class CharacterInspectorViewModel : ObservableObject
         Func<CharacterRowViewModel?, string?, Task>? setPrimaryDef = null,
         ICommand? deleteCommand = null,
         ICommand? openSpritesCommand = null,
-        ICommand? openTuningCommand = null)
+        ICommand? openTuningCommand = null,
+        ICommand? openXRayCommand = null)
     {
         Row = row;
         OpenSpritesCommand = openSpritesCommand;
         OpenTuningCommand = openTuningCommand;
+        OpenXRayCommand = openXRayCommand;
         _setPrimaryDef = setPrimaryDef;
         DeleteCommand = deleteCommand;
         _selectedDef = CurrentDefRelative();
@@ -73,6 +75,9 @@ public sealed class CharacterInspectorViewModel : ObservableObject
 
     /// <summary>Size &amp; Stats editor for this character's CNS (parameter is <see cref="Row"/>).</summary>
     public ICommand? OpenTuningCommand { get; }
+
+    /// <summary>Character X-Ray: abilities, triggers, state graph, variables, helpers and animation for this character.</summary>
+    public ICommand? OpenXRayCommand { get; }
 
     public bool CanShowTools => OpenSpritesCommand is not null && OpenTuningCommand is not null;
 

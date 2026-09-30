@@ -66,6 +66,7 @@ public sealed class CharactersViewModel : ObservableObject
             p => CanDelete(p as CharacterRowViewModel ?? Selected));
         OpenSpritesCommand = new RelayCommand(p => OpenSprites(p as CharacterRowViewModel ?? Selected));
         OpenTuningCommand = new RelayCommand(p => OpenTuning(p as CharacterRowViewModel ?? Selected));
+        OpenXRayCommand = new RelayCommand(p => OpenXRay(p as CharacterRowViewModel ?? Selected));
     }
 
     public ObservableCollection<CharacterRowViewModel> Characters { get; } = [];
@@ -78,6 +79,7 @@ public sealed class CharactersViewModel : ObservableObject
     public ICommand DeleteCharacterCommand { get; }
     public ICommand OpenSpritesCommand { get; }
     public ICommand OpenTuningCommand { get; }
+    public ICommand OpenXRayCommand { get; }
 
     /// <summary>True while a Delete Character operation is running (only one at a time).</summary>
     public bool IsDeleting
@@ -387,7 +389,7 @@ public sealed class CharactersViewModel : ObservableObject
             return;
         }
 
-        var inspector = new CharacterInspectorViewModel(row, SetPrimaryDefAsync, DeleteCharacterCommand, OpenSpritesCommand, OpenTuningCommand) { Portrait = row.Thumbnail };
+        var inspector = new CharacterInspectorViewModel(row, SetPrimaryDefAsync, DeleteCharacterCommand, OpenSpritesCommand, OpenTuningCommand, OpenXRayCommand) { Portrait = row.Thumbnail };
         Inspector = inspector;
         var root = _root;
 
@@ -420,6 +422,13 @@ public sealed class CharactersViewModel : ObservableObject
         {
             Owner = Application.Current?.MainWindow
         };
+        window.Show();
+    }
+
+    private void OpenXRay(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null) return;
+        var window = new XRayWindow(new XRayViewModel(_root, row.Entry, row.DisplayName)) { Owner = Application.Current?.MainWindow };
         window.Show();
     }
 

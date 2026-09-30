@@ -59,6 +59,14 @@ last one), and a missing key or section is added in the right place. The write g
 mutation service (backup, hash check, read-back verification), and **Undo last save** restores the file
 byte for byte. If the CNS changed on disk after the editor opened, the save is refused.
 
+## Character X-Ray
+
+**X-Ray…** in the character inspector opens one window with six synchronized lenses (Ability Atlas, Triggers, State Graph, Variables, Helpers,
+Animation & CLSN) over a single Character Semantic Index built from the character's DEF/CMD/CNS/ST/AIR. Everything carries its source file and line and
+an evidence confidence (proven / inferred / unknown, drawn differently). The same index is available to tools and agents as versioned JSON through the
+`ikemenlab xray …` command line. See [docs/xray.md](../docs/xray.md), [docs/xray-evidence-rules.md](../docs/xray-evidence-rules.md) and, for the
+runtime telemetry spike, [docs/xray-runtime-spike.md](../docs/xray-runtime-spike.md) (`scripts\Run-XRaySpike.ps1`).
+
 ## Build
 
 ```powershell

@@ -514,3 +514,27 @@ public class XRayIndexTests : IDisposable
         Assert.Single(idx.Objects);
     }
 }
+
+public class XRayDocsTests
+{
+    private static string? Find(string name)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var p = Path.Combine(dir.FullName, "docs", name);
+            if (File.Exists(p)) return p;
+        }
+
+        return null;
+    }
+
+    [Fact]
+    public void EvidenceRulesDocumentListsEveryRegisteredRule()
+    {
+        var path = Find("xray-evidence-rules.md");
+        Assert.NotNull(path);
+        var text = File.ReadAllText(path!);
+        foreach (var rule in EvidenceRules.Rules)
+            Assert.Contains($"`{rule.Id}`", text);
+    }
+}

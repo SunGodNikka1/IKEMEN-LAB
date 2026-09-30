@@ -2,7 +2,7 @@ using IKEMENLab.Core.XRay.Source;
 
 namespace IKEMENLab.Core.XRay.Model;
 
-public sealed record ExplainItem(string Id, string Name, ObjectKind Kind, Confidence? Confidence, string? Via, SourceRef? Source, string? Note);
+public sealed record ExplainItem(string Id, string Name, ObjectKind Kind, Confidence? Confidence, string? Via, SourceRef? Source, string? Note, string? Rule = null);
 
 public sealed record ExplainSection(string Title, IReadOnlyList<ExplainItem> Items);
 

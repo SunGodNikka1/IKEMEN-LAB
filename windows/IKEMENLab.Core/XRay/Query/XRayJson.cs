@@ -323,6 +323,7 @@ public static class XRayJson
         if (it.Confidence is { } c) w.WriteString("confidence", c.ToString());
         if (it.Via is not null) w.WriteString("via", it.Via);
         if (it.Note is not null) w.WriteString("note", it.Note);
+        if (it.Rule is not null) w.WriteString("rule", it.Rule);
         WriteSource(w, index, it.Source);
         w.WriteEndObject();
     }

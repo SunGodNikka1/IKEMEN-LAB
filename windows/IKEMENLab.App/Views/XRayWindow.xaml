@@ -1,0 +1,510 @@
+<Window x:Class="IKEMENLab.App.Views.XRayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:IKEMENLab.App.ViewModels"
+        Title="Character X-Ray" Height="860" Width="1440"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        MinHeight="560" MinWidth="1040"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Window.Resources>
+        <!-- One row look for every lens and the details panel: confidence glyph + title + subtitle; highlighted when related to the selection. -->
+        <DataTemplate x:Key="RowTemplate" DataType="{x:Type vm:XRayRow}">
+            <Border x:Name="Bd" Padding="10,6" Background="Transparent" ToolTip="{Binding Tooltip}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding Glyph}" Foreground="{Binding GlyphBrush}" Width="18" FontSize="13"
+                               VerticalAlignment="Top" Visibility="{Binding HasConfidence, Converter={StaticResource BoolToVis}}"/>
+                    <StackPanel>
+                        <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis" FontSize="13" Foreground="{DynamicResource TextPrimary}"/>
+                        <TextBlock Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" FontSize="11" Foreground="{DynamicResource TextTertiary}"
+                                   Visibility="{Binding HasSubtitle, Converter={StaticResource BoolToVis}}"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                    <Setter TargetName="Bd" Property="Background" Value="{DynamicResource RowHoverBrush}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <Style x:Key="LensPanel" TargetType="Grid">
+            <Setter Property="Visibility" Value="Collapsed"/>
+        </Style>
+        <Style x:Key="LensAtlas" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Atlas">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LensTriggers" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Triggers">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LensGraph" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Graph">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LensVariables" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Variables">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LensHelpers" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Helpers">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LensTimeline" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Timeline">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- ============ Header ============ -->
+        <DockPanel Grid.Row="0" Margin="0,0,0,12">
+            <Button DockPanel.Dock="Left" Content="&#x25C0; Back" Style="{StaticResource SecondaryButton}" Margin="0,0,14,0"
+                    Command="{Binding BackCommand}" VerticalAlignment="Center" AutomationProperties.Name="Back"/>
+            <TextBox DockPanel.Dock="Right" Width="300" Style="{StaticResource SearchBox}" Tag="Search states, commands, variables&#x2026;"
+                     Text="{Binding SearchText, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="Search the index"/>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}">
+                    <Run Text="X-Ray &#x2014; "/><Run Text="{Binding CharacterName, Mode=OneWay}"/>
+                </TextBlock>
+                <TextBlock Text="{Binding Status}" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,0"/>
+            </StackPanel>
+        </DockPanel>
+
+        <!-- ============ Lens switcher + confidence legend ============ -->
+        <DockPanel Grid.Row="1" Margin="0,0,0,12">
+            <TextBlock DockPanel.Dock="Right" Text="{Binding Legend}" FontSize="11" VerticalAlignment="Center" Foreground="{DynamicResource TextTertiary}"/>
+            <Border Style="{StaticResource SegmentedHost}" HorizontalAlignment="Left">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton GroupName="XRayLens" Content="Ability Atlas" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Atlas}"/>
+                    <RadioButton GroupName="XRayLens" Content="Triggers" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Triggers}"/>
+                    <RadioButton GroupName="XRayLens" Content="State Graph" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Graph}"/>
+                    <RadioButton GroupName="XRayLens" Content="Variables" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Variables}"/>
+                    <RadioButton GroupName="XRayLens" Content="Helpers" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Helpers}"/>
+                    <RadioButton GroupName="XRayLens" Content="Animation &amp; CLSN" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Timeline}"/>
+                </StackPanel>
+            </Border>
+        </DockPanel>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="14"/>
+                <ColumnDefinition Width="420"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ============ Lenses ============ -->
+            <Border Grid.Column="0" Style="{StaticResource Card}" CornerRadius="10" Padding="0">
+                <Grid>
+                    <!-- 1. Ability Atlas -->
+                    <Grid Style="{StaticResource LensAtlas}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Margin="14,12,14,4" Text="{Binding Atlas.Summary}" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
+                        <ListBox Grid.Row="1" Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                 ItemsSource="{Binding Atlas.View}" SelectedItem="{Binding Atlas.SelectedRow, Mode=TwoWay}"
+                                 ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Abilities">
+                            <ListBox.GroupStyle>
+                                <GroupStyle>
+                                    <GroupStyle.HeaderTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="14,16,0,4">
+                                                <TextBlock Text="{Binding Name}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                                                <TextBlock Text="   &#x25D0; category is inferred" FontSize="11" Foreground="{DynamicResource WarningBrush}"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </GroupStyle.HeaderTemplate>
+                                </GroupStyle>
+                            </ListBox.GroupStyle>
+                        </ListBox>
+                    </Grid>
+
+                    <!-- 2. Trigger Explorer -->
+                    <Grid Style="{StaticResource LensTriggers}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <ListBox Grid.Column="0" Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                 ItemsSource="{Binding Triggers.Controllers}" SelectedItem="{Binding Triggers.SelectedController, Mode=TwoWay}"
+                                 ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Controllers"/>
+                        <DockPanel Grid.Column="1" Margin="14,12,14,12">
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding Triggers.Header}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock DockPanel.Dock="Top" Margin="0,4,0,8" Text="Double-click an outcome to jump to it. Select a line to see its source." FontSize="11"
+                                       Foreground="{DynamicResource TextTertiary}"/>
+                            <TextBlock DockPanel.Dock="Bottom" Margin="0,8,0,0" Text="{Binding Triggers.Facets}" FontSize="11" Foreground="{DynamicResource TextTertiary}" TextWrapping="Wrap"/>
+                            <TreeView x:Name="GateTree" ItemsSource="{Binding Triggers.Nodes}" Background="Transparent" BorderThickness="0"
+                                      Foreground="{DynamicResource TextPrimary}" SelectedItemChanged="OnGateSelected" MouseDoubleClick="OnGateDoubleClick"
+                                      AutomationProperties.Name="Trigger structure">
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem">
+                                        <Setter Property="IsExpanded" Value="True"/>
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate DataType="{x:Type vm:GateNode}" ItemsSource="{Binding Children}">
+                                        <StackPanel Orientation="Horizontal" Margin="0,3">
+                                            <TextBlock Text="{Binding Glyph}" Foreground="{Binding GlyphBrush}" Width="18" FontSize="13"
+                                                       Visibility="{Binding HasGlyph, Converter={StaticResource BoolToVis}}"/>
+                                            <TextBlock Text="{Binding Title}" FontSize="13" FontFamily="{StaticResource MonoFont}"/>
+                                            <TextBlock Text="{Binding Detail}" Margin="12,0,0,0" FontSize="11" Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center"
+                                                       Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}"/>
+                                        </StackPanel>
+                                    </HierarchicalDataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+                        </DockPanel>
+                    </Grid>
+
+                    <!-- 3. State Graph -->
+                    <Grid Style="{StaticResource LensGraph}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <DockPanel Margin="14,12,14,8">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <TextBlock Text="Depth" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0"/>
+                                <Slider Style="{StaticResource FlatSlider}" Width="110" Minimum="1" Maximum="3" TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Value="{Binding Graph.Depth}" VerticalAlignment="Center" AutomationProperties.Name="Graph depth"/>
+                                <TextBlock Text="{Binding Graph.DepthText}" FontSize="12" Margin="8,0,0,0" MinWidth="44" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding Graph.Caption}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/>
+                        </DockPanel>
+                        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                            <Grid Width="{Binding Graph.CanvasWidth}" Height="{Binding Graph.CanvasHeight}">
+                                <ItemsControl ItemsSource="{Binding Graph.Edges}" Focusable="False">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:GraphEdgeVM}">
+                                            <Line X1="{Binding X1}" Y1="{Binding Y1}" X2="{Binding X2}" Y2="{Binding Y2}" Stroke="{Binding Stroke}"
+                                                  StrokeThickness="{Binding Thickness}" StrokeDashArray="{Binding Dash}" StrokeEndLineCap="Triangle" ToolTip="{Binding Tooltip}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <ItemsControl ItemsSource="{Binding Graph.Edges}" Focusable="False" IsHitTestVisible="False">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Canvas.Left" Value="{Binding MidX}"/>
+                                            <Setter Property="Canvas.Top" Value="{Binding MidY}"/>
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:GraphEdgeVM}">
+                                            <TextBlock Text="{Binding MidGlyph}" Foreground="{Binding MidBrush}" FontSize="14" FontWeight="Bold"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <ItemsControl ItemsSource="{Binding Graph.Nodes}" Focusable="False">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemContainerStyle>
+                                        <Style TargetType="ContentPresenter">
+                                            <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                                            <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                                        </Style>
+                                    </ItemsControl.ItemContainerStyle>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:GraphNodeVM}">
+                                            <Border x:Name="Node" Width="176" Height="44" CornerRadius="8" Padding="8,3" Cursor="Hand"
+                                                    Background="{DynamicResource CardSolidBrush}" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
+                                                    ToolTip="{Binding Id}" MouseLeftButtonUp="OnNodeClicked">
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Left" Text="{Binding Glyph}" Foreground="{Binding GlyphBrush}" Width="16" FontSize="12" VerticalAlignment="Center"/>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Title}" FontSize="12" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimary}"/>
+                                                        <TextBlock Text="{Binding Subtitle}" FontSize="10" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextTertiary}"/>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </Border>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                                                    <Setter TargetName="Node" Property="Background" Value="{DynamicResource RowHoverBrush}"/>
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsCenter}" Value="True">
+                                                    <Setter TargetName="Node" Property="BorderBrush" Value="{DynamicResource InfoBrush}"/>
+                                                    <Setter TargetName="Node" Property="BorderThickness" Value="2"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Grid>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <!-- 4. Variable Map -->
+                    <Grid Style="{StaticResource LensVariables}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="340"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <DockPanel Grid.Column="0">
+                            <TextBox DockPanel.Dock="Top" Style="{StaticResource FieldBox}" Margin="12,12,12,8"
+                                     Text="{Binding Variables.Filter, UpdateSourceTrigger=PropertyChanged}" ToolTip="Filter by name, count or inferred label"
+                                     AutomationProperties.Name="Filter variables"/>
+                            <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                     ItemsSource="{Binding Variables.View}" SelectedItem="{Binding Variables.SelectedRow, Mode=TwoWay}"
+                                     ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Variables"/>
+                        </DockPanel>
+                        <DockPanel Grid.Column="1" Margin="14,12,14,12">
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding Variables.UsesHeader}" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock DockPanel.Dock="Top" Margin="0,4,0,8" Text="{Binding Variables.Traits}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"/>
+                            <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                     ItemsSource="{Binding Variables.Uses}" SelectedItem="{Binding Variables.SelectedUse, Mode=TwoWay}"
+                                     ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Uses"/>
+                        </DockPanel>
+                    </Grid>
+
+                    <!-- 5. Helper Tree -->
+                    <Grid Style="{StaticResource LensHelpers}">
+                        <DockPanel Margin="14,12,14,12">
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding Helpers.Summary}" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,8"/>
+                            <TreeView ItemsSource="{Binding Helpers.Roots}" Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextPrimary}"
+                                      SelectedItemChanged="OnHelperSelected" AutomationProperties.Name="Helper family">
+                                <TreeView.ItemContainerStyle>
+                                    <Style TargetType="TreeViewItem">
+                                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                    </Style>
+                                </TreeView.ItemContainerStyle>
+                                <TreeView.ItemTemplate>
+                                    <HierarchicalDataTemplate DataType="{x:Type vm:TreeNodeVM}" ItemsSource="{Binding Children}">
+                                        <Border x:Name="Bd" Padding="4,3" Background="Transparent">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding Glyph}" Foreground="{Binding GlyphBrush}" Width="18" FontSize="13"
+                                                           Visibility="{Binding HasGlyph, Converter={StaticResource BoolToVis}}"/>
+                                                <TextBlock Text="{Binding Title}" FontSize="13"/>
+                                                <TextBlock Text="{Binding Subtitle}" Margin="12,0,0,0" FontSize="11" Foreground="{DynamicResource TextTertiary}" VerticalAlignment="Center"
+                                                           Visibility="{Binding HasSubtitle, Converter={StaticResource BoolToVis}}"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <HierarchicalDataTemplate.Triggers>
+                                            <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource RowHoverBrush}"/>
+                                            </DataTrigger>
+                                        </HierarchicalDataTemplate.Triggers>
+                                    </HierarchicalDataTemplate>
+                                </TreeView.ItemTemplate>
+                            </TreeView>
+                        </DockPanel>
+                    </Grid>
+
+                    <!-- 6. Animation / CLSN timeline -->
+                    <Grid Style="{StaticResource LensTimeline}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Margin="14,12,14,4">
+                            <TextBlock Text="{Binding Timeline.Title}" FontSize="14" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="{Binding Timeline.Detail}" FontSize="11" Margin="0,3,0,0" Foreground="{DynamicResource TextTertiary}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="14,4,14,4">
+                            <ListBox ItemsSource="{Binding Timeline.Frames}" SelectedItem="{Binding Timeline.SelectedFrame, Mode=TwoWay}" Background="Transparent" BorderThickness="0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                     ItemContainerStyle="{StaticResource BrowserCardItem}" AutomationProperties.Name="Animation frames">
+                                <ListBox.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+                                </ListBox.ItemsPanel>
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:FrameVM}">
+                                        <StackPanel Width="{Binding Width}" Margin="8,6">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding SpriteGlyph}" Foreground="{Binding SpriteBrush}" FontSize="12"/>
+                                                <TextBlock Text="{Binding Label}" FontFamily="{StaticResource MonoFont}" FontSize="12" Foreground="{DynamicResource TextPrimary}"/>
+                                            </DockPanel>
+                                            <TextBlock Text="{Binding TicksText}" FontSize="11" Foreground="{DynamicResource TextTertiary}"/>
+                                            <ItemsControl ItemsSource="{Binding Markers}" Focusable="False" Margin="0,4,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type vm:MarkerVM}">
+                                                        <TextBlock FontSize="10" ToolTip="{Binding Tooltip}" TextTrimming="CharacterEllipsis">
+                                                            <Run Text="{Binding Glyph, Mode=OneWay}" Foreground="{Binding Brush, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding Text, Mode=OneWay}"/>
+                                                        </TextBlock>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </ScrollViewer>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="14,4,14,12">
+                            <Border Width="460" Height="340" CornerRadius="8" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1" Background="{DynamicResource CardSolidBrush}" ClipToBounds="True">
+                                <Canvas Width="460" Height="340">
+                                    <Rectangle Canvas.Left="0" Canvas.Top="290" Width="460" Height="1" Fill="#66FFFFFF"/>
+                                    <Rectangle Canvas.Left="230" Canvas.Top="0" Width="1" Height="340" Fill="#66FFFFFF"/>
+                                    <ItemsControl ItemsSource="{Binding Timeline.Boxes}" Focusable="False">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><Canvas/></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemContainerStyle>
+                                            <Style TargetType="ContentPresenter">
+                                                <Setter Property="Canvas.Left" Value="{Binding X}"/>
+                                                <Setter Property="Canvas.Top" Value="{Binding Y}"/>
+                                            </Style>
+                                        </ItemsControl.ItemContainerStyle>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:ClsnBoxVM}">
+                                                <Rectangle Width="{Binding Width}" Height="{Binding Height}" Stroke="{Binding Stroke}" Fill="{Binding Fill}" StrokeThickness="1.5" ToolTip="{Binding Tooltip}"/>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Canvas>
+                            </Border>
+                            <StackPanel Margin="16,0,0,0" MaxWidth="300">
+                                <TextBlock Text="Collision boxes" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                                <TextBlock Margin="0,4,0,10" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"
+                                           Text="Red = Clsn1 (attack), blue = Clsn2 (hurt). Crosshair = the sprite's origin, so boxes are shown exactly where the file puts them. Boxes inherited from Clsn Default say so in their tooltip."/>
+                                <Button Content="Open this sprite in the Sprite Inspector&#x2026;" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left"
+                                        Command="{Binding Timeline.OpenSpriteCommand}"
+                                        AutomationProperties.Name="Open sprite in the Sprite Inspector"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- ============ Details / evidence / source (shared by every lens) ============ -->
+            <Border Grid.Column="2" Style="{StaticResource Card}" CornerRadius="10" Padding="0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="230"/>
+                    </Grid.RowDefinitions>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel Margin="14,12,14,8">
+                            <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding KindText}" FontSize="11" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                            <TextBlock Text="{Binding IdText}" Style="{StaticResource MonoText}" Margin="0,2,0,0"/>
+                            <ItemsControl ItemsSource="{Binding Labels}" Margin="0,8,0,0" Focusable="False">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:LabelChip}">
+                                        <Border CornerRadius="10" Padding="8,2" Margin="0,0,6,6" BorderBrush="{Binding Brush}" BorderThickness="1" ToolTip="{Binding Tooltip}">
+                                            <TextBlock FontSize="11" Foreground="{DynamicResource TextPrimary}">
+                                                <Run Text="{Binding Glyph, Mode=OneWay}" Foreground="{Binding Brush, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding Text, Mode=OneWay}"/>
+                                            </TextBlock>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Button Content="Copy id" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,4,0,8"
+                                    Command="{Binding CopyIdCommand}" AutomationProperties.Name="Copy object id"/>
+
+                            <ItemsControl ItemsSource="{Binding Sections}" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:DetailSection}">
+                                        <StackPanel Margin="0,10,0,0">
+                                            <TextBlock Text="{Binding Title}" Style="{StaticResource SectionLabel}" Margin="0,0,0,2"/>
+                                            <ItemsControl ItemsSource="{Binding Items}" Focusable="False">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type vm:XRayRow}">
+                                                        <Button Style="{StaticResource RowButton}" ContentTemplate="{StaticResource RowTemplate}" Content="{Binding}"
+                                                                Command="{Binding DataContext.SelectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                CommandParameter="{Binding Id}"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+
+                    <DockPanel Grid.Row="1" Margin="14,4,14,4">
+                        <Button DockPanel.Dock="Right" Content="Open file" Style="{StaticResource SecondaryButton}" Command="{Binding OpenFileCommand}"
+                                AutomationProperties.Name="Open the source file"/>
+                        <TextBlock Text="{Binding SourceText}" Style="{StaticResource MonoText}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <ListBox Grid.Row="2" ItemsSource="{Binding SourceLines}" Background="#33000000" BorderThickness="0" Margin="8,0,8,8"
+                             ScrollViewer.HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="Source">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="0"/>
+                                <Setter Property="Focusable" Value="False"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:SourceLine}">
+                                <Grid x:Name="Line">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="44"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="{Binding Number}" HorizontalAlignment="Right" Margin="0,0,8,0" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource TextTertiary}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Text}" FontFamily="{StaticResource MonoFont}" FontSize="11" Foreground="{DynamicResource TextSecondary}" xml:space="preserve"/>
+                                </Grid>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding InSpan}" Value="True">
+                                        <Setter TargetName="Line" Property="Background" Value="{DynamicResource RowSelectedBrush}"/>
+                                    </DataTrigger>
+                                </DataTemplate.Triggers>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <!-- Search results float over the lenses -->
+            <Border Grid.Column="0" HorizontalAlignment="Right" VerticalAlignment="Top" Width="340" MaxHeight="360" Margin="0,4,8,0" CornerRadius="8" Panel.ZIndex="10"
+                    Background="{DynamicResource CardSolidBrush}" BorderBrush="{DynamicResource BorderStrong}" BorderThickness="1"
+                    Visibility="{Binding HasSearchResults, Converter={StaticResource BoolToVis}}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding SearchResults}" Focusable="False">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:XRayRow}">
+                                <Button Style="{StaticResource RowButton}" ContentTemplate="{StaticResource RowTemplate}" Content="{Binding}"
+                                        Command="{Binding DataContext.SelectCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                        CommandParameter="{Binding Id}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
