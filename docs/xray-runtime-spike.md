@@ -1,9 +1,9 @@
 # X-Ray runtime compatibility spike
 
-**Status: run against a real IKEMEN GO build on Windows (2026-09-30).** 3 of the 4 checks pass: the disposable sandbox launches,
-the trace is valid JSONL, and the source install is proven byte-identical afterwards. The remaining check —
-associating a runtime StateNo with a static State object — **fails because this engine build does not expose the probe's
-state accessor**. See "Windows result" at the bottom. Until that is resolved nothing about runtime state association is a claim.
+**Status: PASSING on a real IKEMEN GO build (Windows, 2026-09-30).** All four checks pass: the disposable sandbox launches,
+the trace is valid JSONL, a real P1 StateNo resolves to a static `state:<n>`, and the source install is proven byte-identical
+afterwards. The last of these failed on the first run because the probe guessed MUGEN System-script API names; see
+"Windows result" at the bottom.
 
 ## Goal (and only this)
 
@@ -87,17 +87,29 @@ Ikemen_GO.exe -p1 Funny_Valentine -p2 kfm -s stages/kfm.def -p1.ai 1 -p2.ai 1 -n
 The engine exits cleanly (code 0) and the probe registers on `hook:loop`, so the deferred registration works. The match really
 starts: frames carry `life=3000`, `anim=190`, `x=-70/+70`, `facing=±1`.
 
-**The blocker.** The probe reads player state through bare Lua globals (`xray_probe.lua`: `{ "state", num, { function() return call("stateno") end } }`).
-On this build `stateno`, `prevstateno`, `statetype`, `movetype`, `animelemno`, `velx` and `vely` are **not** exposed as globals, so
-`p1.state` is reported `false` in `meta.capabilities` and written as `null` in every frame. The globals that *do* exist
-(`anim`, `ctrl`, `facing`, `life`, `power`, `posx`, `posy`) are all simple value getters.
+**The blocker, and what it actually was.** The first run reported `p1.state` unsupported and concluded this build exposed no
+player-scoped state. That conclusion was wrong, and the fault was in the probe. IKEMEN's Lua API is **redirect based**:
+`player(n)` sets the current context, and the field getters (`stateNo`, `stateType`, `life`, …) then read that context.
+`src/script.go` registers 558 globals, and the names are **camelCase**:
 
-With no StateNo in the trace, `RuntimeLink.Associate` has nothing to tie to `state:<n>`, the "Subject states seen at runtime"
-table is empty, and the third check cannot pass. The probe is honest about this — it records `false` rather than guessing, which
-is the intended behaviour.
+```go
+luaRegister(l, "stateNo", func(*lua.LState) int { l.Push(lua.LNumber(sys.debugWC.ss.no)); return 1 })
+luaRegister(l, "player", func(*lua.LState) int { … sys.debugWC, ret = sys.chars[idx][0], true … })
+```
 
-To unblock, the probe needs a player-scoped accessor for the fields it currently reads globally (IKEMEN exposes these through the
-`player(id)` table), and `meta.capabilities` must keep reporting per-field `true`/`false` so a build that exposes neither is still
-described accurately. That is a change to the probe's field readers, which is milestone 3 work and is deliberately not started here.
+The probe was calling the **MUGEN System-script spellings** — `stateno`, `statetype`, `movetype`, `velx`, `vely`,
+`animelemno`, `movehit`, `movecontact`. Lua is case sensitive, so every one of those silently returned nil. The fields
+that *did* report `true` are exactly the ones whose MUGEN spelling happens to match the binding (`anim`, `ctrl`, `facing`,
+`life`, `power`, plus `posX`/`posY` which the probe already tried as a third alternative) — the capability map was a
+fingerprint of the naming bug, not of the engine. `withPlayer` was already doing the right thing; only the names were wrong.
 
-`RuntimeVerified` therefore stays unused, and no runtime evidence has been allowed to raise any static confidence.
+**Fix.** The probe now tries the engine binding first and keeps the MUGEN spelling as a fallback. No engine change was
+needed, and none was made. Three tests in `XRayProbeTests` pin the contract.
+
+**Result** (Funny Valentine vs kfm, 300 frames): `p1.state = 190`, `p2.state = 191` in the same frame — the two differ, which is
+the direct proof that the reads are genuinely per-player and not one shared context. `RuntimeLink` then resolved
+`stateNo 190` → `state:190`, and `state 0 (common)` → `state:0`. State changes went from 0 to a real count.
+
+Fields still honestly `null` on this build: `animElem` (needs an argument the probe does not pass) and `hitPause`
+(`hitpausetime` is not bound at all), plus the match-level fields. `RuntimeVerified` remains unused and no runtime evidence
+was allowed to raise a static confidence.

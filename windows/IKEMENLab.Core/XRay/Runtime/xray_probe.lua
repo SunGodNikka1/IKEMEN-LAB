@@ -108,23 +108,27 @@ local function bool(v)
 end
 
 -- Each field lists alternative ways to read it; the first that yields a value is remembered and reported in capabilities.
+-- Spellings are tried in order. The camelCase names first are the ones IKEMEN actually binds to Lua
+-- (script.go registers e.g. "stateNo", "stateType", "velX" — not the MUGEN System-script "stateno").
+-- The MUGEN spellings stay as fallbacks so the probe still works against a build that exposes those.
+-- All of these read the context that withPlayer() set with player(n), so they are per-player.
 local FIELDS = {
-	{ "state", num, { function() return call("stateno") end } },
-	{ "prevState", num, { function() return call("prevstateno") end } },
+	{ "state", num, { function() return call("stateNo") end, function() return call("stateno") end } },
+	{ "prevState", num, { function() return call("prevStateNo") end, function() return call("prevstateno") end } },
 	{ "ctrl", bool, { function() return call("ctrl") end } },
-	{ "stateType", str, { function() return call("statetype") end } },
-	{ "moveType", str, { function() return call("movetype") end } },
+	{ "stateType", str, { function() return call("stateType") end, function() return call("statetype") end } },
+	{ "moveType", str, { function() return call("moveType") end, function() return call("movetype") end } },
 	{ "anim", num, { function() return call("anim") end } },
-	{ "animElem", num, { function() return call("animelemno", 0) end, function() return call("animelem") end } },
+	{ "animElem", num, { function() return call("animElemNo") end, function() return call("animelemno", 0) end, function() return call("animelem") end } },
 	{ "life", num, { function() return call("life") end } },
 	{ "power", num, { function() return call("power") end } },
-	{ "x", num, { function() return call("posx") end, function() return call("pos", "x") end, function() return call("posX") end } },
-	{ "y", num, { function() return call("posy") end, function() return call("pos", "y") end, function() return call("posY") end } },
-	{ "velX", num, { function() return call("velx") end, function() return call("vel", "x") end } },
-	{ "velY", num, { function() return call("vely") end, function() return call("vel", "y") end } },
+	{ "x", num, { function() return call("posX") end, function() return call("posx") end, function() return call("pos", "x") end } },
+	{ "y", num, { function() return call("posY") end, function() return call("posy") end, function() return call("pos", "y") end } },
+	{ "velX", num, { function() return call("velX") end, function() return call("velx") end, function() return call("vel", "x") end } },
+	{ "velY", num, { function() return call("velY") end, function() return call("vely") end, function() return call("vel", "y") end } },
 	{ "facing", num, { function() return call("facing") end } },
-	{ "moveHit", num, { function() return call("movehit") end } },
-	{ "moveContact", num, { function() return call("movecontact") end } },
+	{ "moveHit", num, { function() return call("moveHit") end, function() return call("movehit") end } },
+	{ "moveContact", num, { function() return call("moveContact") end, function() return call("movecontact") end } },
 	{ "hitPause", num, { function() return call("hitpausetime") end } },
 }
 
@@ -134,7 +138,6 @@ local MATCH_FIELDS = {
 	{ "distance", num, { function() return call("p2distx") end, function() return call("p2dist", "x") end, function() return call("p2bodydistx") end } },
 	{ "p1TargetCount", num, { function() return call("numtarget") end } },
 	{ "p1TargetId", num, { function() return call("targetid") end } },
-	{ "combo", num, { function() return call("combocount") end, function() return call("hitcount") end } },
 }
 
 local capabilities = {}
