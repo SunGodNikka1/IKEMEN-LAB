@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.App.Services;
+using IKEMENLab.App.Views;
 using IKEMENLab.Core.Characters;
 using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Models;
@@ -63,6 +64,8 @@ public sealed class CharactersViewModel : ObservableObject
         DeleteCharacterCommand = new AsyncRelayCommand(
             p => DeleteCharacterAsync(p as CharacterRowViewModel ?? Selected),
             p => CanDelete(p as CharacterRowViewModel ?? Selected));
+        OpenSpritesCommand = new RelayCommand(p => OpenSprites(p as CharacterRowViewModel ?? Selected));
+        OpenTuningCommand = new RelayCommand(p => OpenTuning(p as CharacterRowViewModel ?? Selected));
     }
 
     public ObservableCollection<CharacterRowViewModel> Characters { get; } = [];
@@ -73,6 +76,8 @@ public sealed class CharactersViewModel : ObservableObject
     public ICommand ClearSearchCommand { get; }
     public ICommand ToggleStatusCommand { get; }
     public ICommand DeleteCharacterCommand { get; }
+    public ICommand OpenSpritesCommand { get; }
+    public ICommand OpenTuningCommand { get; }
 
     /// <summary>True while a Delete Character operation is running (only one at a time).</summary>
     public bool IsDeleting
@@ -382,7 +387,7 @@ public sealed class CharactersViewModel : ObservableObject
             return;
         }
 
-        var inspector = new CharacterInspectorViewModel(row, SetPrimaryDefAsync, DeleteCharacterCommand) { Portrait = row.Thumbnail };
+        var inspector = new CharacterInspectorViewModel(row, SetPrimaryDefAsync, DeleteCharacterCommand, OpenSpritesCommand, OpenTuningCommand) { Portrait = row.Thumbnail };
         Inspector = inspector;
         var root = _root;
 
@@ -399,6 +404,32 @@ public sealed class CharactersViewModel : ObservableObject
 
         var portrait = await portraitTask;
         if (ReferenceEquals(Inspector, inspector) && portrait is not null) inspector.Portrait = portrait;
+    }
+
+    private void OpenSprites(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null) return;
+        var sff = CharacterDetailsReader.ResolveSprite(_root, row.Entry);
+        if (sff is null)
+        {
+            UserDialogs.Warn($"{row.DisplayName} has no SFF sprite file that IKEMEN can find.", "Sprite Inspector");
+            return;
+        }
+
+        var window = new SpriteInspectorWindow(new SpriteInspectorViewModel(row.DisplayName, sff, _root, row.Entry))
+        {
+            Owner = Application.Current?.MainWindow
+        };
+        window.Show();
+    }
+
+    private void OpenTuning(CharacterRowViewModel? row)
+    {
+        if (row is null || _root is null) return;
+        var viewModel = new CharacterTuningViewModel(_root, row.Entry, row.DisplayName);
+        // The attribute bars come from the same CNS, so refresh them after a save or undo.
+        viewModel.Changed += () => { if (ReferenceEquals(Selected, row)) _ = LoadInspectorAsync(row); };
+        new CharacterTuningWindow(viewModel) { Owner = Application.Current?.MainWindow }.ShowDialog();
     }
 
     private void OpenFolder(CharacterRowViewModel? row)

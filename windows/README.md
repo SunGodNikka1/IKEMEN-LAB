@@ -39,6 +39,26 @@ name, the `chars/` folder and the `select.def` lines affected:
 
 `scripts\Run-RefreshDeleteFixtures.ps1` runs these scenarios against disposable fixture roots.
 
+## Sprite Inspector
+
+Select a character and choose **Inspect Sprites…**. The window lists every sprite in the character's SFF
+(group,number, size, axis, encoding, stored bytes) for SFF v1 and v2, with a filter (`9000`, `0,0`, `RLE8`),
+a zoomable checkerboard preview with the sprite's axis drawn on it, a palette picker (the character's ACT
+files and embedded palettes) and **Export PNG…**. Problems are listed under the table: duplicate sprite
+numbers, sprites that cannot be decoded, broken links, very large sprites, and (for characters) a missing
+`0,0` standing frame or `9000,0` select portrait. It is read-only; nothing in the IKEMEN folder is written.
+
+## Size & Stats
+
+**Edit Size & Stats…** edits the values in the character's CNS: `[Data]` life, power, attack, defence,
+fall.defence_up, liedown.time, airjuggle, and `[Size]` xscale, yscale, ground/air push widths, height and
+AI distances. The **Scale by** buttons multiply Width and Height scale together. Values are validated
+against sane ranges before anything is written. Only the edited lines change: comments, spacing, line
+endings and the file's text encoding are kept, a repeated key is edited where the engine reads it (the
+last one), and a missing key or section is added in the right place. The write goes through the safe
+mutation service (backup, hash check, read-back verification), and **Undo last save** restores the file
+byte for byte. If the CNS changed on disk after the editor opened, the save is refused.
+
 ## Build
 
 ```powershell

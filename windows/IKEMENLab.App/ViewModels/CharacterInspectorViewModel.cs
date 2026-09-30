@@ -38,9 +38,13 @@ public sealed class CharacterInspectorViewModel : ObservableObject
     public CharacterInspectorViewModel(
         CharacterRowViewModel row,
         Func<CharacterRowViewModel?, string?, Task>? setPrimaryDef = null,
-        ICommand? deleteCommand = null)
+        ICommand? deleteCommand = null,
+        ICommand? openSpritesCommand = null,
+        ICommand? openTuningCommand = null)
     {
         Row = row;
+        OpenSpritesCommand = openSpritesCommand;
+        OpenTuningCommand = openTuningCommand;
         _setPrimaryDef = setPrimaryDef;
         DeleteCommand = deleteCommand;
         _selectedDef = CurrentDefRelative();
@@ -63,6 +67,14 @@ public sealed class CharacterInspectorViewModel : ObservableObject
     public ICommand? DeleteCommand { get; }
 
     public bool CanShowDelete => DeleteCommand is not null;
+
+    /// <summary>Sprite Inspector for this character's SFF (parameter is <see cref="Row"/>).</summary>
+    public ICommand? OpenSpritesCommand { get; }
+
+    /// <summary>Size &amp; Stats editor for this character's CNS (parameter is <see cref="Row"/>).</summary>
+    public ICommand? OpenTuningCommand { get; }
+
+    public bool CanShowTools => OpenSpritesCommand is not null && OpenTuningCommand is not null;
 
     /// <summary>The package a delete removes: the character's top-level folder under chars/.</summary>
     public string PackageFolder => "chars/" + IKEMENLab.Core.Library.ContentIdentity.TopFolder(Row.Entry.Id);

@@ -1,0 +1,173 @@
+<Window x:Class="IKEMENLab.App.Views.SpriteInspectorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:IKEMENLab.App.ViewModels"
+        xmlns:core="clr-namespace:IKEMENLab.Core.Sprites;assembly=IKEMENLab.Core"
+        Title="Sprite Inspector" Height="700" Width="1080"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip"
+        MinHeight="480" MinWidth="820"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,14">
+            <TextBlock FontSize="18" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}">
+                <Run Text="{Binding Title, Mode=OneWay}"/><Run Text=" — sprites"/>
+            </TextBlock>
+            <TextBlock Margin="0,4,0,0" FontSize="12" Foreground="{DynamicResource TextSecondary}">
+                <Run Text="{Binding FileName, Mode=OneWay}" FontFamily="{StaticResource MonoFont}"/><Run Text="   "/><Run Text="{Binding Summary, Mode=OneWay}"/>
+            </TextBlock>
+        </StackPanel>
+
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="460"/>
+                <ColumnDefinition Width="16"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- ============ Sprite table ============ -->
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBox Grid.Row="0" Style="{StaticResource FieldBox}" Margin="0,0,0,8"
+                         Text="{Binding Filter, UpdateSourceTrigger=PropertyChanged}"
+                         ToolTip="Group (9000), group and number (0,0), or an encoding (RLE8, PNG)"
+                         AutomationProperties.Name="Filter sprites"/>
+
+                <Border Grid.Row="1" Style="{StaticResource Card}" CornerRadius="8" Padding="0">
+                    <DockPanel>
+                        <Grid DockPanel.Dock="Top" Margin="12,8,12,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="76"/>
+                                <ColumnDefinition Width="84"/>
+                                <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="84"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="SPRITE" Style="{StaticResource SectionLabel}"/>
+                            <TextBlock Grid.Column="1" Text="SIZE" Style="{StaticResource SectionLabel}"/>
+                            <TextBlock Grid.Column="2" Text="AXIS" Style="{StaticResource SectionLabel}"/>
+                            <TextBlock Grid.Column="3" Text="ENCODING" Style="{StaticResource SectionLabel}"/>
+                            <TextBlock Grid.Column="4" Text="BYTES" Style="{StaticResource SectionLabel}"/>
+                        </Grid>
+                        <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                 ItemsSource="{Binding Sprites}" SelectedItem="{Binding SelectedSprite, Mode=TwoWay}"
+                                 AutomationProperties.Name="Sprites">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type core:SpriteInfo}">
+                                    <Grid Margin="12,6" TextElement.FontSize="12" TextElement.Foreground="{DynamicResource TextPrimary}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="76"/>
+                                            <ColumnDefinition Width="84"/>
+                                            <ColumnDefinition Width="72"/>
+                                            <ColumnDefinition Width="84"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="{Binding Id}" FontFamily="{StaticResource MonoFont}"/>
+                                        <TextBlock Grid.Column="1">
+                                            <Run Text="{Binding Width, Mode=OneWay}"/><Run Text="&#215;"/><Run Text="{Binding Height, Mode=OneWay}"/>
+                                        </TextBlock>
+                                        <TextBlock Grid.Column="2">
+                                            <Run Text="{Binding AxisX, Mode=OneWay}"/><Run Text=","/><Run Text="{Binding AxisY, Mode=OneWay}"/>
+                                        </TextBlock>
+                                        <TextBlock Grid.Column="3" Text="{Binding Encoding}"/>
+                                        <TextBlock Grid.Column="4" Text="{Binding StoredBytes}" Foreground="{DynamicResource TextSecondary}"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+
+                <ItemsControl Grid.Row="2" ItemsSource="{Binding Findings}" Margin="0,10,0,0" Focusable="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:FindingRow}">
+                            <DockPanel Margin="0,2">
+                                <TextBlock DockPanel.Dock="Left" Text="{Binding Glyph}" Width="18" FontSize="12"
+                                           Foreground="{Binding Foreground}"/>
+                                <TextBlock Text="{Binding Message}" FontSize="12" TextWrapping="Wrap"
+                                           Foreground="{Binding Foreground}"/>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+
+            <!-- ============ Preview ============ -->
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" Margin="0,0,0,8" LastChildFill="False">
+                    <ComboBox DockPanel.Dock="Left" Style="{StaticResource ThemedComboBox}" Width="260" Margin="0,0,12,0"
+                              ItemsSource="{Binding Palettes}" SelectedItem="{Binding SelectedPalette}"
+                              DisplayMemberPath="Label"
+                              Visibility="{Binding ShowPaletteChoice, Converter={StaticResource BoolToVis}}"
+                              AutomationProperties.Name="Preview palette"/>
+                    <TextBlock DockPanel.Dock="Left" Text="Zoom" VerticalAlignment="Center" FontSize="12"
+                               Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0"/>
+                    <Slider DockPanel.Dock="Left" Style="{StaticResource FlatSlider}" Width="120" VerticalAlignment="Center"
+                            Minimum="1" Maximum="8" Value="{Binding Zoom}" TickFrequency="1" IsSnapToTickEnabled="True"
+                            AutomationProperties.Name="Zoom"/>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding ZoomText}" VerticalAlignment="Center" FontSize="12"
+                               Foreground="{DynamicResource TextSecondary}" Margin="8,0,16,0" MinWidth="24"/>
+                    <CheckBox DockPanel.Dock="Left" Content="Show axis" IsChecked="{Binding ShowAxis}" VerticalAlignment="Center"
+                              Foreground="{DynamicResource TextSecondary}"/>
+                    <Button DockPanel.Dock="Right" Content="Export PNG…" Style="{StaticResource SecondaryButton}"
+                            Command="{Binding ExportCommand}"/>
+                </DockPanel>
+
+                <Border Grid.Row="1" CornerRadius="8" BorderBrush="{DynamicResource BorderSubtle}" BorderThickness="1"
+                        ClipToBounds="True">
+                    <Border.Background>
+                        <!-- Checkerboard so transparent pixels are visible -->
+                        <DrawingBrush TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute" Viewbox="0,0,16,16" ViewboxUnits="Absolute">
+                            <DrawingBrush.Drawing>
+                                <DrawingGroup>
+                                    <GeometryDrawing Brush="#FF1C1C20"><GeometryDrawing.Geometry><RectangleGeometry Rect="0,0,16,16"/></GeometryDrawing.Geometry></GeometryDrawing>
+                                    <GeometryDrawing Brush="#FF26262B"><GeometryDrawing.Geometry><GeometryGroup>
+                                        <RectangleGeometry Rect="0,0,8,8"/><RectangleGeometry Rect="8,8,8,8"/>
+                                    </GeometryGroup></GeometryDrawing.Geometry></GeometryDrawing>
+                                </DrawingGroup>
+                            </DrawingBrush.Drawing>
+                        </DrawingBrush>
+                    </Border.Background>
+                    <Grid>
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                            <Canvas Width="{Binding PreviewWidth}" Height="{Binding PreviewHeight}"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center" Margin="24">
+                                <Image Source="{Binding Preview}" Width="{Binding PreviewWidth}" Height="{Binding PreviewHeight}"
+                                       Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
+                                <Rectangle Height="1" Width="{Binding PreviewWidth}" Canvas.Top="{Binding AxisTop}"
+                                           Fill="#CCFF4D4D" IsHitTestVisible="False"
+                                           Visibility="{Binding ShowAxis, Converter={StaticResource BoolToVis}}"/>
+                                <Rectangle Width="1" Height="{Binding PreviewHeight}" Canvas.Left="{Binding AxisLeft}"
+                                           Fill="#CCFF4D4D" IsHitTestVisible="False"
+                                           Visibility="{Binding ShowAxis, Converter={StaticResource BoolToVis}}"/>
+                            </Canvas>
+                        </ScrollViewer>
+                        <TextBlock Text="{Binding PreviewNote}" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                   FontSize="13" Foreground="{DynamicResource TextTertiary}"
+                                   Visibility="{Binding PreviewNote, Converter={StaticResource HasValueToVis}}"/>
+                    </Grid>
+                </Border>
+
+                <TextBlock Grid.Row="2" Text="{Binding DetailText}" Margin="0,10,0,0" FontSize="12"
+                           FontFamily="{StaticResource MonoFont}" Foreground="{DynamicResource TextSecondary}"
+                           TextWrapping="Wrap"/>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>

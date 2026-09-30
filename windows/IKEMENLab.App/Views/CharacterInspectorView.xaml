@@ -75,6 +75,17 @@
                     </Border>
                 </UniformGrid>
 
+                <!-- ============ Tools ============ -->
+                <StackPanel Orientation="Horizontal" Margin="0,20,0,0"
+                            Visibility="{Binding CanShowTools, Converter={StaticResource BoolToVis}}">
+                    <Button Content="Inspect Sprites&#x2026;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
+                            Command="{Binding OpenSpritesCommand}" CommandParameter="{Binding Row}"
+                            AutomationProperties.Name="Inspect Sprites"/>
+                    <Button Content="Edit Size &amp; Stats&#x2026;" Style="{StaticResource SecondaryButton}"
+                            Command="{Binding OpenTuningCommand}" CommandParameter="{Binding Row}"
+                            AutomationProperties.Name="Edit Size and Stats"/>
+                </StackPanel>
+
                 <!-- ============ Attributes ============ -->
                 <DockPanel Margin="0,28,0,0">
                     <TextBlock DockPanel.Dock="Right" Text="{Binding StatsNote}" FontSize="10" VerticalAlignment="Center"
