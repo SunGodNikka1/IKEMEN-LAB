@@ -22,12 +22,14 @@ internal sealed class XRayFixtures : IDisposable
         File.WriteAllText(Path.Combine(Root, "data", "common1.cns"), CommonCns);
         WriteValentine();
         WriteIkemen();
+        WriteComboGuy();
     }
 
     public void Dispose() { try { Directory.Delete(Root, true); } catch { /* best effort */ } }
 
     public CharacterEntry Valentine => Entry("Valentine", "Funny Valentine");
     public CharacterEntry Ikemen => Entry("IkemenGuy", "Ikemen Guy");
+    public CharacterEntry ComboGuy => Entry("ComboGuy", "Combo Guy");
 
     private static CharacterEntry Entry(string folder, string name) => new()
     {
@@ -550,6 +552,282 @@ internal sealed class XRayFixtures : IDisposable
         1000,1, 0,0, 4
         1000,2, 0,0, 4
         1000,3, 0,0, 4
+        """;
+
+
+    // ------------------------------------------------------------------ Combo fixture (hand-computed expectations in XRayComboTests)
+
+    private void WriteComboGuy()
+    {
+        var d = Dir("ComboGuy");
+        File.WriteAllText(Path.Combine(d, "ComboGuy.def"), "[Info]\nname = \"Combo Guy\"\n[Files]\ncmd = ComboGuy.cmd\ncns = ComboGuy.cns\nanim = ComboGuy.air\nstcommon = common1.cns\n");
+        File.WriteAllText(Path.Combine(d, "ComboGuy.cmd"), ComboCmd);
+        File.WriteAllText(Path.Combine(d, "ComboGuy.cns"), ComboCns);
+        File.WriteAllText(Path.Combine(d, "ComboGuy.air"), ComboAir);
+    }
+
+    public const string ComboCmd = """
+        [Command]
+        name = "x"
+        command = x
+        [Command]
+        name = "y"
+        command = y
+        [Command]
+        name = "z"
+        command = z
+        [Command]
+        name = "QCF_x"
+        command = ~D, DF, F, x
+        [Command]
+        name = "super"
+        command = ~D, DF, F, a+b
+
+        [Statedef -1]
+
+        [State -1, x from neutral]
+        type = ChangeState
+        value = 200
+        triggerall = command = "x"
+        trigger1 = statetype = S && ctrl
+
+        [State -1, y from neutral]
+        type = ChangeState
+        value = 210
+        triggerall = command = "y"
+        trigger1 = statetype = S && ctrl
+
+        [State -1, x into y on hit]
+        type = ChangeState
+        value = 210
+        triggerall = command = "y"
+        trigger1 = stateno = 200 && movehit
+
+        [State -1, special cancel]
+        type = ChangeState
+        value = 1000
+        triggerall = command = "QCF_x"
+        trigger1 = stateno = [200,210] && movecontact
+
+        [State -1, special from neutral]
+        type = ChangeState
+        value = 1000
+        triggerall = command = "QCF_x"
+        trigger1 = statetype = S && ctrl
+
+        [State -1, super cancel]
+        type = ChangeState
+        value = 3000
+        triggerall = command = "super"
+        triggerall = power >= 1000
+        trigger1 = stateno = 1000 && movehit
+
+        [State -1, whiff repeat]
+        type = ChangeState
+        value = 200
+        triggerall = command = "x"
+        trigger1 = stateno = 200
+
+        [State -1, z any attack on hit]
+        type = ChangeState
+        value = 220
+        triggerall = command = "z"
+        trigger1 = statetype = S && movehit
+
+        [State -1, z from neutral]
+        type = ChangeState
+        value = 220
+        triggerall = command = "z"
+        trigger1 = statetype = S && ctrl
+
+        [State -1, link x after y]
+        type = ChangeState
+        value = 200
+        triggerall = command = "x"
+        trigger1 = stateno = 210 && ctrl
+
+        [State -1, dynamic pick]
+        type = ChangeState
+        value = var(1) + 200
+        triggerall = command = "y"
+        trigger1 = stateno = 220 && movehit
+
+        [State -1, weird cancel]
+        type = ChangeState
+        value = 300
+        triggerall = command = "z"
+        trigger1 = stateno = 210 && movehit && (P2Dist X < 60 || random < 300)
+        """;
+
+    public const string ComboCns = """
+        [Data]
+        life = 1000
+
+        [Statedef 200]
+        type = S
+        movetype = A
+        anim = 200
+        ctrl = 0
+
+        [State 200, hit]
+        type = HitDef
+        trigger1 = AnimElem = 2
+        attr = S, NA
+        damage = 20, 3
+        pausetime = 8, 8
+
+        [State 200, end]
+        type = ChangeState
+        value = 0
+        trigger1 = AnimTime = 0
+
+        [Statedef 210]
+        type = S
+        movetype = A
+        anim = 210
+        ctrl = 0
+
+        [State 210, hit]
+        type = HitDef
+        trigger1 = AnimElem = 2
+        attr = S, NA
+        damage = 30
+
+        [State 210, end]
+        type = ChangeState
+        value = 0
+        trigger1 = AnimTime = 0
+
+        [Statedef 220]
+        type = S
+        movetype = A
+        anim = 220
+
+        [State 220, hit]
+        type = HitDef
+        trigger1 = AnimElem = 1
+        attr = S, NA
+        damage = 15
+
+        [State 220, end]
+        type = ChangeState
+        value = 0
+        trigger1 = AnimTime = 0
+
+        [Statedef 300]
+        type = S
+        movetype = A
+        anim = 300
+
+        [State 300, hit1]
+        type = HitDef
+        trigger1 = Time = 2
+        attr = S, NA
+        damage = 10
+        [State 300, hit2]
+        type = HitDef
+        trigger1 = Time = 6
+        attr = S, NA
+        damage = 10
+
+        [Statedef 1000]
+        type = S
+        movetype = A
+        anim = 1000
+        ctrl = 0
+
+        [State 1000, hit]
+        type = HitDef
+        trigger1 = AnimElem = 2
+        attr = S, SA
+        damage = 50
+        p1stateno = 1002
+
+        [State 1000, second stage]
+        type = ChangeState
+        value = 1001
+        trigger1 = Time >= 6
+
+        [Statedef 1001]
+        type = S
+        movetype = A
+        anim = 1000
+
+        [State 1001, hit]
+        type = HitDef
+        trigger1 = Time = 1
+        attr = S, SA
+        damage = 20
+
+        [State 1001, end]
+        type = ChangeState
+        value = 0
+        trigger1 = AnimTime = 0
+
+        [Statedef 1002]
+        type = S
+        movetype = A
+        anim = 1000
+
+        [State 1002, end]
+        type = ChangeState
+        value = 0
+        trigger1 = AnimTime = 0
+
+        [Statedef 3000]
+        type = S
+        movetype = A
+        anim = 3000
+        poweradd = -1000
+        ctrl = 0
+
+        [State 3000, hit]
+        type = HitDef
+        trigger1 = AnimElem = 1
+        attr = S, HA
+        damage = 200
+
+        [State 3000, end]
+        type = ChangeState
+        value = 0
+        trigger1 = AnimTime = 0
+
+        [Statedef 400]
+        type = S
+        movetype = A
+        anim = 200
+
+        [State 400, hit]
+        type = HitDef
+        trigger1 = 1
+        attr = S, NA
+        damage = var(1)
+        """;
+
+    public const string ComboAir = """
+        [Begin Action 200]
+        200,0, 0,0, 3
+        200,1, 0,0, 3
+        200,2, 0,0, 6
+
+        [Begin Action 210]
+        210,0, 0,0, 4
+        210,1, 0,0, 4
+        210,2, 0,0, 6
+
+        [Begin Action 220]
+        220,0, 0,0, 5
+
+        [Begin Action 300]
+        300,0, 0,0, 10
+
+        [Begin Action 1000]
+        1000,0, 0,0, 4
+        1000,1, 0,0, 4
+        1000,2, 0,0, 8
+
+        [Begin Action 3000]
+        3000,0, 0,0, 20
         """;
 
     // ------------------------------------------------------------------ engine common states (tiny)

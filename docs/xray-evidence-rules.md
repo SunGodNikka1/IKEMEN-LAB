@@ -59,6 +59,7 @@ A heuristic, a non-literal step, or a human comment. Always drawn differently fr
 | `helper.state-owner` | Which entity (root or a helper) runs a shared state is not known statically. |
 | `label.author-comment` | Name taken from a comment above the block. |
 | `label.controller-name` | Name taken from the [State n, name] text. |
+| `state.ambiguous-owner` | The controller block names a state other than the [Statedef] it sits in, so which state owns it (and therefore owns everything the block does) is a reading of the layout. |
 | `state.duplicate-definition` | Statedef defined more than once; first definition assumed to win. |
 | `state.engine-common` | Target is a standard common-state number; common1.cns was not loaded, so the definition is assumed. |
 | `timeline.animelem-mixed` | AnimElem gate mapped to a frame although the state may change animation. |
@@ -81,10 +82,36 @@ Could not be determined: an expression that does not parse, a dynamic `ChangeSta
 | `command.undefined` | Command name is not defined in the CMD. |
 | `expr.unparsed` | The expression could not be parsed. |
 | `helper.dynamic-spawn` | Helper stateno/id is not a literal. |
-| `state.ambiguous-owner` | The controller block names a state other than the `[Statedef]` it sits in, so which state owns it — and therefore owns everything the block does — is a reading of the layout, not a literal. |
 | `state.dynamic-target` | ChangeState target is an expression that is not constant. |
 | `state.missing` | Target state is not defined in any indexed file. |
 | `var.dynamic-index` | var/fvar index is not a literal. |
+
+## Combo candidates (Milestone 2)
+
+These rules classify **edges of the state graph** as combo candidates. They never say a combo works: hit-stun, pushback, spacing, juggle points,
+damage scaling, meter gain and whether a cancel window is open on a given tick are not modelled. An edge keeps the confidence of the *facts* it
+depends on (the relationship it came from, how its source states were chosen); the classification itself is always an interpretation, so it is
+listed as evidence but never raises confidence.
+
+| Rule | Confidence | Meaning |
+|---|---|---|
+| `combo.candidate-cancel` | Inferred | A ChangeState out of a move that is driven by an input or by movehit/movecontact/moveguarded; with a contact condition it can only fire after the move connects. |
+| `combo.candidate-chain` | Inferred | A ChangeState that needs no input and no contact: the move continuing by itself on a timer or animation frame. |
+| `combo.candidate-link` | Inferred | The move must recover to control (ctrl) before this input works; whether a link is possible depends on frame data that is not modelled. |
+| `combo.candidate-onhit` | Inferred | HitDef p1stateno: the attacker moves to this state when the hit lands. |
+| `combo.candidate-start` | Inferred | A command-gated edge that starts a move from a neutral state. |
+| `combo.cost-literal` | StaticProven | A literal negative PowerAdd/poweradd is this move's meter cost. |
+| `combo.damage-literal` | StaticProven | HitDef damage is a literal number. |
+| `combo.damage-multi` | Inferred | The state has several HitDefs or a non-literal damage, so its damage is a lower bound or unknown. |
+| `combo.frames-estimate` | Inferred | Earliest cancel tick derived from Time/AnimElem gates against the AIR timeline. |
+| `combo.neutral-node` | Inferred | States treated as neutral (idle with control): common stand/crouch/walk states, or an idle Statedef with ctrl = 1. |
+| `combo.recovery` | Inferred | The edge returns the character to a neutral state. |
+| `combo.route` | Inferred | A route is a candidate: every step is an edge of the static graph. Hit-stun, pushback, juggle, meter gain and timing are not modelled, so it is not a verified combo. |
+| `combo.source-literal` | StaticProven | A -1/-2/-3 gate names its source states with literal stateno tests, so the edge starts from exactly those states. |
+| `combo.source-unconstrained` | Inferred | The gate does not name its source state; candidate sources are every attacking state that satisfies its statetype/movetype/contact conditions. |
+
+Edge confidence is the weakest of its relationship, its source expansion and any neutral-node step. A route's confidence is the weakest of its edges.
+A route that starts from the neutral node is therefore `Inferred` at best, because "neutral" is a heuristic node.
 
 ## Deterministic vs inferred at a glance
 

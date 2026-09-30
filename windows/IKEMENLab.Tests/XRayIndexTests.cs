@@ -170,7 +170,9 @@ public class XRayIndexTests : IDisposable
 
         var second = gate.Branches.First(b => b.Number == 2).Facets;
         Assert.Contains("movecontact", second.Contact);
-        Assert.Equal(1, second.OtherConditions); // stateno = [200,210] is not a modelled shape, and says so
+        Assert.Equal(0, second.OtherConditions);                       // stateno = [200,210] is now a modelled source-state constraint
+        Assert.Equal([new StateRange(200, 210)], second.SourceStateRanges);
+        Assert.Empty(first.SourceStateRanges);
     }
 
     [Fact]
@@ -459,6 +461,7 @@ public class XRayIndexTests : IDisposable
         Assert.Equal(["a!"], gate.StateTypes);
         Assert.True(gate.CtrlRequired);
         Assert.Equal(1, gate.OtherConditions); // Time = [0,20]
+        Assert.Equal(["(= time [0 20])"], _i.Get("state:-1/ctrl:0")!.Gate!.Branches[0].Facets.UnmodelledConditions);
         Assert.Equal(1, _i.Get("state:200/ctrl:0")!.Gate!.Branches[0].Facets.AnimElem.Count);
     }
 

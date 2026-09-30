@@ -53,11 +53,28 @@ public static class GateAnalyzer
         var ctrl = false;
         var ai = false;
         var other = 0;
+        var unmodelled = new List<string>();
+        List<StateRange>? source = null;
+        var excluded = new List<StateRange>();
+        List<StateRange>? prev = null;
 
         foreach (var c in conjuncts)
         {
             var f = ExprAnalyzer.Analyze(c);
             if (IsConstantTrue(c)) continue;
+
+            if (StateConstraint(c, "stateno") is { } sc)
+            {
+                if (sc.Negated) excluded.AddRange(sc.Ranges);
+                else source = source is null ? sc.Ranges : StateRange.Intersect(source, sc.Ranges);
+                continue;
+            }
+
+            if (StateConstraint(c, "prevstateno") is { Negated: false } pc)
+            {
+                prev = prev is null ? pc.Ranges : StateRange.Intersect(prev, pc.Ranges);
+                continue;
+            }
 
             if (c is Binary { Op: "=" or "!=", Left: Ident { Name: "command" }, Right: StringLit } && f.Commands.Count == 1)
             {
@@ -87,12 +104,80 @@ public static class GateAnalyzer
             else if (c is Binary { Op: "=" or "!=", Left: Ident { Name: "movetype" }, Right: Ident } && f.MoveTypes.Count == 1) moveTypes.Add(f.MoveTypes[0]);
             else if (OrOfIdentEquals(c, "statetype") is { Count: > 0 } sts) stateTypes.AddRange(sts);
             else if (OrOfIdentEquals(c, "movetype") is { Count: > 0 } mts) moveTypes.AddRange(mts);
-            else other++;
+            else
+            {
+                other++;
+                unmodelled.Add(ExprPrinter.ToSExpr(c));
+            }
         }
 
         return new GateFacets(
             commands.Distinct().ToList(), negated.Distinct().ToList(), contact.Distinct().ToList(),
-            power, time, animElem, ctrl, stateTypes.Distinct().ToList(), moveTypes.Distinct().ToList(), ai, other);
+            power, time, animElem, ctrl, stateTypes.Distinct().ToList(), moveTypes.Distinct().ToList(), ai, other,
+            source, excluded, prev, unmodelled);
+    }
+
+    private sealed record StateConstraintShape(List<StateRange> Ranges, bool Negated);
+
+    /// <summary>
+    /// Recognises <c>stateno = 200</c>, <c>= [200,210]</c> / <c>(200,210]</c>, <c>!=</c> of those, <c>&gt;= 1000</c>-style bounds,
+    /// and an OR of positive equalities. Anything else (arithmetic, other triggers inside) is not recognised.
+    /// </summary>
+    private static StateConstraintShape? StateConstraint(Expr e, string trigger)
+    {
+        static int? Int(Expr x) => x switch
+        {
+            NumberLit { IsInt: true } n => (int)n.Value,
+            Unary { Op: "-", Operand: NumberLit { IsInt: true } n } => -(int)n.Value,
+            _ => null
+        };
+
+        List<StateRange>? Equality(Expr x)
+        {
+            if (x is Binary { Op: "=", Left: Ident l } b && l.Name == trigger)
+            {
+                if (Int(b.Right) is { } n) return [new StateRange(n, n)];
+                if (b.Right is Interval { Low: var lo, High: var hi } iv && Int(lo) is { } a && Int(hi) is { } z)
+                {
+                    var from = iv.Open == '(' ? a + 1 : a;
+                    var to = iv.Close == ')' ? z - 1 : z;
+                    return from <= to ? [new StateRange(from, to)] : [];
+                }
+            }
+
+            if (x is Binary { Op: "||" } or)
+            {
+                var left = Equality(or.Left);
+                var right = Equality(or.Right);
+                if (left is null || right is null) return null;
+                return [.. left, .. right];
+            }
+
+            return null;
+        }
+
+        if (Equality(e) is { } eq) return new StateConstraintShape(eq, false);
+
+        if (e is Binary { Op: "!=", Left: Ident l } ne && l.Name == trigger)
+        {
+            if (Int(ne.Right) is { } n) return new StateConstraintShape([new StateRange(n, n)], true);
+            if (ne.Right is Interval { Low: var lo, High: var hi } iv && Int(lo) is { } a && Int(hi) is { } z)
+                return new StateConstraintShape([new StateRange(iv.Open == '(' ? a + 1 : a, iv.Close == ')' ? z - 1 : z)], true);
+        }
+
+        if (e is Binary { Op: ">=" or ">" or "<=" or "<", Left: Ident bl, Right: var rhs } cmp && bl.Name == trigger && Int(rhs) is { } bound)
+        {
+            var range = cmp.Op switch
+            {
+                ">=" => new StateRange(bound, int.MaxValue),
+                ">" => new StateRange(bound + 1, int.MaxValue),
+                "<=" => new StateRange(int.MinValue, bound),
+                _ => new StateRange(int.MinValue, bound - 1)
+            };
+            return new StateConstraintShape([range], false);
+        }
+
+        return null;
     }
 
     private static bool IsConstantTrue(Expr e) => e is NumberLit { Value: not 0 } || e is Binary { Op: "=", Left: NumberLit l, Right: NumberLit r } && l.Value == r.Value;

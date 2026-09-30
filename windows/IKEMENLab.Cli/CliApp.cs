@@ -1,5 +1,6 @@
 using System.Text.Json;
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.XRay.Combo;
 using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
 using IKEMENLab.Core.XRay.Query;
@@ -24,7 +25,12 @@ public static class CliApp
           transitions  <character> <200|state:200> ChangeState edges leaving a state, with their gates
           search       <character> <text>
           rules                                    the evidence rules behind every confidence level
-          combos       ...                         (milestone 2)
+          readiness    <character>                 how much the candidate graph can (and cannot) say about this character
+          candidates   <character> [--from <state|neutral>]   candidate combo edges with gates, evidence and unmodelled conditions
+          combos       <character> [--from <state>] [--max-moves N] [--meter N] [--max-frames N] [--top K]
+                       [--strategy dfs|beam|best] [--beam N] [--repeats N] [--max-unmodelled N]
+                       [--all-cancels] [--no-chains] [--allow-links]
+                       deterministic search; every route is a CANDIDATE (never verified), with its weakest confidence and unmodelled conditions
 
           runtime-prepare --root R --subject <folder> --dummy <folder> --stage <stages/x.def> [--frames N]
                        builds a disposable sandbox with the Lua probe (never touches R) and prints how to launch it
@@ -48,7 +54,6 @@ public static class CliApp
 
             var command = opts.Positional[1].ToLowerInvariant();
             if (command == "rules") { output.WriteLine(XRayJson.Rules()); return 0; }
-            if (command == "combos") return Fail(output, error, 2, "Combo search is milestone 2 and is not implemented yet.");
             if (command.StartsWith("runtime-", StringComparison.Ordinal)) return RuntimeCommands.Run(command, opts, output, error);
 
             if (opts.Positional.Count < 3) { error.WriteLine(Usage); return 2; }
@@ -117,6 +122,30 @@ public static class CliApp
                     return 0;
                 }
 
+                case "readiness":
+                    output.WriteLine(ComboJson.Readiness(CandidateGraph.Build(index!)));
+                    return 0;
+
+                case "candidates":
+                {
+                    var graph = CandidateGraph.Build(index!);
+                    var from = opts.Get("from");
+                    if (from is null) { output.WriteLine(ComboJson.Edges(graph, null, graph.Edges)); return 0; }
+                    var node = CandidateGraph.ResolveState(index!, from);
+                    if (node is null) return Fail(output, error, 3, $"No state '{from}'.");
+                    output.WriteLine(ComboJson.Edges(graph, node, graph.From(node)));
+                    return 0;
+                }
+
+                case "combos":
+                {
+                    var graph = CandidateGraph.Build(index!);
+                    var built = BuildComboOptions(opts, out var problem);
+                    if (built is null) return Fail(output, error, 2, problem!);
+                    output.WriteLine(ComboJson.Search(graph, ComboSearch.Find(graph, built)));
+                    return 0;
+                }
+
                 case "search":
                     if (rest.Count < 1) return Fail(output, error, 2, "search needs text.");
                     output.WriteLine(XRayJson.ObjectList(index!, "search " + rest[0], index!.Search(rest[0])));
@@ -131,6 +160,54 @@ public static class CliApp
         {
             return Fail(output, error, 3, ex.Message);
         }
+    }
+
+    private static ComboOptions? BuildComboOptions(Options opts, out string? problem)
+    {
+        string? error = null;
+        int? Int(string name, int? fallback = null)
+        {
+            var raw = opts.Get(name);
+            if (raw is null) return fallback;
+            if (int.TryParse(raw, out var n) && n >= 0) return n;
+            error = $"--{name} needs a non-negative whole number.";
+            return null;
+        }
+
+        var maxMoves = Int("max-moves", 4);
+        var meter = Int("meter", 0);
+        var top = Int("top", 20);
+        var repeats = Int("repeats", 1);
+        var beam = Int("beam", 200);
+        var maxFrames = Int("max-frames");
+        var maxUnmodelled = Int("max-unmodelled");
+        problem = error;
+        if (problem is not null) return null;
+
+        var strategy = (opts.Get("strategy") ?? "dfs").ToLowerInvariant() switch
+        {
+            "dfs" => ComboStrategy.Dfs,
+            "beam" => ComboStrategy.Beam,
+            "best" or "best-first" or "bestfirst" => ComboStrategy.BestFirst,
+            _ => (ComboStrategy?)null
+        };
+        if (strategy is null) { problem = "--strategy must be dfs, beam or best."; return null; }
+
+        return new ComboOptions
+        {
+            From = opts.Get("from"),
+            MaxMoves = Math.Clamp(maxMoves!.Value, 1, 12),
+            StartMeter = meter!.Value,
+            MaxFrames = maxFrames,
+            HitConfirmOnly = !opts.Flag("all-cancels"),
+            AllowChains = !opts.Flag("no-chains"),
+            AllowLinks = opts.Flag("allow-links"),
+            MaxRepeats = Math.Max(1, repeats!.Value),
+            Top = Math.Clamp(top!.Value, 1, 1000),
+            Strategy = strategy.Value,
+            BeamWidth = Math.Max(1, beam!.Value),
+            MaxUnmodelledPerEdge = maxUnmodelled
+        };
     }
 
     private static int Load(string target, Options opts, TextWriter output, TextWriter error, out SemanticIndex? index)
@@ -169,9 +246,10 @@ public static class CliApp
         return sb.ToString();
     }
 
-    internal sealed record Options(List<string> Positional, string? Root, bool Text, bool NoCommon, Dictionary<string, string> Named)
+    internal sealed record Options(List<string> Positional, string? Root, bool Text, bool NoCommon, Dictionary<string, string> Named, HashSet<string> Flags)
     {
         public string? Get(string name) => Named.TryGetValue(name, out var v) ? v : null;
+        public bool Flag(string name) => Flags.Contains(name);
 
         public static Options Parse(string[] args)
         {
@@ -180,6 +258,7 @@ public static class CliApp
             string? root = null;
             var text = false;
             var noCommon = false;
+            var flags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             for (var i = 0; i < args.Length; i++)
             {
                 switch (args[i])
@@ -187,6 +266,7 @@ public static class CliApp
                     case "--root" when i + 1 < args.Length: root = args[++i]; break;
                     case "--text": text = true; break;
                     case "--no-common": noCommon = true; break;
+                    case "--all-cancels" or "--no-chains" or "--allow-links": flags.Add(args[i][2..]); break;
                     case var a when a.StartsWith("--", StringComparison.Ordinal) && i + 1 < args.Length:
                         named[a[2..]] = args[++i];
                         break;
@@ -194,7 +274,7 @@ public static class CliApp
                 }
             }
 
-            return new Options(pos, root, text, noCommon, named);
+            return new Options(pos, root, text, noCommon, named, flags);
         }
     }
 

@@ -260,25 +260,33 @@ public static class XRayJson
             w.WriteStartArray();
             foreach (var l in b.Lines) WriteLine(w, l);
             w.WriteEndArray();
-            var f = b.Facets;
             w.WritePropertyName("facets");
-            w.WriteStartObject();
-            WriteStrings(w, "commands", f.Commands);
-            WriteStrings(w, "negatedCommands", f.NegatedCommands);
-            WriteStrings(w, "contact", f.Contact);
-            WriteCompares(w, "power", f.Power);
-            WriteCompares(w, "time", f.Time);
-            WriteCompares(w, "animElem", f.AnimElem);
-            w.WriteBoolean("ctrlRequired", f.CtrlRequired);
-            WriteStrings(w, "stateTypes", f.StateTypes);
-            WriteStrings(w, "moveTypes", f.MoveTypes);
-            w.WriteBoolean("readsAILevel", f.ReadsAiLevel);
-            w.WriteNumber("otherConditions", f.OtherConditions);
-            w.WriteEndObject();
+            WriteFacets(w, b.Facets);
             w.WriteEndObject();
         }
 
         w.WriteEndArray();
+        w.WriteEndObject();
+    }
+
+    public static void WriteFacets(Utf8JsonWriter w, GateFacets f)
+    {
+        w.WriteStartObject();
+        WriteStrings(w, "commands", f.Commands);
+        WriteStrings(w, "negatedCommands", f.NegatedCommands);
+        WriteStrings(w, "contact", f.Contact);
+        WriteCompares(w, "power", f.Power);
+        WriteCompares(w, "time", f.Time);
+        WriteCompares(w, "animElem", f.AnimElem);
+        w.WriteBoolean("ctrlRequired", f.CtrlRequired);
+        WriteStrings(w, "stateTypes", f.StateTypes);
+        WriteStrings(w, "moveTypes", f.MoveTypes);
+        w.WriteBoolean("readsAILevel", f.ReadsAiLevel);
+        w.WriteNumber("otherConditions", f.OtherConditions);
+        WriteRanges(w, "sourceStates", f.SourceStateRanges);
+        WriteRanges(w, "excludedStates", f.ExcludedStateRanges);
+        WriteRanges(w, "prevStates", f.PrevStateRanges);
+        WriteStrings(w, "unmodelled", f.UnmodelledConditions);
         w.WriteEndObject();
     }
 
@@ -291,7 +299,22 @@ public static class XRayJson
         w.WriteEndObject();
     }
 
-    private static void WriteStrings(Utf8JsonWriter w, string name, IReadOnlyList<string> values)
+    public static void WriteRanges(Utf8JsonWriter w, string name, IReadOnlyList<StateRange> ranges)
+    {
+        w.WritePropertyName(name);
+        w.WriteStartArray();
+        foreach (var r in ranges)
+        {
+            w.WriteStartObject();
+            if (r.Lo != int.MinValue) w.WriteNumber("from", r.Lo);
+            if (r.Hi != int.MaxValue) w.WriteNumber("to", r.Hi);
+            w.WriteEndObject();
+        }
+
+        w.WriteEndArray();
+    }
+
+    public static void WriteStrings(Utf8JsonWriter w, string name, IReadOnlyList<string> values)
     {
         w.WritePropertyName(name);
         w.WriteStartArray();
@@ -299,7 +322,7 @@ public static class XRayJson
         w.WriteEndArray();
     }
 
-    private static void WriteCompares(Utf8JsonWriter w, string name, IReadOnlyList<Expressions.NumCompare> values)
+    public static void WriteCompares(Utf8JsonWriter w, string name, IReadOnlyList<Expressions.NumCompare> values)
     {
         w.WritePropertyName(name);
         w.WriteStartArray();
@@ -328,7 +351,7 @@ public static class XRayJson
         w.WriteEndObject();
     }
 
-    private static void WriteProps(Utf8JsonWriter w, IEnumerable<KeyValuePair<string, string>> props)
+    public static void WriteProps(Utf8JsonWriter w, IEnumerable<KeyValuePair<string, string>> props)
     {
         var list = props.ToList();
         if (list.Count == 0) return;
@@ -338,7 +361,7 @@ public static class XRayJson
         w.WriteEndObject();
     }
 
-    private static void WriteSource(Utf8JsonWriter w, SemanticIndex index, SourceRef? source)
+    public static void WriteSource(Utf8JsonWriter w, SemanticIndex index, SourceRef? source)
     {
         if (source is not { } s || index.FileOf(s) is not { } file) return;
         w.WritePropertyName("source");

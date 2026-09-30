@@ -73,6 +73,21 @@ public static class EvidenceRules
         new("anim.sprite-missing", Confidence.Unknown, "Sprite named by an AIR frame is not in the SFF."),
         new("expr.unparsed", Confidence.Unknown, "The expression could not be parsed."),
         new("helper.dynamic-spawn", Confidence.Unknown, "Helper stateno/id is not a literal."),
+        // ---- Milestone 2: combo candidates. These classify edges of the state graph; they never say a combo works.
+        new("combo.source-literal", Confidence.StaticProven, "A -1/-2/-3 gate names its source states with literal stateno tests, so the edge starts from exactly those states."),
+        new("combo.damage-literal", Confidence.StaticProven, "HitDef damage is a literal number."),
+        new("combo.cost-literal", Confidence.StaticProven, "A literal negative PowerAdd/poweradd is this move's meter cost."),
+        new("combo.source-unconstrained", Confidence.Inferred, "The gate does not name its source state; candidate sources are every attacking state that satisfies its statetype/movetype/contact conditions."),
+        new("combo.neutral-node", Confidence.Inferred, "States treated as neutral (idle with control): common stand/crouch/walk states, or an idle Statedef with ctrl = 1."),
+        new("combo.candidate-cancel", Confidence.Inferred, "A ChangeState out of a move that is driven by an input or by movehit/movecontact/moveguarded; with a contact condition it can only fire after the move connects."),
+        new("combo.candidate-chain", Confidence.Inferred, "A ChangeState that needs no input and no contact: the move continuing by itself on a timer or animation frame."),
+        new("combo.candidate-onhit", Confidence.Inferred, "HitDef p1stateno: the attacker moves to this state when the hit lands."),
+        new("combo.candidate-start", Confidence.Inferred, "A command-gated edge that starts a move from a neutral state."),
+        new("combo.candidate-link", Confidence.Inferred, "The move must recover to control (ctrl) before this input works; whether a link is possible depends on frame data that is not modelled."),
+        new("combo.recovery", Confidence.Inferred, "The edge returns the character to a neutral state."),
+        new("combo.damage-multi", Confidence.Inferred, "The state has several HitDefs or a non-literal damage, so its damage is a lower bound or unknown."),
+        new("combo.frames-estimate", Confidence.Inferred, "Earliest cancel tick derived from Time/AnimElem gates against the AIR timeline."),
+        new("combo.route", Confidence.Inferred, "A route is a candidate: every step is an edge of the static graph. Hit-stun, pushback, juggle, meter gain and timing are not modelled, so it is not a verified combo."),
         new("state.ambiguous-owner", Confidence.Inferred, "The controller block names a state other than the [Statedef] it sits in, so which state owns it (and therefore owns everything the block does) is a reading of the layout."),
     ];
 

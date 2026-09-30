@@ -296,6 +296,61 @@
                   "otherConditions": {
                     "type": "integer",
                     "description": "Conjuncts that are not a recognised literal shape. Greater than 0 means the other facets are incomplete."
+                  },
+                  "sourceStates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "integer"
+                        },
+                        "to": {
+                          "type": "integer"
+                        }
+                      },
+                      "description": "Inclusive state-number range; a missing bound is open-ended."
+                    },
+                    "description": "Union of state numbers the controller's own state must be in (stateno = N, = [a,b], >= N, OR of equalities). Empty = not constrained."
+                  },
+                  "excludedStates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "integer"
+                        },
+                        "to": {
+                          "type": "integer"
+                        }
+                      },
+                      "description": "Inclusive state-number range; a missing bound is open-ended."
+                    },
+                    "description": "State numbers excluded by stateno != \u2026"
+                  },
+                  "prevStates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "from": {
+                          "type": "integer"
+                        },
+                        "to": {
+                          "type": "integer"
+                        }
+                      },
+                      "description": "Inclusive state-number range; a missing bound is open-ended."
+                    },
+                    "description": "prevstateno = \u2026 constraints."
+                  },
+                  "unmodelled": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "S-expression text of the conjuncts that are not a recognised shape; its length equals otherConditions."
                   }
                 }
               }

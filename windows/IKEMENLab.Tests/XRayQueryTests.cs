@@ -259,9 +259,9 @@ public class XRayQueryTests : IDisposable
         Assert.Equal(3, Cli("xray", "explain", Target, "state:99999").Code);
         Assert.Equal(3, Cli("xray", "var", Target, "var(9999)").Code);
         Assert.Equal(3, Cli("xray", "index", Path.Combine(_fx.Root, "nowhere")).Code);
-        var combos = Cli("xray", "combos", Target);
+        var combos = Cli("xray", "combos", Target, "--strategy", "nope");
         Assert.Equal(2, combos.Code);
-        Assert.Contains("milestone 2", combos.Err);
+        Assert.Contains("--strategy", combos.Err);
         using var err = JsonDocument.Parse(combos.Out);
         Assert.True(err.RootElement.TryGetProperty("error", out _));
     }

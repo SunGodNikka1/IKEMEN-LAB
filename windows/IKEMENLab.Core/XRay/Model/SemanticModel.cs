@@ -52,7 +52,48 @@ public sealed record GateFacets(
     IReadOnlyList<string> StateTypes,
     IReadOnlyList<string> MoveTypes,
     bool ReadsAiLevel,
-    int OtherConditions);
+    int OtherConditions,
+    IReadOnlyList<StateRange>? SourceStates = null,
+    IReadOnlyList<StateRange>? ExcludedStates = null,
+    IReadOnlyList<StateRange>? PrevStates = null,
+    IReadOnlyList<string>? Unmodelled = null)
+{
+    /// <summary>Union of state numbers the controller's own state must be in (<c>stateno = 200</c>, <c>= [200,210]</c>, <c>&gt;= 1000</c>); empty = not constrained.</summary>
+    public IReadOnlyList<StateRange> SourceStateRanges => SourceStates ?? [];
+    public IReadOnlyList<StateRange> ExcludedStateRanges => ExcludedStates ?? [];
+    public IReadOnlyList<StateRange> PrevStateRanges => PrevStates ?? [];
+    /// <summary>The conjuncts that are not a recognised shape (S-expression text); its count equals <see cref="OtherConditions"/>.</summary>
+    public IReadOnlyList<string> UnmodelledConditions => Unmodelled ?? [];
+    public bool HasSourceStateConstraint => SourceStates is { Count: > 0 };
+}
+
+/// <summary>Inclusive range of state numbers.</summary>
+public readonly record struct StateRange(int Lo, int Hi)
+{
+    public bool Contains(int n) => n >= Lo && n <= Hi;
+    public override string ToString() => Lo == Hi ? Lo.ToString() : Hi == int.MaxValue ? $"{Lo}+" : Lo == int.MinValue ? $"..{Hi}" : $"{Lo}-{Hi}";
+
+    public static bool Any(IReadOnlyList<StateRange> ranges, int n)
+    {
+        foreach (var r in ranges) if (r.Contains(n)) return true;
+        return false;
+    }
+
+    /// <summary>Intersection of two unions of ranges.</summary>
+    public static List<StateRange> Intersect(IReadOnlyList<StateRange> a, IReadOnlyList<StateRange> b)
+    {
+        var result = new List<StateRange>();
+        foreach (var x in a)
+            foreach (var y in b)
+            {
+                var lo = Math.Max(x.Lo, y.Lo);
+                var hi = Math.Min(x.Hi, y.Hi);
+                if (lo <= hi) result.Add(new StateRange(lo, hi));
+            }
+
+        return result.OrderBy(r => r.Lo).ThenBy(r => r.Hi).ToList();
+    }
+}
 
 public sealed record GateBranch(int Number, IReadOnlyList<TriggerLine> Lines, GateFacets Facets);
 
