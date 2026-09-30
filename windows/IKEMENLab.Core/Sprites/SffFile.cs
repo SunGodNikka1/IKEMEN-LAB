@@ -13,6 +13,9 @@ public sealed class SffSprite
     internal int Width { get; set; }
     internal int Height { get; set; }
 
+    internal short AxisX { get; init; }
+    internal short AxisY { get; init; }
+
     internal long DataOffset { get; init; }
     internal uint DataLength { get; init; }
     internal ushort Link { get; init; }
@@ -60,6 +63,9 @@ public sealed class SffFile : IDisposable
     public byte VersionLo2 { get; private set; }
 
     public IReadOnlyList<SffSprite> Sprites => _sprites;
+
+    /// <summary>Number of palettes stored in an SFF v2 (0 for v1, whose palettes travel inside the sprites).</summary>
+    public int PaletteCount => Version == 2 ? _paletteCount : 0;
 
     public static SffFile? Open(string path)
     {
@@ -207,13 +213,13 @@ public sealed class SffFile : IDisposable
 
     /// <summary>
     /// Decodes one sprite. <paramref name="palette0Override"/> replaces the SFF's physical palette 0
-    /// the way IKEMEN remaps it to the character's pal1 ACT (v1 only).
+    /// the way IKEMEN remaps it to the character's pal1 ACT. For SFF v2 it replaces the palette of every indexed sprite.
     /// </summary>
     public SpriteImage? Decode(SffSprite sprite, uint[]? palette0Override = null)
     {
         try
         {
-            return Version == 1 ? DecodeV1(sprite, palette0Override) : DecodeV2(sprite);
+            return Version == 1 ? DecodeV1(sprite, palette0Override) : DecodeV2(sprite, palette0Override);
         }
         catch (Exception e) when (e is IOException or IndexOutOfRangeException or ArgumentException
                                       or OverflowException or InvalidDataException)
@@ -275,6 +281,8 @@ public sealed class SffFile : IDisposable
             _sprites.Add(new SffSprite
             {
                 Index = i,
+                AxisX = BinaryPrimitives.ReadInt16LittleEndian(sh[8..]),
+                AxisY = BinaryPrimitives.ReadInt16LittleEndian(sh[10..]),
                 Group = BinaryPrimitives.ReadUInt16LittleEndian(sh[12..]),
                 Number = BinaryPrimitives.ReadUInt16LittleEndian(sh[14..]),
                 Link = BinaryPrimitives.ReadUInt16LittleEndian(sh[16..]),
@@ -307,6 +315,8 @@ public sealed class SffFile : IDisposable
                 Number = BinaryPrimitives.ReadUInt16LittleEndian(e[2..]),
                 Width = BinaryPrimitives.ReadUInt16LittleEndian(e[4..]),
                 Height = BinaryPrimitives.ReadUInt16LittleEndian(e[6..]),
+                AxisX = BinaryPrimitives.ReadInt16LittleEndian(e[8..]),
+                AxisY = BinaryPrimitives.ReadInt16LittleEndian(e[10..]),
                 Link = BinaryPrimitives.ReadUInt16LittleEndian(e[12..]),
                 Format = e[14],
                 ColorDepth = e[15],
@@ -421,7 +431,7 @@ public sealed class SffFile : IDisposable
 
     // ------------------------------------------------------------------ v2
 
-    private SpriteImage? DecodeV2(SffSprite sprite)
+    private SpriteImage? DecodeV2(SffSprite sprite, uint[]? paletteOverride = null)
     {
         var data = ResolveLinked(sprite);
         int width = data.Width, height = data.Height;
@@ -436,7 +446,7 @@ public sealed class SffFile : IDisposable
             case 0:
                 if (data.ColorDepth == 8)
                 {
-                    var pal = V2Palette(data.PaletteIndex);
+                    var pal = paletteOverride ?? V2Palette(data.PaletteIndex);
                     return pal is null ? null : SpriteImage.FromIndexed(width, height, Pad(bytes, width * height), pal);
                 }
 
@@ -452,7 +462,7 @@ public sealed class SffFile : IDisposable
                     3 => SffCodecs.Rle5(body, width, height),
                     _ => SffCodecs.Lz5(body, width, height)
                 };
-                var pal = V2Palette(data.PaletteIndex);
+                var pal = paletteOverride ?? V2Palette(data.PaletteIndex);
                 return pal is null ? null : SpriteImage.FromIndexed(width, height, indices, pal);
             }
 
@@ -460,7 +470,7 @@ public sealed class SffFile : IDisposable
             {
                 var png = bytes.Length > 4 ? Png.TryDecode(bytes.AsSpan(4)) : null;
                 if (png?.Indices is null) return null;
-                var pal = V2Palette(data.PaletteIndex);
+                var pal = paletteOverride ?? V2Palette(data.PaletteIndex);
                 return pal is null ? null : SpriteImage.FromIndexed(png.Width, png.Height, png.Indices, pal);
             }
 

@@ -8,7 +8,7 @@ namespace IKEMENLab.Tests;
 internal static class SffTestBuilder
 {
     public sealed record V1Sprite(ushort Group, ushort Number, int Width, int Height, byte[]? Indices,
-        byte[]? PaletteRgb, bool SamePalette, ushort Link = 0);
+        byte[]? PaletteRgb, bool SamePalette, ushort Link = 0, short AxisX = 0, short AxisY = 0);
 
     public static byte[] BuildV1(IReadOnlyList<V1Sprite> sprites)
     {
@@ -31,6 +31,8 @@ internal static class SffTestBuilder
             var sub = new byte[32];
             BinaryPrimitives.WriteUInt32LittleEndian(sub, (uint)next);
             BinaryPrimitives.WriteUInt32LittleEndian(sub.AsSpan(4), (uint)pcx.Length);
+            BinaryPrimitives.WriteInt16LittleEndian(sub.AsSpan(8), s.AxisX);
+            BinaryPrimitives.WriteInt16LittleEndian(sub.AsSpan(10), s.AxisY);
             BinaryPrimitives.WriteUInt16LittleEndian(sub.AsSpan(12), s.Group);
             BinaryPrimitives.WriteUInt16LittleEndian(sub.AsSpan(14), s.Number);
             BinaryPrimitives.WriteUInt16LittleEndian(sub.AsSpan(16), s.Link);
@@ -81,7 +83,7 @@ internal static class SffTestBuilder
     }
 
     public sealed record V2Sprite(ushort Group, ushort Number, int Width, int Height, byte Format, byte[] Data,
-        ushort PaletteIndex = 0, ushort Link = 0, byte ColorDepth = 8);
+        ushort PaletteIndex = 0, ushort Link = 0, byte ColorDepth = 8, short AxisX = 0, short AxisY = 0);
 
     /// <param name="palettes">RGBA palettes (4 bytes per colour).</param>
     public static byte[] BuildV2(IReadOnlyList<V2Sprite> sprites, IReadOnlyList<byte[]> palettes, byte versionLo2 = 0)
@@ -113,6 +115,8 @@ internal static class SffTestBuilder
             BinaryPrimitives.WriteUInt16LittleEndian(e[2..], s.Number);
             BinaryPrimitives.WriteUInt16LittleEndian(e[4..], (ushort)s.Width);
             BinaryPrimitives.WriteUInt16LittleEndian(e[6..], (ushort)s.Height);
+            BinaryPrimitives.WriteInt16LittleEndian(e[8..], s.AxisX);
+            BinaryPrimitives.WriteInt16LittleEndian(e[10..], s.AxisY);
             BinaryPrimitives.WriteUInt16LittleEndian(e[12..], s.Link);
             e[14] = s.Format;
             e[15] = s.ColorDepth;

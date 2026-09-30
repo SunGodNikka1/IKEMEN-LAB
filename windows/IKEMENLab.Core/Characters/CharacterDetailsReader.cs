@@ -75,6 +75,15 @@ public static class CharacterDetailsReader
         };
     }
 
+    /// <summary>The CNS the DEF's [Files] cns= names, resolved in IKEMEN's lookup order (null when absent).</summary>
+    public static string? ResolveCns(string root, CharacterEntry character)
+    {
+        var def = Path.GetFullPath(Path.Combine(root, character.DefPath));
+        var text = ReadDefText(def);
+        var parsed = text is null ? null : DefParser.Parse(text);
+        return Resolve(root, def, parsed?.Value("cns", "files"));
+    }
+
     /// <summary>"MUGEN 1.1", "MUGEN 1.0", "IKEMEN" or "WinMUGEN" (no mugenversion key).</summary>
     public static string EngineLabel(DefParseResult? parsed)
     {
@@ -132,8 +141,36 @@ public static class CharacterDetailsReader
     /// </summary>
     public static IReadOnlyList<PaletteSlot> ReadPalettes(string root, string def, DefParseResult? parsed, string? sffPath)
     {
-        var slots = new List<(int Number, string Source, uint[]? Palette)>();
         using var sff = sffPath is null ? null : SffFile.Open(sffPath);
+        var slots = Collect(root, def, parsed, sff);
+        var usage = SpriteIndexUsage(sff);
+        return slots.Select(s => new PaletteSlot(s.Number, s.Source, s.Palette is null ? null : Swatch(s.Palette, usage))).ToList();
+    }
+
+    /// <summary>The same palettes as <see cref="ReadPalettes"/>, with their colours, for previewing sprites.</summary>
+    public static IReadOnlyList<(int Number, string Source, uint[] Palette)> CollectPaletteSets(
+        string root, string def, DefParseResult? parsed, string? sffPath)
+    {
+        using var sff = sffPath is null ? null : SffFile.Open(sffPath);
+        return Collect(root, def, parsed, sff)
+            .Where(s => s.Palette is not null)
+            .Select(s => (s.Number, s.Source, s.Palette!))
+            .ToList();
+    }
+
+    /// <summary>The SFF the DEF's [Files] sprite= names, resolved in IKEMEN's lookup order (null when absent).</summary>
+    public static string? ResolveSprite(string root, CharacterEntry character)
+    {
+        var def = Path.GetFullPath(Path.Combine(root, character.DefPath));
+        var text = ReadDefText(def);
+        var parsed = text is null ? null : DefParser.Parse(text);
+        return Resolve(root, def, parsed?.Value("sprite", "files"));
+    }
+
+    private static List<(int Number, string Source, uint[]? Palette)> Collect(
+        string root, string def, DefParseResult? parsed, SffFile? sff)
+    {
+        var slots = new List<(int Number, string Source, uint[]? Palette)>();
 
         for (var n = 1; n <= MaxPalettes; n++)
         {
@@ -155,8 +192,7 @@ public static class CharacterDetailsReader
             slots.Add((1, "Embedded SFF palette", sff.EmbeddedPaletteFor(first)));
         }
 
-        var usage = SpriteIndexUsage(sff);
-        return slots.Select(s => new PaletteSlot(s.Number, s.Source, s.Palette is null ? null : Swatch(s.Palette, usage))).ToList();
+        return slots;
     }
 
     /// <summary>Histogram of palette indices used by the standing sprite (0,0), if decodable.</summary>
