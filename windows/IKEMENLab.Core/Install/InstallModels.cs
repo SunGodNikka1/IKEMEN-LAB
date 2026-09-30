@@ -42,6 +42,12 @@ public sealed class DetectedPackage
     public IReadOnlyList<string> MissingAssets { get; init; } = Array.Empty<string>();
     public int FileCount { get; init; }
 
+    /// <summary>Stages: files the DEF references outside the stage folder that install with it.</summary>
+    public IReadOnlyList<StageCompanion> Companions { get; init; } = Array.Empty<StageCompanion>();
+
+    /// <summary>Stages: true when the stage installs as loose files directly under stages/.</summary>
+    public bool IsFlatStage { get; init; }
+
     /// <summary>Characters: where <see cref="SuggestedFolderName"/> came from (never a DEF file name).</summary>
     public FolderNameSource NameSource { get; init; } = FolderNameSource.Detected;
 
@@ -61,6 +67,8 @@ public sealed class DetectedPackage
 
     /// <summary>Other files outside the character folder; installing without them must be confirmed.</summary>
     public IReadOnlyList<string> LeftOutFiles { get; init; } = Array.Empty<string>();
+
+    public bool HasMissingAssets => MissingAssets.Count > 0;
 
     public bool RequiresDefChoice => PrimaryRule == PrimaryDefRule.Ambiguous;
     public bool RequiresLayoutConfirmation => LeftOutFiles.Count > 0;

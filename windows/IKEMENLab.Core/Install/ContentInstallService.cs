@@ -1,5 +1,6 @@
 using IKEMENLab.Core.Library;
 using IKEMENLab.Core.Mutations;
+using IKEMENLab.Core.Parsing;
 using IKEMENLab.Core.Settings;
 
 namespace IKEMENLab.Core.Install;
@@ -186,37 +187,50 @@ public sealed class ContentInstallService : IContentInstallService
 
         // Stage
         var flat = ContentDetector.IsFlatStageLayout(package, scanRoot);
+        var stageDestination = flat ? "stages" : "stages/" + package.SuggestedFolderName;
+        var assets = PlanStageAssets(package, stageDestination, scanRoot, ikemenRoot);
+        var stageWarnings = new List<string>(package.Warnings);
+        if (flat) stageWarnings.Add("Flat stage layout: files will install directly under stages/.");
+        else if (File.Exists(package.SourceInput) &&
+                 string.Equals(Path.TrimEndingDirectorySeparator(package.PackageRoot), Path.TrimEndingDirectorySeparator(scanRoot), StringComparison.OrdinalIgnoreCase))
+            stageWarnings.Add($"The archive has no stage folder, so it installs as stages/{package.SuggestedFolderName}/ (named after the archive).");
+        foreach (var companion in assets.Companions)
+            stageWarnings.Add($"Also installs {companion.Destination} (referenced as {companion.Reference}; it sits outside the stage folder in the archive).");
+        stageWarnings.AddRange(assets.Warnings);
+
+        var stagePackage = new DetectedPackage
+        {
+            Kind = package.Kind,
+            DisplayName = package.DisplayName,
+            SuggestedFolderName = package.SuggestedFolderName,
+            PackageRoot = package.PackageRoot,
+            DefPath = package.DefPath,
+            SourceInput = package.SourceInput,
+            Warnings = stageWarnings,
+            MissingAssets = assets.Missing,
+            FileCount = package.FileCount + assets.Companions.Count,
+            Companions = assets.Companions,
+            IsFlatStage = flat
+        };
+        var companionPaths = assets.Companions
+            .Select(c => Path.Combine(ikemenRoot, c.Destination.Replace('/', Path.DirectorySeparatorChar)))
+            .ToList();
+
         if (flat)
         {
             var stagesRoot = Path.Combine(ikemenRoot, "stages");
-            var files = Directory.EnumerateFiles(package.PackageRoot)
-                .Where(f => !IsIgnoredFile(f))
+            var flatPaths = FlatStageFiles(package.PackageRoot)
+                .Select(f => Path.Combine(stagesRoot, Path.GetRelativePath(package.PackageRoot, f)))
                 .ToList();
-            var anyExists = files.Any(f => File.Exists(Path.Combine(stagesRoot, Path.GetFileName(f))));
-            var warnings = new List<string>(package.Warnings)
-            {
-                "Flat stage layout: files will install directly under stages/."
-            };
-            var enriched = new DetectedPackage
-            {
-                Kind = package.Kind,
-                DisplayName = package.DisplayName,
-                SuggestedFolderName = package.SuggestedFolderName,
-                PackageRoot = package.PackageRoot,
-                DefPath = package.DefPath,
-                SourceInput = package.SourceInput,
-                Warnings = warnings,
-                MissingAssets = package.MissingAssets,
-                FileCount = package.FileCount
-            };
+            var anyExists = flatPaths.Any(File.Exists);
 
             return new InstallPlanItem
             {
-                Package = enriched,
+                Package = stagePackage,
                 TargetDirectory = stagesRoot,
                 DestinationExists = anyExists,
                 Decision = anyExists ? InstallItemDecision.NeedsDecision : InstallItemDecision.InstallNew,
-                AffectedPaths = files.Select(f => Path.Combine(stagesRoot, Path.GetFileName(f))).ToList()
+                AffectedPaths = flatPaths.Concat(companionPaths).ToList()
             };
         }
 
@@ -229,14 +243,53 @@ public sealed class ContentInstallService : IContentInstallService
 
             return new InstallPlanItem
             {
-                Package = package,
+                Package = stagePackage,
                 TargetDirectory = target,
                 DestinationExists = exists,
                 Decision = exists ? InstallItemDecision.NeedsDecision : InstallItemDecision.InstallNew,
                 MutationPlan = plan,
-                AffectedPaths = plan.AffectedPaths
+                AffectedPaths = plan.AffectedPaths.Concat(companionPaths).ToList()
             };
         }
+    }
+
+    /// <summary>Resolves what every stage DEF in the package references, per DEF folder, against the archive and the install.</summary>
+    private static StageAssetPlan PlanStageAssets(DetectedPackage package, string stageDestination, string scanRoot, string ikemenRoot)
+    {
+        var companions = new Dictionary<string, StageCompanion>(StringComparer.OrdinalIgnoreCase);
+        var missing = new List<string>();
+        var warnings = new List<string>();
+        var defs = Directory.EnumerateFiles(package.PackageRoot, "*.def", SearchOption.AllDirectories)
+            .Where(d => !Path.GetFileName(d).StartsWith('.') && DefContentClassifier.IsValidStageDefFile(d))
+            .GroupBy(d => Path.GetDirectoryName(d)!, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in defs)
+        {
+            var relDir = Path.GetRelativePath(package.PackageRoot, group.Key).Replace('\\', '/');
+            var destination = relDir == "." ? stageDestination : stageDestination + "/" + relDir;
+            var plan = StageAssetResolver.Resolve(group.ToList(), group.Key, scanRoot, ikemenRoot, destination);
+            foreach (var c in plan.Companions) companions[c.Destination] = c;
+            missing.AddRange(plan.Missing);
+            warnings.AddRange(plan.Warnings);
+        }
+
+        return new StageAssetPlan
+        {
+            Companions = companions.Values.ToList(),
+            Missing = missing.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            Warnings = warnings.Distinct().ToList()
+        };
+    }
+
+    /// <summary>Every file a loose stage layout installs, preserving its subfolders.</summary>
+    private static List<string> FlatStageFiles(string packageRoot)
+    {
+        return Directory.EnumerateFiles(packageRoot, "*", SearchOption.AllDirectories)
+            .Where(f => !IsIgnoredFile(f) && !Path.GetRelativePath(packageRoot, f)
+                .Split(Path.DirectorySeparatorChar)
+                .SkipLast(1)
+                .Any(part => part.StartsWith('.') || part.Equals("__MACOSX", StringComparison.OrdinalIgnoreCase)))
+            .ToList();
     }
 
     public InstallBatchResult Execute(IReadOnlyList<InstallPlanItem> items, string ikemenRoot, bool dryRun = false)
@@ -382,7 +435,8 @@ public sealed class ContentInstallService : IContentInstallService
         item.OperationId = result.OperationId;
         if (result.Success)
         {
-            item.Outcome = InstallItemOutcome.Installed;
+            var opIds = new List<string> { result.OperationId };
+            if (InstallCompanions(item, ikemenRoot, opIds)) item.Outcome = InstallItemOutcome.Installed;
         }
         else
         {
@@ -392,11 +446,46 @@ public sealed class ContentInstallService : IContentInstallService
         }
     }
 
+    /// <summary>
+    /// Writes the files the DEF references from outside the stage folder. On any failure everything this item
+    /// wrote (including the stage folder, via <paramref name="opIds"/>) is rolled back.
+    /// </summary>
+    private bool InstallCompanions(InstallPlanItem item, string ikemenRoot, List<string> opIds)
+    {
+        foreach (var companion in item.Package.Companions)
+        {
+            var dest = Path.Combine(ikemenRoot, companion.Destination.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(dest))
+            {
+                if (File.ReadAllBytes(dest).AsSpan().SequenceEqual(File.ReadAllBytes(companion.SourcePath))) continue;
+                RollbackOps(opIds);
+                item.Outcome = InstallItemOutcome.Failed;
+                item.Error = $"{companion.Destination} already exists and is different; nothing was installed.";
+                return false;
+            }
+
+            var result = _mutations.CreateFile(ikemenRoot, dest, File.ReadAllBytes(companion.SourcePath));
+            opIds.Add(result.OperationId);
+            if (!result.Success)
+            {
+                RollbackOps(opIds);
+                item.Outcome = InstallItemOutcome.Failed;
+                item.Error = result.Error ?? $"Could not install {companion.Destination}.";
+                return false;
+            }
+        }
+
+        item.OperationId = opIds.LastOrDefault();
+        return true;
+    }
+
     private void ExecuteFlatStage(InstallPlanItem item, string ikemenRoot, bool dryRun)
     {
         var stagesRoot = Path.Combine(ikemenRoot, "stages");
-        var files = Directory.EnumerateFiles(item.Package.PackageRoot)
-            .Where(f => !IsIgnoredFile(f))
+        var files = FlatStageFiles(item.Package.PackageRoot)
+            .Select(f => (Source: f, Dest: Path.Combine(stagesRoot, Path.GetRelativePath(item.Package.PackageRoot, f))))
+            .Concat(item.Package.Companions.Select(c =>
+                (Source: c.SourcePath, Dest: Path.Combine(ikemenRoot, c.Destination.Replace('/', Path.DirectorySeparatorChar)))))
             .ToList();
 
         if (files.Count == 0)
@@ -409,9 +498,8 @@ public sealed class ContentInstallService : IContentInstallService
         if (dryRun)
         {
             // Preview only — plan each file, mutate nothing.
-            foreach (var file in files)
+            foreach (var (file, dest) in files)
             {
-                var dest = Path.Combine(stagesRoot, Path.GetFileName(file));
                 var plan = File.Exists(dest)
                     ? _mutations.PlanReplaceFile(ikemenRoot, dest, file)
                     : _mutations.PlanCreateFile(ikemenRoot, dest, Array.Empty<byte>());
@@ -430,9 +518,8 @@ public sealed class ContentInstallService : IContentInstallService
         var opIds = new List<string>();
         try
         {
-            foreach (var file in files)
+            foreach (var (file, dest) in files)
             {
-                var dest = Path.Combine(stagesRoot, Path.GetFileName(file));
                 MutationResult result;
                 if (File.Exists(dest))
                 {
@@ -519,9 +606,9 @@ public sealed class ContentInstallService : IContentInstallService
                     item.TargetDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)))];
 
             case InstallContentKind.Stage when flatStage:
-                return Directory.EnumerateFiles(item.Package.PackageRoot, "*.def")
-                    .Where(f => !IsIgnoredFile(f))
-                    .Select(f => ContentIdentity.ForStageDef(Path.GetFileName(f)))
+                return FlatStageFiles(item.Package.PackageRoot)
+                    .Where(f => f.EndsWith(".def", StringComparison.OrdinalIgnoreCase))
+                    .Select(f => ContentIdentity.ForStageDef(Path.GetRelativePath(item.Package.PackageRoot, f).Replace('\\', '/')))
                     .ToList();
 
             case InstallContentKind.Stage:

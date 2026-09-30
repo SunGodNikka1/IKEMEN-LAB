@@ -43,7 +43,7 @@ public static class ContentDetector
         foreach (var c in candidates)
         {
             if (!byRoot.ContainsKey(c.PackageRoot))
-                byRoot[c.PackageRoot] = Enrich(c, sourceInput);
+                byRoot[c.PackageRoot] = Enrich(c.Kind == InstallContentKind.Stage ? WithStageIdentity(c, cleaned, sourceInput) : c, sourceInput);
         }
 
         return byRoot.Values.ToList();
@@ -120,18 +120,8 @@ public static class ContentDetector
         var warnings = new List<string>(draft.Warnings);
         var missing = new List<string>();
 
-        if (draft.Kind == InstallContentKind.Stage)
-        {
-            foreach (var asset in CollectReferencedAssets(draft.DefPath, draft.PackageRoot))
-            {
-                var full = Path.GetFullPath(Path.Combine(draft.PackageRoot, asset.Replace('/', Path.DirectorySeparatorChar)));
-                if (!File.Exists(full))
-                {
-                    missing.Add(asset);
-                    warnings.Add($"Missing referenced asset: {asset}");
-                }
-            }
-        }
+        // Stage assets are checked against the whole archive and the IKEMEN install when the plan is built
+        // (StageAssetResolver), not just the DEF's own folder.
 
         var fileCount = Directory.Exists(draft.PackageRoot)
             ? Directory.EnumerateFiles(draft.PackageRoot, "*", SearchOption.AllDirectories).Count()
@@ -252,6 +242,43 @@ public static class ContentDetector
         return keep;
     }
 
+    /// <summary>
+    /// A stage keeps the folder its author supplied: the folder holding its DEF. Loose files at the top of
+    /// an archive have no author folder, so they take the archive's name (a dropped folder is its own name),
+    /// the same as characters. The DEF file name never names the package.
+    /// </summary>
+    private static DetectedPackage WithStageIdentity(DetectedPackage stage, string scanRoot, string sourceInput)
+    {
+        var warnings = new List<string>(stage.Warnings);
+        string name;
+        if (SamePath(stage.PackageRoot, scanRoot))
+        {
+            var isArchive = File.Exists(sourceInput);
+            name = isArchive
+                ? CharacterLayoutAnalyzer.ArchiveBaseName(sourceInput)
+                : Path.GetFileName(Path.TrimEndingDirectorySeparator(scanRoot));
+        }
+        else
+        {
+            name = Path.GetFileName(Path.TrimEndingDirectorySeparator(stage.PackageRoot));
+        }
+
+        return new DetectedPackage
+        {
+            Kind = stage.Kind,
+            DisplayName = stage.DisplayName,
+            SuggestedFolderName = name,
+            PackageRoot = stage.PackageRoot,
+            DefPath = stage.DefPath,
+            SourceInput = stage.SourceInput,
+            Warnings = warnings
+        };
+    }
+
+    private static bool SamePath(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)), StringComparison.OrdinalIgnoreCase);
+
     private static DetectedPackage BuildStageCandidate(string defPath, string defDirectory)
     {
         var display = StageNameExtractor.Extract(defPath);
@@ -288,8 +315,9 @@ public static class ContentDetector
     }
 
     /// <summary>
-    /// True when the stage package should install as loose files directly under stages/
-    /// (classic MUGEN layout). Folder packages install as stages/Name/.
+    /// True when the stage installs as loose files directly under stages/ (classic MUGEN layout): either the
+    /// author's own <c>stages/</c> folder, or DEF + files sitting loose at the top of an archive.
+    /// A folder the author supplied (including a dropped folder) installs as stages/Name/.
     /// </summary>
     public static bool IsFlatStageLayout(DetectedPackage package, string scanRoot)
     {
@@ -301,6 +329,15 @@ public static class ContentDetector
                 package.PackageRoot,
                 StringComparison.OrdinalIgnoreCase))
             return false;
+
+        // The author mirrored IKEMEN's own layout (stages/x.def): keep it exactly as it is.
+        if (string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(package.PackageRoot)), "stages",
+                StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        // Loose files only count as flat when they come straight out of an archive (no folder was supplied).
+        if (!File.Exists(package.SourceInput)) return false;
+        if (!SamePath(package.PackageRoot, scanRoot)) return false;
 
         // Any non-junk subdirectory with files => folder package.
         try
@@ -317,53 +354,7 @@ public static class ContentDetector
             return false;
         }
 
-        var packageFull = Path.GetFullPath(package.PackageRoot)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var scanFull = Path.GetFullPath(scanRoot)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-        // Flat only when loose files sit at the scan/staging root itself.
-        if (!string.Equals(packageFull, scanFull, StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        // A user-dropped/named folder (FolderName.def inside FolderName/) is a folder package,
-        // not classic flat stages/ loose files.
-        var rootLeaf = Path.GetFileName(packageFull);
-        if (!string.IsNullOrEmpty(rootLeaf) &&
-            string.Equals(rootLeaf, package.SuggestedFolderName, StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
         return true;
-    }
-
-    public static IReadOnlyList<string> CollectReferencedAssets(string defPath, string packageRoot)
-    {
-        var parsed = DefParser.ParseFile(defPath);
-        if (parsed is null) return Array.Empty<string>();
-
-        var keys = new[] { "sprite", "spr", "bgmusic", "bgm", "music", "snd", "sound" };
-        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var key in keys)
-        {
-            var value = parsed.Value(key) ?? parsed.Value(key, "bgdef") ?? parsed.Value(key, "music") ?? parsed.Value(key, "info");
-            if (string.IsNullOrWhiteSpace(value)) continue;
-            // Skip URLs / absolute paths outside package
-            if (value.Contains("://", StringComparison.Ordinal)) continue;
-            found.Add(value.Replace('\\', '/'));
-        }
-
-        // Also scan [BG*] sections for spr= values
-        foreach (var section in parsed.SectionValues)
-        {
-            if (!section.Key.StartsWith("bg", StringComparison.OrdinalIgnoreCase)) continue;
-            if (section.Value.TryGetValue("spr", out var spr) && !string.IsNullOrWhiteSpace(spr))
-                found.Add(spr.Replace('\\', '/'));
-        }
-
-        return found.ToList();
     }
 
     public static string SanitizeFolderName(string name)

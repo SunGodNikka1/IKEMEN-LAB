@@ -132,24 +132,31 @@ public class ContentInstallServiceTests : IDisposable
     [Fact]
     public void FlatStageInstall()
     {
-        var folder = Path.Combine(Path.GetTempPath(), "flatstage-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(folder);
-        File.WriteAllText(Path.Combine(folder, "FlatStage.def"),
-            "[StageInfo]\nautoturn = 1\n\n[BGdef]\nspr = FlatStage.sff\n");
-        File.WriteAllBytes(Path.Combine(folder, "FlatStage.sff"), [9]);
+        // Loose stage files at the top of an archive: no author folder, so they install as loose stages/ files.
+        var parent = Path.Combine(Path.GetTempPath(), "flatstage-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(parent);
+        var zip = Path.Combine(parent, "FlatStage.zip");
+        using (var z = ZipFile.Open(zip, ZipArchiveMode.Create))
+        {
+            using (var w = new StreamWriter(z.CreateEntry("FlatStage.def").Open()))
+                w.Write("[StageInfo]\nautoturn = 1\n\n[BGdef]\nspr = FlatStage.sff\n");
+            using var s = z.CreateEntry("FlatStage.sff").Open();
+            s.WriteByte(9);
+        }
         try
         {
-            var inspect = _installer.Inspect([folder], _fixtureRoot, _stagingRoot);
+            var inspect = _installer.Inspect([zip], _fixtureRoot, _stagingRoot);
             Assert.Single(inspect.Items);
             Assert.Contains("Flat stage layout", string.Join(" ", inspect.Items[0].Package.Warnings));
             var result = _installer.Execute(inspect.Items, _fixtureRoot);
             Assert.Equal(1, result.InstalledCount);
             Assert.True(File.Exists(Path.Combine(_fixtureRoot, "stages", "FlatStage.def")));
             Assert.True(File.Exists(Path.Combine(_fixtureRoot, "stages", "FlatStage.sff")));
+            _installer.CleanupStaging(inspect.StagingDirectories);
         }
         finally
         {
-            TryDelete(folder);
+            TryDelete(parent);
         }
     }
 
