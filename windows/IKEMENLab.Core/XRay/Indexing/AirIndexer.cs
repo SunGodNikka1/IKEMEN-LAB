@@ -67,6 +67,14 @@ public static partial class AirIndexer
                     continue;
                 }
 
+                // "Interpolate Blend/Offset/Scale/Angle" (and LoopEnd/Continue) are IKEMEN AIR directives
+                // inside a Begin block, not sprite frames. Falling through to the frame parser turned every
+                // one of them into an "air.bad-frame" warning, burying the genuine parse problems.
+                if (!e.HadEquals && IsAirDirective(key))
+                {
+                    continue;
+                }
+
                 var count = ClsnCount().Match(key);
                 if (count.Success && !e.HadEquals || count.Success && e.HadEquals && e.Value.Length == 0)
                 {
@@ -206,4 +214,14 @@ public static partial class AirIndexer
 
         return result;
     }
+
+    /// <summary>IKEMEN AIR block directives that are not sprite frames.</summary>
+    private static bool IsAirDirective(string key) =>
+        key.Equals("LoopStart", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("LoopEnd", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("Continue", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("Interpolate Blend", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("Interpolate Offset", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("Interpolate Scale", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("Interpolate Angle", StringComparison.OrdinalIgnoreCase);
 }

@@ -48,6 +48,7 @@ public static class GateAnalyzer
         var power = new List<NumCompare>();
         var time = new List<NumCompare>();
         var animElem = new List<NumCompare>();
+        var timeMods = new List<TimeModFact>();
         var stateTypes = new List<string>();
         var moveTypes = new List<string>();
         var ctrl = false;
@@ -100,6 +101,14 @@ public static class GateAnalyzer
             else if (IsPureCompare(c, "power") && f.Power.Count == 1) power.Add(f.Power[0]);
             else if (IsPureCompare(c, "time") && f.Time.Count == 1) time.Add(f.Time[0]);
             else if (IsPureCompare(c, "animelem") && f.AnimElems.Count == 1) animElem.Add(f.AnimElems[0]);
+            else if (c is Binary { Op: "=", Left: Ident { Name: var tmName }, Right: TimeModCompare tmc } &&
+                     tmName.Equals("timemod", StringComparison.OrdinalIgnoreCase) && f.TimeMods.Count == 1)
+            {
+                // The trigger's own syntax is now fully understood: a literal TimeMod value at a literal
+                // time offset. What the index still cannot say is the state's effective TimeMod, so this is
+                // modelled and reported once by name instead of being dumped as an opaque expression.
+                timeMods.Add(f.TimeMods[0]);
+            }
             else if (c is Binary { Op: "=" or "!=", Left: Ident { Name: "statetype" }, Right: Ident } && f.StateTypes.Count == 1) stateTypes.Add(f.StateTypes[0]);
             else if (c is Binary { Op: "=" or "!=", Left: Ident { Name: "movetype" }, Right: Ident } && f.MoveTypes.Count == 1) moveTypes.Add(f.MoveTypes[0]);
             else if (OrOfIdentEquals(c, "statetype") is { Count: > 0 } sts) stateTypes.AddRange(sts);
@@ -114,7 +123,7 @@ public static class GateAnalyzer
         return new GateFacets(
             commands.Distinct().ToList(), negated.Distinct().ToList(), contact.Distinct().ToList(),
             power, time, animElem, ctrl, stateTypes.Distinct().ToList(), moveTypes.Distinct().ToList(), ai, other,
-            source, excluded, prev, unmodelled);
+            source, excluded, prev, timeMods.Distinct().ToList(), unmodelled);
     }
 
     private sealed record StateConstraintShape(List<StateRange> Ranges, bool Negated);

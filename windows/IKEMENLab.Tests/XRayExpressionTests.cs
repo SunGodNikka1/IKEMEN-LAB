@@ -34,6 +34,30 @@ public class XRayExpressionTests
     public void IntervalsAndCommaLists(string input, string expected) => Assert.Equal(expected, S(input));
 
     [Theory]
+    [InlineData("time >= 8 && timemod = 5,0")]
+    [InlineData("timemod = 2,0")]
+    [InlineData("anim=100 && timemod = 10,0 && time > 11")]
+    [InlineData("numhelper(340)>0 && timemod=10,0")]
+    [InlineData("time = 6 ||(time >=6 && timemod = 15,0)")]
+    public void TimeModIsATriggerNotACommaList(string input)
+    {
+        // The engine has a dedicated "timemod" compiler case that reads two integers, so the comma belongs to
+        // the trigger. It used to be a parse error, which silently dropped the whole condition.
+        var expr = ExprParser.Parse(input);
+        Assert.DoesNotContain("unexpected ','", S(input), StringComparison.Ordinal);
+        Assert.NotEmpty(ExprAnalyzer.Analyze(expr).TimeMods);
+    }
+
+    [Fact]
+    public void TimeModFactsCarryBothLiteralArguments()
+    {
+        var facts = ExprAnalyzer.Analyze(ExprParser.Parse("timemod = 140,1"));
+        var tm = Assert.Single(facts.TimeMods);
+        Assert.Equal(140, tm.Value);
+        Assert.Equal(1, tm.Time);
+    }
+
+    [Theory]
     [InlineData("helper(340), var(3) = 1", "(= (redirect helper 340 (var 3)) 1)")]
     [InlineData("root, life > 500", "(> (redirect root life) 500)")]
     [InlineData("parent,var(5) := 2", "(:= (redirect parent (var 5)) 2)")]

@@ -12,6 +12,9 @@ public sealed record CommandRef(string Name, bool Negated);
 /// <summary>A comparison normalised so the named trigger is on the left (<c>power &gt;= 1000</c>).</summary>
 public sealed record NumCompare(string Op, double Value);
 
+/// <summary><c>timemod = value, time</c> with both arguments literal.</summary>
+public sealed record TimeModFact(int Value, int Time);
+
 /// <summary>What a single expression states, computed only from literal syntax. Nothing here is evaluated.</summary>
 public sealed class ExprFacts
 {
@@ -20,6 +23,7 @@ public sealed class ExprFacts
     public List<NumCompare> Power { get; } = [];
     public List<NumCompare> Time { get; } = [];
     public List<NumCompare> AnimElems { get; } = [];
+    public List<TimeModFact> TimeMods { get; } = [];
     public List<(string Trigger, int Value)> StateNos { get; } = [];
     public List<string> StateTypes { get; } = [];
     public List<string> MoveTypes { get; } = [];
@@ -125,6 +129,13 @@ public static class ExprAnalyzer
 
         if (name is "statetype" && other is Ident st) f.StateTypes.Add(st.Name + (b.Op == "!=" ? "!" : string.Empty));
         if (name is "movetype" && other is Ident mt) f.MoveTypes.Add(mt.Name + (b.Op == "!=" ? "!" : string.Empty));
+
+if (other is TimeModCompare tm)
+        {
+            if (tm.Value is NumberLit v && tm.Time is NumberLit ti && v.IsInt && ti.IsInt)
+                f.TimeMods.Add(new TimeModFact((int)v.Value, (int)ti.Value));
+            return;
+        }
 
         if (other is ExprList list && name == "animelem")
         {

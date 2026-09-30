@@ -196,6 +196,18 @@ public static class ExprParser
                 return new ExprList(items);
             }
 
+            // "timemod = 2,0" is one trigger with two arguments, not a list: the engine has a dedicated
+            // "timemod" case in its compiler. Without this the trailing comma was a parse error and the
+            // whole condition collapsed into an opaque unparsed expression. This one does not check
+            // _depth: a comma directly after "timemod =" is always the trigger's second argument,
+            // wherever the trigger appears.
+            if (Cur.Type == T.Comma && left is Ident tm &&
+                tm.Name.Equals("timemod", StringComparison.OrdinalIgnoreCase))
+            {
+                _i++;
+                return new TimeModCompare(first, ParseBinary(7));
+            }
+
             return first;
         }
 

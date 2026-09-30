@@ -1,5 +1,6 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using IKEMENLab.Core.XRay.Expressions;
 using IKEMENLab.Core.XRay.Model;
 using IKEMENLab.Core.XRay.Source;
 
@@ -286,8 +287,24 @@ public static class XRayJson
         WriteRanges(w, "sourceStates", f.SourceStateRanges);
         WriteRanges(w, "excludedStates", f.ExcludedStateRanges);
         WriteRanges(w, "prevStates", f.PrevStateRanges);
+        WriteTimeMods(w, f.TimeMods);
         WriteStrings(w, "unmodelled", f.UnmodelledConditions);
         w.WriteEndObject();
+    }
+
+    private static void WriteTimeMods(Utf8JsonWriter w, IReadOnlyList<TimeModFact>? items)
+    {
+        w.WritePropertyName("timeMods");
+        w.WriteStartArray();
+        foreach (var t in items ?? [])
+        {
+            w.WriteStartObject();
+            w.WriteNumber("value", t.Value);
+            w.WriteNumber("time", t.Time);
+            w.WriteEndObject();
+        }
+
+        w.WriteEndArray();
     }
 
     private static void WriteLine(Utf8JsonWriter w, TriggerLine l)

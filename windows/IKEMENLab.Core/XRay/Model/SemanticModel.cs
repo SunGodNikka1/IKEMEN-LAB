@@ -56,6 +56,7 @@ public sealed record GateFacets(
     IReadOnlyList<StateRange>? SourceStates = null,
     IReadOnlyList<StateRange>? ExcludedStates = null,
     IReadOnlyList<StateRange>? PrevStates = null,
+    IReadOnlyList<TimeModFact>? TimeMods = null,
     IReadOnlyList<string>? Unmodelled = null)
 {
     /// <summary>Union of state numbers the controller's own state must be in (<c>stateno = 200</c>, <c>= [200,210]</c>, <c>&gt;= 1000</c>); empty = not constrained.</summary>

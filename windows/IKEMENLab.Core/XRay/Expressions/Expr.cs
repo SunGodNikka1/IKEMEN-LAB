@@ -17,6 +17,14 @@ public sealed record Binary(string Op, Expr Left, Expr Right) : Expr;
 public sealed record Interval(char Open, Expr Low, Expr High, char Close) : Expr;
 /// <summary>Right side of <c>AnimElem = 3, &gt;= 0</c> or <c>HitDefAttr = SCA, NA, SA</c>.</summary>
 public sealed record ExprList(IReadOnlyList<Expr> Items) : Expr;
+
+/// <summary>
+/// <c>timemod = value, time</c>. The engine compiles this as a two-argument trigger (compiler.go
+/// <c>case "timemod"</c>), so the comma is part of the trigger's own grammar and not a separator.
+/// <see cref="Time"/> is the time argument the writer supplied; whether the trigger can ever hold also
+/// depends on the state's TimeMod, which the index does not resolve.
+/// </summary>
+public sealed record TimeModCompare(Expr Value, Expr Time) : Expr;
 /// <summary><c>&gt;= 0</c> inside an <see cref="ExprList"/>.</summary>
 public sealed record RelPrefix(string Op, Expr Operand) : Expr;
 /// <summary><c>var(3) := 5</c>.</summary>
