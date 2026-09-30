@@ -92,6 +92,8 @@ public static class TraceReader
                     "state_change" => new StateChangeEvent(frame.Value, engineTick, Int(root, "player") ?? 0, Int(root, "from"), Int(root, "to")),
                     "life_change" => new LifeChangeEvent(frame.Value, engineTick, Int(root, "player") ?? 0, Dbl(root, "from"), Dbl(root, "to")),
                     "hit" => new HitEvent(frame.Value, engineTick, Int(root, "attacker"), Int(root, "defender"), Dbl(root, "lifeBefore"), Dbl(root, "lifeAfter")),
+                    "input" => new InputEvent(frame.Value, engineTick, Int(root, "player") ?? 1, Strings(root, "keys"), Int(root, "step"), Str(root, "phase")),
+                    "driver" => new DriverEvent(frame.Value, engineTick, Str(root, "event") ?? "unknown", Int(root, "step"), Str(root, "detail")),
                     "end" => new EndEvent(frame.Value, engineTick, root.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString() : null),
                     _ => new UnknownEvent(frame.Value, engineTick, type, line)
                 });
@@ -126,6 +128,15 @@ public static class TraceReader
             Int(p, "state"), Int(p, "prevState"), Bool(p, "ctrl"), Str(p, "stateType"), Str(p, "moveType"), Int(p, "anim"), Int(p, "animElem"),
             Dbl(p, "life"), Dbl(p, "power"), Dbl(p, "x"), Dbl(p, "y"), Dbl(p, "velX"), Dbl(p, "velY"), Int(p, "facing"),
             Int(p, "moveHit"), Int(p, "moveContact"), Int(p, "hitPause"));
+    }
+
+    private static IReadOnlyList<string> Strings(JsonElement e, string name)
+    {
+        var list = new List<string>();
+        if (e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Array)
+            foreach (var x in v.EnumerateArray())
+                if (x.ValueKind == JsonValueKind.String) list.Add(x.GetString()!);
+        return list;
     }
 
     private static string? Str(JsonElement e, string name) =>

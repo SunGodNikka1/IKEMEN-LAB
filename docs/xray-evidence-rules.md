@@ -2,7 +2,7 @@
 
 Every relationship and label in the Character Semantic Index cites one of these rule ids, and the rule dictates its confidence — a heuristic cannot be recorded as StaticProven by accident (`IndexBuilder.Relate` takes the confidence from the rule).
 
-`RuntimeVerified` is **reserved** for milestone 3 (facts observed in a running match). Nothing in milestone 1 emits it, and a test asserts that.
+`RuntimeVerified` means a fact was **observed in a real match**. Only the three `runtime.*` rules below carry it, and they are cited only by a runtime-verification report (`ikemenlab.xray.verify/1`) built from a real trace. The static index, the candidate graph and every route from the search never emit it, and tests assert that.
 
 This file is checked against the registry in `EvidenceRules.cs` by a test; regenerate it with `ikemenlab xray rules`.
 
@@ -112,6 +112,18 @@ listed as evidence but never raises confidence.
 
 Edge confidence is the weakest of its relationship, its source expansion and any neutral-node step. A route's confidence is the weakest of its edges.
 A route that starts from the neutral node is therefore `Inferred` at best, because "neutral" is a heuristic node.
+
+## RuntimeVerified
+
+Produced only by `RouteVerifier` from a trace of a disposable match (see [xray-runtime-verifier.md](xray-runtime-verifier.md)). A verdict cites these beside, never instead of, the edge's static rules: the edge keeps its static confidence.
+
+| Rule | Confidence | Meaning |
+|---|---|---|
+| `runtime.contact-observed` | RuntimeVerified | In a real match, the contact the edge requires (moveHit/moveContact) was observed on the source move before the transition. |
+| `runtime.opponent-continuous` | RuntimeVerified | In a real match, P2 stayed in a hit state from the first hit to the route's last step: no frame of recovery in between. |
+| `runtime.transition-observed` | RuntimeVerified | In a real match, P1 entered this edge's target state immediately after its source state, following the scripted inputs. |
+
+A route is reported `RuntimeVerified` only when every step has its transition (and required contact) observed **and** P2 stayed continuous. A run that could not inject input or read telemetry is `Inconclusive`, never verified.
 
 ## Deterministic vs inferred at a glance
 

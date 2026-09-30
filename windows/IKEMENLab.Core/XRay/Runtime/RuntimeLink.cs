@@ -9,7 +9,7 @@ public sealed record RuntimeAnimLink(int Player, int AnimNo, string? ObjectId, l
 
 /// <summary>
 /// Runtime facts joined to the static index. These links are evidence pointers, deliberately kept apart from the index's
-/// relationships: milestone 3 will promote matching edges to <see cref="Confidence.RuntimeVerified"/>; milestone 1 never does.
+/// relationships. Only a verify report (<c>RouteVerifier</c>, from a driven match) may speak of <see cref="Confidence.RuntimeVerified"/>; associating states never does.
 /// </summary>
 public sealed class RuntimeEvidence
 {

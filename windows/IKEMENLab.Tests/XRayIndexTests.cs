@@ -537,9 +537,9 @@ public class XRayIndexTests : IDisposable
     }
 
     [Fact]
-    public void EveryRuleIdIsDocumentedAndNoRuleClaimsRuntimeEvidence()
+    public void EveryRuleIdIsDocumentedAndOnlyRuntimeRulesClaimRuntimeEvidence()
     {
-        Assert.DoesNotContain(EvidenceRules.Rules, r => r.Confidence == Confidence.RuntimeVerified);
+        Assert.All(EvidenceRules.Rules.Where(r => r.Confidence == Confidence.RuntimeVerified), r => Assert.StartsWith("runtime.", r.Id));   // only the runtime.* rules, cited by verify reports
         Assert.Equal(EvidenceRules.Rules.Count, EvidenceRules.Rules.Select(r => r.Id).Distinct().Count());
         Assert.All(EvidenceRules.Rules, r => Assert.False(string.IsNullOrWhiteSpace(r.Description)));
     }

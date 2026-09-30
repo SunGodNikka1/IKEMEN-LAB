@@ -35,10 +35,15 @@ public static class CliApp
           runtime-prepare --root R --subject <folder> --dummy <folder> --stage <stages/x.def> [--frames N]
                        builds a disposable sandbox with the Lua probe (never touches R) and prints how to launch it
           runtime-report  <character> --trace <file.jsonl>   parses a trace and links its states to the static index
+          verify-plan     <character> [combo options] [--route N] [--approach N]   the input plan (JSON) for one candidate route
+          verify-trace    <character> [combo options] [--route N] --trace <file.jsonl>   judges a recorded trace against that route
+          runtime-verify  <character> --root R --dummy <folder> --stage <stages/x.def> [--route N] [--adapter <lua>] [--timeout S] [--keep]
+                       plays the route in a disposable match and reports Verified / Failed / Inconclusive (needs an input adapter for the engine build)
+          rank-subjects   --root R [--limit N]      ranks the installed characters as runtime-verification subjects
           runtime-clean   <sandbox dir>            deletes a sandbox (only folders carrying the sandbox marker)
 
         <character> is a character folder or its .def. Confidence: StaticProven (literal in the files),
-        Inferred (heuristic), Unknown. RuntimeVerified is reserved for a later milestone.
+        Inferred (heuristic), Unknown; RuntimeVerified only ever comes from a verify run's real trace.
         """;
 
     public static int Run(string[] args, TextWriter output, TextWriter error)
@@ -54,6 +59,7 @@ public static class CliApp
 
             var command = opts.Positional[1].ToLowerInvariant();
             if (command == "rules") { output.WriteLine(XRayJson.Rules()); return 0; }
+            if (VerifyCommands.Handles(command)) return VerifyCommands.Run(command, opts, output, error);
             if (command.StartsWith("runtime-", StringComparison.Ordinal)) return RuntimeCommands.Run(command, opts, output, error);
 
             if (opts.Positional.Count < 3) { error.WriteLine(Usage); return 2; }
@@ -162,7 +168,7 @@ public static class CliApp
         }
     }
 
-    private static ComboOptions? BuildComboOptions(Options opts, out string? problem)
+    internal static ComboOptions? BuildComboOptions(Options opts, out string? problem)
     {
         string? error = null;
         int? Int(string name, int? fallback = null)
@@ -210,7 +216,7 @@ public static class CliApp
         };
     }
 
-    private static int Load(string target, Options opts, TextWriter output, TextWriter error, out SemanticIndex? index)
+    internal static int Load(string target, Options opts, TextWriter output, TextWriter error, out SemanticIndex? index)
     {
         index = null;
         var resolved = CharacterLocator.Locate(target, opts.Root);
@@ -266,7 +272,7 @@ public static class CliApp
                     case "--root" when i + 1 < args.Length: root = args[++i]; break;
                     case "--text": text = true; break;
                     case "--no-common": noCommon = true; break;
-                    case "--all-cancels" or "--no-chains" or "--allow-links": flags.Add(args[i][2..]); break;
+                    case "--all-cancels" or "--no-chains" or "--allow-links" or "--keep" or "--lua": flags.Add(args[i][2..]); break;
                     case var a when a.StartsWith("--", StringComparison.Ordinal) && i + 1 < args.Length:
                         named[a[2..]] = args[++i];
                         break;

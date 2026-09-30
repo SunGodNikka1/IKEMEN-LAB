@@ -30,6 +30,12 @@ public sealed record LifeChangeEvent(long Frame, long? EngineTick, int Player, d
 /// <summary>Reserved: a probe may emit hits, but the shipped probe reports life_change and moveHit facts and lets C# interpret them.</summary>
 public sealed record HitEvent(long Frame, long? EngineTick, int? Attacker, int? Defender, double? LifeBefore, double? LifeAfter) : TraceEvent(Frame, EngineTick);
 
+/// <summary>What the driver fed the engine: the complete held key set of one player from this tick on (empty = all released).</summary>
+public sealed record InputEvent(long Frame, long? EngineTick, int Player, IReadOnlyList<string> Keys, int? Step, string? Phase) : TraceEvent(Frame, EngineTick);
+
+/// <summary>The driver's own bookkeeping (plan started, wait met, expectation met or timed out, no input injector). Not an engine fact.</summary>
+public sealed record DriverEvent(long Frame, long? EngineTick, string Kind, int? Step, string? Detail) : TraceEvent(Frame, EngineTick);
+
 public sealed record EndEvent(long Frame, long? EngineTick, string? Reason) : TraceEvent(Frame, EngineTick);
 
 /// <summary>An event type this version does not know; kept verbatim so newer probes do not lose data.</summary>

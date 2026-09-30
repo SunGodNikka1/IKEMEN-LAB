@@ -1,0 +1,13 @@
+-- IKEMEN Lab X-Ray input adapter (TEMPLATE, milestone 3). Sandbox copy only.
+--
+-- The one engine-specific hook the runtime verifier needs: apply a set of held keys to P1 for the current tick.
+--
+--     _G.__ikemenlab_xray_inject(player, keys) -> true if the keys were applied, false/nil otherwise
+--
+-- keys: array of logical key names, the COMPLETE held set for this tick. Directions U D F B (F/B relative to the character's
+-- facing, so map them by p.facing) and buttons a b c x y z s. An empty array means "release everything".
+--
+-- This template injects nothing on purpose. Until a real adapter replaces it the driver reports "inject_unavailable" and the
+-- verdict is Inconclusive (InputInjectionUnavailable) — a route is never marked verified without real input having been fed.
+-- Replace this file in the sandbox (runtime-verify --adapter <file>) with one written against the engine source of the build in use.
+return true

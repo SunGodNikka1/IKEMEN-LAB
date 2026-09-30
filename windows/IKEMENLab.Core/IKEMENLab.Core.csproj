@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="XRay\Runtime\xray_probe.lua" LogicalName="xray_probe.lua" />
+    <EmbeddedResource Include="XRay\Runtime\xray_driver.lua" LogicalName="xray_driver.lua" />
+    <EmbeddedResource Include="XRay\Runtime\xray_inject.lua" LogicalName="xray_inject.lua" />
   </ItemGroup>
 
   <ItemGroup>

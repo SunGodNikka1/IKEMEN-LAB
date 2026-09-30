@@ -74,6 +74,24 @@ local function emit(obj)
 	return true
 end
 
+-- ---------------------------------------------------------------- input driver (milestone 3, only when cfg.plan is set)
+
+local driver = nil
+local driverError = nil
+local function loadDriver(emitFn, OFn)
+	if not cfg.plan then return end
+	local ok, plan = pcall(dofile, cfg.plan)
+	if not ok or type(plan) ~= "table" then driverError = "plan: " .. tostring(plan); return end
+	local okD, mod = pcall(dofile, cfg.driver or "external/mods/xray_driver.lua")
+	if not okD or type(mod) ~= "table" then driverError = "driver: " .. tostring(mod); return end
+	pcall(dofile, cfg.adapter or "external/mods/xray_inject.lua")
+	local inject = rawget(_G, "__ikemenlab_xray_inject")
+	driver = mod.new(plan, {
+		inject = type(inject) == "function" and inject or nil,
+		emit = function(kind, frame, ...) emitFn(OFn("type", kind, "frame", frame, ...)) end,
+	})
+end
+
 -- ---------------------------------------------------------------- engine access (all guarded)
 
 local function G(name)
@@ -270,6 +288,24 @@ local function sample()
 	writeMeta()
 	emit(frame)
 
+	if driver then
+		local obs = { distance = extra.distance, p1 = {}, p2 = {} }
+		for _, f in ipairs(FIELDS) do
+			local a, b = value(p1, f[1]), value(p2, f[1])
+			if a ~= NULL then obs.p1[f[1]] = a end
+			if b ~= NULL then obs.p2[f[1]] = b end
+		end
+		local okD, reason = pcall(driver.tick, tick, obs)
+		if not okD then
+			emit(O("type", "driver", "frame", tick, "event", "driver_error", "detail", tostring(reason)))
+			driver = nil
+			finish("driverError")
+		elseif reason then
+			finish(reason)
+			return
+		end
+	end
+
 	for n, snap in pairs({ [1] = p1, [2] = p2 }) do
 		local state, life = value(snap, "state"), value(snap, "life")
 		local prev = previous[n]
@@ -328,6 +364,11 @@ local function watchGlobal(name, callback)
 		if cb then pcall(cb) end
 	end
 	pcall(setmetatable, _G, new)
+end
+
+loadDriver(emit, O)
+if cfg.plan and not driver then
+	emit(O("type", "driver", "frame", 0, "event", "driver_load_failed", "detail", driverError or "unknown"))
 end
 
 emit(O("type", "probe_loaded", "frame", 0, "probeVersion", PROBE_VERSION, "trace", cfg.trace,

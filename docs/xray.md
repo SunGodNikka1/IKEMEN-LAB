@@ -19,7 +19,7 @@ DEF [Files] ─▶ CMD · CNS · ST · AIR · common1.cns · SFF
      WPF lenses     ikemenlab xray …        runtime traces (spike) attach by state number
 ```
 
-Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**; there is still no runtime verifier.
+Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md).**
 
 ## The model
 
@@ -88,6 +88,10 @@ ikemenlab xray rules                                      # the evidence rules
 ikemenlab xray readiness    <character>                   # (M2) how much the candidate graph can and cannot say
 ikemenlab xray candidates   <character> [--from 200]      # (M2) candidate combo edges
 ikemenlab xray combos       <character> --meter 1000      # (M2) deterministic candidate routes
+ikemenlab xray rank-subjects --root R                     # (M3) which installed character suits a first runtime proof
+ikemenlab xray verify-plan  <character> --route 1         # (M3) the scripted input plan for one candidate route
+ikemenlab xray verify-trace <character> --route 1 --trace t.jsonl   # (M3) judge a recorded trace: exit 0 verified, 4 failed, 5 inconclusive
+ikemenlab xray runtime-verify <character> --root R --dummy kfm --stage stages/x.def --adapter inject.lua   # (M3) play it in a sandbox
 ```
 
 `<character>` is a folder or a `.def`; `--root` names the IKEMEN root if it is not the parent of `chars/`. Output is deterministic JSON (`--text` for `explain`).

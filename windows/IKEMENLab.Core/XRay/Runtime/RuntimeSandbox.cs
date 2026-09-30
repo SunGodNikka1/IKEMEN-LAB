@@ -21,20 +21,27 @@ public sealed record SandboxRequest(
     string StageDef,
     int MaxFrames = 900,
     string? BaseDirectory = null,
-    ProbeInjection Injection = ProbeInjection.ModsAndMainLua);
+    ProbeInjection Injection = ProbeInjection.ModsAndMainLua,
+    /// <summary>Milestone 3: play this input plan (verify mode). Null = observe only, both sides on the engine's own AI.</summary>
+    Verify.InputPlan? Plan = null,
+    /// <summary>Verify mode: an engine adapter (Lua) that defines __ikemenlab_xray_inject. Null installs the template, which injects nothing.</summary>
+    string? AdapterPath = null);
 
 public static class RuntimeProbe
 {
     /// <summary>The Lua probe shipped inside IKEMENLab.Core.</summary>
-    public static string Source
+    public static string Source => Resource("xray_probe.lua");
+    /// <summary>The plan executor (milestone 3).</summary>
+    public static string Driver => Resource("xray_driver.lua");
+    /// <summary>The input-injection adapter template: injects nothing until replaced for the engine build in use.</summary>
+    public static string AdapterTemplate => Resource("xray_inject.lua");
+
+    private static string Resource(string name)
     {
-        get
-        {
-            using var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("xray_probe.lua")
-                          ?? throw new InvalidOperationException("The embedded xray_probe.lua is missing.");
-            using var r = new StreamReader(s, Encoding.UTF8);
-            return r.ReadToEnd();
-        }
+        using var s = Assembly.GetExecutingAssembly().GetManifestResourceStream(name)
+                      ?? throw new InvalidOperationException($"The embedded {name} is missing.");
+        using var r = new StreamReader(s, Encoding.UTF8);
+        return r.ReadToEnd();
     }
 }
 
@@ -172,10 +179,10 @@ public sealed class RuntimeSandbox : IDisposable
     // ------------------------------------------------------------------ pieces
 
     private static IReadOnlyList<string> BuildArguments(SandboxRequest r) =>
-    [
-        "-p1", r.SubjectFolder, "-p2", r.DummyFolder, "-s", r.StageDef.Replace('\\', '/'),
-        "-p1.ai", "1", "-p2.ai", "1", "-nosound"
-    ];
+        r.Plan is null
+            ? ["-p1", r.SubjectFolder, "-p2", r.DummyFolder, "-s", r.StageDef.Replace('\\', '/'), "-p1.ai", "1", "-p2.ai", "1", "-nosound"]
+            // Verify mode: nobody is on the engine's AI. P1 is fed by the driver, P2 is a dummy that receives no input.
+            : ["-p1", r.SubjectFolder, "-p2", r.DummyFolder, "-s", r.StageDef.Replace('\\', '/'), "-nosound"];
 
     private static void InstallProbe(string root, SandboxRequest request, List<string> notes)
     {
@@ -184,8 +191,20 @@ public sealed class RuntimeSandbox : IDisposable
         File.WriteAllText(Path.Combine(mods, "xray_probe.lua"), RuntimeProbe.Source, new UTF8Encoding(false));
 
         var trace = Path.Combine(root, "xray_trace.jsonl").Replace('\\', '/');
+        var planConfig = "";
+        if (request.Plan is not null)
+        {
+            File.WriteAllText(Path.Combine(mods, "xray_plan.lua"), Verify.InputPlanner.ToLua(request.Plan), new UTF8Encoding(false));
+            File.WriteAllText(Path.Combine(mods, "xray_driver.lua"), RuntimeProbe.Driver, new UTF8Encoding(false));
+            var adapter = request.AdapterPath is { } a ? File.ReadAllText(a) : RuntimeProbe.AdapterTemplate;
+            File.WriteAllText(Path.Combine(mods, "xray_inject.lua"), adapter, new UTF8Encoding(false));
+            if (request.AdapterPath is null)
+                notes.Add("No input adapter was supplied: the template injects nothing, so a verify run will end Inconclusive (InputInjectionUnavailable).");
+            planConfig = ", plan = \"external/mods/xray_plan.lua\", driver = \"external/mods/xray_driver.lua\", adapter = \"external/mods/xray_inject.lua\"";
+        }
+
         File.WriteAllText(Path.Combine(mods, "xray_config.lua"),
-            $"return {{ trace = \"{trace}\", maxFrames = {request.MaxFrames}, character = \"{request.SubjectFolder.Replace("\"", "")}\", hooks = {{ \"loop\" }} }}\n",
+            $"return {{ trace = \"{trace}\", maxFrames = {request.MaxFrames}, character = \"{request.SubjectFolder.Replace("\"", "")}\", hooks = {{ \"loop\" }}{planConfig} }}\n",
             new UTF8Encoding(false));
 
         if (request.Injection != ProbeInjection.ModsAndMainLua) return;
