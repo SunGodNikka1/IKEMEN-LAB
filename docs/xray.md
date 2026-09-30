@@ -19,7 +19,7 @@ DEF [Files] ─▶ CMD · CNS · ST · AIR · common1.cns · SFF
      WPF lenses     ikemenlab xray …        runtime traces (spike) attach by state number
 ```
 
-Milestone 1 is static only. No combo search, no runtime verifier (see the roadmap below).
+Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**; there is still no runtime verifier.
 
 ## The model
 
@@ -58,7 +58,7 @@ Each controller also has a **gate**: `triggerall` lines AND at least one `trigge
 [`xray-evidence-rules.md`](xray-evidence-rules.md). In the UI one shared style is used everywhere: filled disc and solid line = proven,
 half disc and dashed line = inferred, `?` and dotted line = unknown, and the glyph is repeated at the middle of every graph edge.
 
-## The six lenses (WPF: Characters → select → **X-Ray…**)
+## The lenses (WPF: Characters → select → **X-Ray…**; the seventh, Combos, is Milestone 2)
 
 All lenses read one selection. Selecting State 10800 anywhere highlights, in every other lens, its incoming commands and gates, controllers, helpers,
 projectiles, variables, animation, HitDefs and outgoing states; the right panel lists them all with confidence and rule, and shows the source lines.
@@ -70,6 +70,7 @@ projectiles, variables, animation, HitDefs and outgoing states; the right panel 
 | State Graph | neighbourhood of a state (1–3 hops); ChangeState, victim, attacker and helper-spawn edges |
 | Variables | every var/fvar/sysvar with readers, writers, clearers and scope; traits and names are inferred labels |
 | Helpers | helper and projectile family: spawners, states run, HitDefs, variables written |
+| Combos (M2) | candidate combo edges out of the selected state and a route finder; every row is a candidate with its confidence and unmodelled conditions |
 | Animation & CLSN | frames by duration, Clsn1/Clsn2 with `Default` inheritance, controllers gated on a frame; a frame's sprite opens the Sprite Inspector |
 
 ## CLI for agents
@@ -84,6 +85,9 @@ ikemenlab xray find         <character> throws|projectiles|counters|supers|speci
 ikemenlab xray transitions  <character> 200               # ChangeState edges leaving a state, with gates
 ikemenlab xray search       <character> love
 ikemenlab xray rules                                      # the evidence rules
+ikemenlab xray readiness    <character>                   # (M2) how much the candidate graph can and cannot say
+ikemenlab xray candidates   <character> [--from 200]      # (M2) candidate combo edges
+ikemenlab xray combos       <character> --meter 1000      # (M2) deterministic candidate routes
 ```
 
 `<character>` is a folder or a `.def`; `--root` names the IKEMEN root if it is not the parent of `chars/`. Output is deterministic JSON (`--text` for `explain`).

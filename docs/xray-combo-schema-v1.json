@@ -1,0 +1,377 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ikemenlab/xray/combo/1",
+  "title": "IKEMEN Lab Character X-Ray combo candidates",
+  "description": "Output of `ikemenlab xray candidates | combos | readiness`. Every route is a candidate: `status` is always \"candidate\" and `confidence` is the weakest edge, never RuntimeVerified. Deterministic: same index and options give the same bytes.",
+  "definitions": {
+    "edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "from",
+        "to",
+        "kind",
+        "contact",
+        "confidence",
+        "controller",
+        "relationship",
+        "trigger",
+        "global",
+        "sourceHasHitDef",
+        "commands",
+        "facets",
+        "evidence",
+        "unmodelled",
+        "notes"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "cand:<from>><to>@<controller>#<gate branch>"
+        },
+        "from": {
+          "type": "string",
+          "description": "state:<n> or the heuristic node `neutral`"
+        },
+        "to": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "Start",
+            "Cancel",
+            "OnHit",
+            "Chain",
+            "Link",
+            "Recovery"
+          ]
+        },
+        "contact": {
+          "enum": [
+            "None",
+            "Guarded",
+            "Contact",
+            "Hit"
+          ]
+        },
+        "confidence": {
+          "enum": [
+            "StaticProven",
+            "Inferred",
+            "Unknown"
+          ],
+          "description": "Weakest of the relationship, the source expansion and any neutral-node step. Unknown edges are never emitted."
+        },
+        "controller": {
+          "type": "string"
+        },
+        "relationship": {
+          "type": "string",
+          "description": "Id of the semantic-index relationship the edge is derived from (ikemenlab.xray/1)."
+        },
+        "trigger": {
+          "type": "integer"
+        },
+        "global": {
+          "type": "boolean",
+          "description": "Came from a -1/-2/-3 controller and was expanded to this source state."
+        },
+        "sourceHasHitDef": {
+          "type": "boolean"
+        },
+        "earliestTick": {
+          "type": "integer"
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "facets": {
+          "type": "object",
+          "description": "Same shape as the index's gate facets."
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "rule"
+            ],
+            "properties": {
+              "rule": {
+                "type": "string"
+              },
+              "relationship": {
+                "type": "string"
+              },
+              "source": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "unmodelled": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Conditions the edge depends on that the index does not model."
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "route": {
+      "type": "object",
+      "required": [
+        "status",
+        "start",
+        "confidence",
+        "damageKnown",
+        "damageComplete",
+        "meterSpent",
+        "endMeter",
+        "framesComplete",
+        "unmodelledConditions",
+        "notes",
+        "steps"
+      ],
+      "properties": {
+        "status": {
+          "const": "candidate"
+        },
+        "start": {
+          "type": "string"
+        },
+        "confidence": {
+          "enum": [
+            "StaticProven",
+            "Inferred",
+            "Unknown"
+          ]
+        },
+        "damageKnown": {
+          "type": "number"
+        },
+        "damageComplete": {
+          "type": "boolean",
+          "description": "false = a lower bound (several HitDefs or a non-literal damage)."
+        },
+        "meterSpent": {
+          "type": "integer"
+        },
+        "endMeter": {
+          "type": "integer"
+        },
+        "minFrames": {
+          "type": "integer"
+        },
+        "framesComplete": {
+          "type": "boolean"
+        },
+        "unmodelledConditions": {
+          "type": "integer"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "edge",
+              "kind",
+              "from",
+              "to",
+              "name",
+              "commands",
+              "contact",
+              "confidence",
+              "meterAfter",
+              "unmodelled",
+              "controller"
+            ],
+            "properties": {
+              "edge": {
+                "type": "string"
+              },
+              "kind": {
+                "enum": [
+                  "Start",
+                  "Cancel",
+                  "OnHit",
+                  "Chain",
+                  "Link",
+                  "Recovery"
+                ]
+              },
+              "from": {
+                "type": "string"
+              },
+              "to": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "commands": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "contact": {
+                "enum": [
+                  "None",
+                  "Guarded",
+                  "Contact",
+                  "Hit"
+                ]
+              },
+              "confidence": {
+                "enum": [
+                  "StaticProven",
+                  "Inferred",
+                  "Unknown"
+                ]
+              },
+              "damage": {
+                "type": "number",
+                "description": "Literal HitDef damage of the state entered; absent when the state has no HitDef or damage is not literal."
+              },
+              "meterAfter": {
+                "type": "integer"
+              },
+              "unmodelled": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "controller": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "oneOf": [
+    {
+      "title": "combos",
+      "type": "object",
+      "required": [
+        "schema",
+        "indexSchema",
+        "character",
+        "options",
+        "expansions",
+        "truncated",
+        "warnings",
+        "routes"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ikemenlab.xray.combo/1"
+        },
+        "indexSchema": {
+          "const": "ikemenlab.xray/1"
+        },
+        "character": {
+          "type": "string"
+        },
+        "options": {
+          "type": "object"
+        },
+        "expansions": {
+          "type": "integer"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/route"
+          }
+        }
+      }
+    },
+    {
+      "title": "candidates",
+      "type": "object",
+      "required": [
+        "schema",
+        "indexSchema",
+        "character",
+        "edges"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ikemenlab.xray.combo/1"
+        },
+        "indexSchema": {
+          "const": "ikemenlab.xray/1"
+        },
+        "character": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string"
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/edge"
+          }
+        }
+      }
+    },
+    {
+      "title": "readiness",
+      "type": "object",
+      "required": [
+        "schema",
+        "indexSchema",
+        "character",
+        "states",
+        "moveStates",
+        "neutralStates",
+        "edges",
+        "globalEdges",
+        "unconstrainedGlobalEdges",
+        "edgesWithUnmodelledConditions",
+        "dynamicTargets",
+        "movesWithHitDef",
+        "movesWithLiteralDamage",
+        "movesWithKnownTicks",
+        "edgesByKind",
+        "edgesByConfidence",
+        "findings"
+      ],
+      "properties": {
+        "schema": {
+          "const": "ikemenlab.xray.combo/1"
+        }
+      }
+    }
+  ]
+}

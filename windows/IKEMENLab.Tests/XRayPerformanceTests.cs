@@ -16,6 +16,42 @@ public class XRayPerformanceTests(ITestOutputHelper output) : IDisposable
     [Fact]
     public void LargeCharacterIndexesInReasonableTime()
     {
+        var entry = WriteBigCharacter();
+        var sw = Stopwatch.StartNew();
+        var idx = CharacterSemanticIndexer.Build(_root, entry);
+        sw.Stop();
+        output.WriteLine($"{idx.Objects.Count} objects, {idx.Relationships.Count} relationships in {sw.ElapsedMilliseconds} ms");
+        Assert.True(idx.Objects.Count > 20_000);
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"took {sw.Elapsed}");
+    }
+
+    [Fact]
+    public void CandidateGraphAndSearchStayBoundedOnALargeCharacter()
+    {
+        var entry = WriteBigCharacter();
+        var idx = CharacterSemanticIndexer.Build(_root, entry);
+
+        var sw = Stopwatch.StartNew();
+        var graph = IKEMENLab.Core.XRay.Combo.CandidateGraph.Build(idx);
+        var built = sw.ElapsedMilliseconds;
+        var results = new List<string>();
+        foreach (var strategy in Enum.GetValues<IKEMENLab.Core.XRay.Combo.ComboStrategy>())
+        {
+            sw.Restart();
+            var r = IKEMENLab.Core.XRay.Combo.ComboSearch.Find(graph, new IKEMENLab.Core.XRay.Combo.ComboOptions { Strategy = strategy, MaxMoves = 6, StartMeter = 1_000_000 });
+            results.Add($"{strategy}: {sw.ElapsedMilliseconds} ms, {r.Expansions} expansions, {r.Routes.Count} routes, truncated={r.Truncated}");
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(30), $"{strategy} took {sw.Elapsed}");
+        }
+
+        output.WriteLine($"graph: {graph.Edges.Count} edges in {built} ms");
+        foreach (var l in results) output.WriteLine(l);
+        Assert.True(built < 20_000);
+        Assert.All(results, l => Assert.DoesNotContain(" 0 routes", l));
+        Assert.True(graph.Edges.Count > 1000);
+    }
+
+    private CharacterEntry WriteBigCharacter()
+    {
         var dir = Path.Combine(_root, "chars", "Big");
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "Big.def"), "[Info]\nname = Big\n[Files]\ncmd = Big.cmd\ncns = Big.cns\nanim = Big.air\n");
@@ -44,12 +80,6 @@ public class XRayPerformanceTests(ITestOutputHelper output) : IDisposable
         File.WriteAllText(Path.Combine(dir, "Big.cns"), cns.ToString());
         File.WriteAllText(Path.Combine(dir, "Big.air"), air.ToString());
 
-        var entry = new CharacterEntry { Id = "Big", DisplayName = "Big", Name = "Big", Author = "", VersionDate = "", DefPath = "chars/Big/Big.def", FolderPath = "chars/Big" };
-        var sw = Stopwatch.StartNew();
-        var idx = CharacterSemanticIndexer.Build(_root, entry);
-        sw.Stop();
-        output.WriteLine($"{idx.Objects.Count} objects, {idx.Relationships.Count} relationships in {sw.ElapsedMilliseconds} ms");
-        Assert.True(idx.Objects.Count > 20_000);
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), $"took {sw.Elapsed}");
+        return new CharacterEntry { Id = "Big", DisplayName = "Big", Name = "Big", Author = "", VersionDate = "", DefPath = "chars/Big/Big.def", FolderPath = "chars/Big" };
     }
 }

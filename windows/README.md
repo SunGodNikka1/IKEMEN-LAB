@@ -65,6 +65,7 @@ byte for byte. If the CNS changed on disk after the editor opened, the save is r
 Animation & CLSN) over a single Character Semantic Index built from the character's DEF/CMD/CNS/ST/AIR. Everything carries its source file and line and
 an evidence confidence (proven / inferred / unknown, drawn differently). The same index is available to tools and agents as versioned JSON through the
 `ikemenlab xray …` command line. See [docs/xray.md](../docs/xray.md), [docs/xray-evidence-rules.md](../docs/xray-evidence-rules.md) and, for the
+static combo candidates (Milestone 2), [docs/xray-combo.md](../docs/xray-combo.md), and for the
 runtime telemetry spike, [docs/xray-runtime-spike.md](../docs/xray-runtime-spike.md) (`scripts\Run-XRaySpike.ps1`).
 
 ## Build

@@ -3,6 +3,7 @@ using System.Text;
 using IKEMENLab.Cli;
 using IKEMENLab.Core.Models;
 using IKEMENLab.Core.Parsing;
+using IKEMENLab.Core.XRay.Combo;
 using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
 using IKEMENLab.Core.XRay.Query;
@@ -62,12 +63,29 @@ public class XRayRealInstallTests(ITestOutputHelper output)
             // The JSON must round-trip through the serializer for every real character too.
             Assert.False(string.IsNullOrEmpty(XRayJson.Index(index)));
 
+            // Milestone 2: the candidate graph and a bounded search must also be safe and honest on every real character.
+            var comboWatch = Stopwatch.StartNew();
+            var graph = CandidateGraph.Build(index);
+            var search = ComboSearch.Find(graph, new ComboOptions { MaxMoves = 3, StartMeter = 3000, Top = 5, MaxExpansions = 50_000 });
+            comboWatch.Stop();
+            Assert.All(graph.Edges, e =>
+            {
+                Assert.NotEmpty(e.Evidence);
+                Assert.NotEqual(Confidence.RuntimeVerified, e.Confidence);
+                Assert.NotEqual(Confidence.Unknown, e.Confidence);
+            });
+            Assert.All(search.Routes, r => Assert.NotEqual(Confidence.RuntimeVerified, r.Confidence));
+            Assert.False(string.IsNullOrEmpty(IKEMENLab.Core.XRay.Query.ComboJson.Search(graph, search)));
+            var ready = graph.Readiness();
+            var comboText = $"edges {graph.Edges.Count,5} routes {search.Routes.Count,2} best {(search.Routes.Count > 0 ? search.Routes[0].DamageKnown : 0),5:0.#} " +
+                            $"dynamic {ready.DynamicTargets,3} unmodelled {ready.EdgesWithUnmodelled,4} unconstrained {ready.UnconstrainedGlobalEdges,4} {comboWatch.ElapsedMilliseconds} ms";
+
             var unknown = index.Relationships.Count(r => r.Confidence == Confidence.Unknown);
             var inferred = index.Relationships.Count(r => r.Confidence == Confidence.Inferred);
             var line = $"{folder,-32} {sw.ElapsedMilliseconds,6} ms  objects {index.Objects.Count,6}  rels {index.Relationships.Count,6}  " +
                        $"states {index.Of(ObjectKind.State).Count(s => !s.IsStub),4}  abilities {index.Of(ObjectKind.Ability).Count(),3}  " +
                        $"helpers {index.Of(ObjectKind.Helper).Count(),3}  vars {index.Of(ObjectKind.Variable).Count(),3}  " +
-                       $"unknown {unknown,4}  inferred {inferred,4}  notes {index.Diagnostics.Count,4}";
+                       $"unknown {unknown,4}  inferred {inferred,4}  notes {index.Diagnostics.Count,4}  | {comboText}";
             summary.AppendLine(line);
             output.WriteLine(line);
 

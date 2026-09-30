@@ -66,6 +66,13 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="LensCombos" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Combos">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="LensTimeline" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding ActiveLens}" Value="Timeline">
@@ -113,6 +120,8 @@
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Helpers}"/>
                     <RadioButton GroupName="XRayLens" Content="Animation &amp; CLSN" Style="{StaticResource SegmentedItem}"
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Timeline}"/>
+                    <RadioButton GroupName="XRayLens" Content="Combos" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Combos}"/>
                 </StackPanel>
             </Border>
         </DockPanel>
@@ -400,6 +409,59 @@
                                         AutomationProperties.Name="Open sprite in the Sprite Inspector"/>
                             </StackPanel>
                         </StackPanel>
+                    </Grid>
+                    <!-- 7. Combo candidates (Milestone 2): candidates only, never verified combos -->
+                    <Grid x:Name="LensCombosPanel" Style="{StaticResource LensCombos}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="380"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <DockPanel Grid.Column="0">
+                            <TextBlock DockPanel.Dock="Top" Margin="14,12,14,2" Text="{Binding Combos.Caption}" FontSize="13" FontWeight="SemiBold"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock DockPanel.Dock="Top" Margin="14,0,14,8" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextTertiary}"
+                                       Text="Each row is an edge the files allow, with the confidence of what it depends on. Hover for the rules, notes and conditions the index could not model."/>
+                            <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                     ItemsSource="{Binding Combos.Edges}" SelectedItem="{Binding Combos.SelectedEdge, Mode=TwoWay}"
+                                     ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Candidate edges"/>
+                        </DockPanel>
+                        <Grid Grid.Column="1" Margin="14,12,14,12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <StackPanel Grid.Row="0" Orientation="Horizontal">
+                                <TextBlock Text="Moves" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0"/>
+                                <Slider Style="{StaticResource FlatSlider}" Width="90" Minimum="1" Maximum="6" TickFrequency="1" IsSnapToTickEnabled="True"
+                                        Value="{Binding Combos.MaxMoves}" VerticalAlignment="Center" AutomationProperties.Name="Most moves in a route"/>
+                                <TextBlock Text="{Binding Combos.MaxMovesText}" FontSize="12" MinWidth="52" Margin="8,0,14,0" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                                <TextBlock Text="Meter" FontSize="12" VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}" Margin="0,0,8,0"/>
+                                <TextBox Style="{StaticResource FieldBox}" Width="72" Text="{Binding Combos.MeterText, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Starting power. Meter gained from hits is not modelled." AutomationProperties.Name="Starting meter"/>
+                                <Button Content="Find routes" Style="{StaticResource PrimaryButton}" Margin="14,0,0,0" Command="{Binding Combos.FindRoutesCommand}"
+                                        AutomationProperties.Name="Find candidate routes"/>
+                            </StackPanel>
+                            <WrapPanel Grid.Row="1" Margin="0,8,0,4">
+                                <CheckBox Content="Hit-confirm cancels only" IsChecked="{Binding Combos.HitConfirmOnly}" Foreground="{DynamicResource TextSecondary}" Margin="0,0,16,4"/>
+                                <CheckBox Content="Allow links through neutral" IsChecked="{Binding Combos.AllowLinks}" Foreground="{DynamicResource TextSecondary}" Margin="0,0,16,4"
+                                          ToolTip="Timing is not modelled, so these routes are much weaker."/>
+                                <CheckBox Content="Start from the selected state" IsChecked="{Binding Combos.FromSelected}" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+                            </WrapPanel>
+                            <DockPanel Grid.Row="2">
+                                <TextBlock DockPanel.Dock="Top" Text="{Binding Combos.RouteStatus}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" Foreground="{DynamicResource TextTertiary}"/>
+                                <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                         ItemsSource="{Binding Combos.Routes}" SelectedItem="{Binding Combos.SelectedRoute, Mode=TwoWay}"
+                                         ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Candidate routes"/>
+                            </DockPanel>
+                            <DockPanel Grid.Row="3" Margin="0,8,0,0">
+                                <TextBlock DockPanel.Dock="Top" Text="Steps of the selected route" Style="{StaticResource SectionLabel}" Margin="0,0,0,4"/>
+                                <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
+                                         ItemsSource="{Binding Combos.RouteSteps}" SelectedItem="{Binding Combos.SelectedStep, Mode=TwoWay}"
+                                         ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Route steps"/>
+                            </DockPanel>
+                        </Grid>
                     </Grid>
                 </Grid>
             </Border>

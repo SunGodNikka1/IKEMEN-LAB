@@ -14,7 +14,7 @@ using IKEMENLab.Core.XRay.Source;
 
 namespace IKEMENLab.App.ViewModels;
 
-public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline }
+public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos }
 
 /// <summary>
 /// Character X-Ray workspace: one <see cref="SemanticIndex"/>, one selection, six lenses. Selecting anything in any lens
@@ -54,7 +54,8 @@ public sealed class XRayViewModel : ObservableObject
         Variables = new VariableMapLens(this);
         Helpers = new HelperTreeLens(this);
         Timeline = new AnimationTimelineLens(this);
-        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline];
+        Combos = new ComboLens(this);
+        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos];
 
         SelectCommand = new RelayCommand(p => { if (p is string id) Select(id); });
         BackCommand = new RelayCommand(Back, () => _history.Count > 1);
@@ -78,6 +79,7 @@ public sealed class XRayViewModel : ObservableObject
     public VariableMapLens Variables { get; }
     public HelperTreeLens Helpers { get; }
     public AnimationTimelineLens Timeline { get; }
+    public ComboLens Combos { get; }
     public IReadOnlyList<XRayLens> Lenses { get; }
 
     public ICommand SelectCommand { get; }

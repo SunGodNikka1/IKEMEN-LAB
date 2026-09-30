@@ -428,3 +428,56 @@ public class XRayComboCliTests : IDisposable
         Assert.True(loose.RootElement.GetProperty("routes").GetArrayLength() > strict.RootElement.GetProperty("routes").GetArrayLength());
     }
 }
+
+public class XRayComboSchemaTests : IDisposable
+{
+    private readonly XRayFixtures _fx = new();
+    public void Dispose() => _fx.Dispose();
+
+    private static string? Find(string name)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var p = Path.Combine(dir.FullName, "docs", name);
+            if (File.Exists(p)) return p;
+        }
+
+        return null;
+    }
+
+    private static List<string> Required(System.Text.Json.JsonElement e) => e.GetProperty("required").EnumerateArray().Select(x => x.GetString()!).ToList();
+
+    [Fact]
+    public void EmittedJsonHasEveryKeyTheCheckedInSchemaRequires_AndOnlyLegalEnums()
+    {
+        var path = Find("xray-combo-schema-v1.json");
+        Assert.NotNull(path);
+        using var schema = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path!));
+        var defs = schema.RootElement.GetProperty("definitions");
+        var edgeKinds = defs.GetProperty("edge").GetProperty("properties").GetProperty("kind").GetProperty("enum").EnumerateArray().Select(x => x.GetString()!).ToList();
+        Assert.Equal(Enum.GetNames<EdgeKind>().OrderBy(x => x), edgeKinds.OrderBy(x => x));
+        Assert.Equal(Enum.GetNames<ContactRequirement>().OrderBy(x => x),
+            defs.GetProperty("edge").GetProperty("properties").GetProperty("contact").GetProperty("enum").EnumerateArray().Select(x => x.GetString()!).OrderBy(x => x));
+
+        var g = CandidateGraph.Build(CharacterSemanticIndexer.Build(_fx.Root, _fx.ComboGuy));
+        var routes = IKEMENLab.Core.XRay.Query.ComboJson.Search(g, ComboSearch.Find(g, new ComboOptions { Top = 3, StartMeter = 1000 }));
+        using var routesDoc = System.Text.Json.JsonDocument.Parse(routes);
+        var routeReq = Required(defs.GetProperty("route"));
+        foreach (var r in routesDoc.RootElement.GetProperty("routes").EnumerateArray())
+        {
+            Assert.All(routeReq, k => Assert.True(r.TryGetProperty(k, out _), k));
+            var stepReq = Required(defs.GetProperty("route").GetProperty("properties").GetProperty("steps").GetProperty("items"));
+            foreach (var s in r.GetProperty("steps").EnumerateArray()) Assert.All(stepReq, k => Assert.True(s.TryGetProperty(k, out _), k));
+        }
+
+        var comboReq = Required(schema.RootElement.GetProperty("oneOf")[0]);
+        Assert.All(comboReq, k => Assert.True(routesDoc.RootElement.TryGetProperty(k, out _), k));
+
+        using var edgesDoc = System.Text.Json.JsonDocument.Parse(IKEMENLab.Core.XRay.Query.ComboJson.Edges(g, null, g.Edges));
+        var edgeReq = Required(defs.GetProperty("edge"));
+        foreach (var e in edgesDoc.RootElement.GetProperty("edges").EnumerateArray()) Assert.All(edgeReq, k => Assert.True(e.TryGetProperty(k, out _), k));
+
+        using var ready = System.Text.Json.JsonDocument.Parse(IKEMENLab.Core.XRay.Query.ComboJson.Readiness(g));
+        Assert.All(Required(schema.RootElement.GetProperty("oneOf")[2]), k => Assert.True(ready.RootElement.TryGetProperty(k, out _), k));
+    }
+}
