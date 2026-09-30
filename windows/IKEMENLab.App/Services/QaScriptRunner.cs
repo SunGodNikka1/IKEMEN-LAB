@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
@@ -7,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using IKEMENLab.App.ViewModels;
+using IKEMENLab.App.Views;
 using IKEMENLab.Core.Collections;
 using IKEMENLab.Core.Services;
 
@@ -138,6 +140,60 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 break;
             case "snapshot":
                 Snapshot(rest);
+                break;
+            case "xray-open":
+                await XRayOpenAsync(rest);
+                break;
+            case "xray-reopen":
+                await XRayOpenAsync(rest);
+                break;
+            case "xray-lens":
+                await XRayLensAsync(rest);
+                break;
+            case "xray-select":
+                XRayVm().Select(rest);
+                await Task.Delay(120);
+                _log.Add($"  xray-select: id={XRayVm().SelectedId} title='{XRayVm().Title}' source='{XRayVm().SourceText}'");
+                break;
+            case "xray-search":
+                XRayVm().SearchText = rest;
+                await Task.Delay(120);
+                _log.Add($"  xray-search: text='{rest}' results={XRayVm().SearchResults.Count} visible={XRayVm().HasSearchResults}");
+                break;
+            case "xray-back":
+                XRayVm().BackCommand.Execute(null);
+                await Task.Delay(120);
+                _log.Add($"  xray-back: id={XRayVm().SelectedId}");
+                break;
+            case "xray-sprite":
+                // Deep link: what the Sprite Inspector button does.
+                XRayVm().OpenSprite(rest);
+                await Task.Delay(400);
+                _log.Add($"  xray-sprite: asked for {rest}");
+                break;
+            case "xray-resize":
+                XRayResize(rest);
+                break;
+            case "xray-minimize":
+                XRayWin().WindowState = WindowState.Minimized;
+                await Task.Delay(200);
+                _log.Add($"  xray-minimize: state={XRayWin().WindowState}");
+                break;
+            case "xray-restore":
+                XRayWin().WindowState = WindowState.Normal;
+                await Task.Delay(200);
+                _log.Add($"  xray-restore: state={XRayWin().WindowState} size={XRayWin().Width}x{XRayWin().Height}");
+                break;
+            case "xray-close":
+                XRayWin().Close();
+                await Task.Delay(200);
+                _log.Add("  xray-close: window closed");
+                break;
+            case "xray-dump":
+                DumpXRay(rest);
+                break;
+            case "xray-shot":
+                XRayShot(rest);
                 break;
             default:
                 throw new InvalidOperationException("Unknown QA command: " + verb);
@@ -356,6 +412,143 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         Render((FrameworkElement)window.Content, path);
     }
 
+    // ------------------------------------------------------------------ Character X-Ray
+
+    private XRayWindow XRayWin() =>
+        Application.Current.Windows.OfType<XRayWindow>().LastOrDefault()
+        ?? throw new InvalidOperationException("The X-Ray window is not open");
+
+    private XRayViewModel XRayVm() => (XRayViewModel)XRayWin().DataContext;
+
+    /// <summary>xray-open ID — the same route the Characters page X-Ray button takes.</summary>
+    private async Task XRayOpenAsync(string id)
+    {
+        main.SelectedNav = NavPage.Characters;
+        var row = main.Characters.Characters.FirstOrDefault(r => r.Entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase))
+                  ?? throw new InvalidOperationException("No character row " + id);
+        main.Characters.Selected = row;
+        main.Characters.OpenXRayCommand.Execute(row);
+
+        var until = DateTime.UtcNow.AddSeconds(180);
+        while (XRayVm().IsLoading && DateTime.UtcNow < until) await Task.Delay(100);
+        await Task.Delay(500);
+        var vm = XRayVm();
+        _log.Add($"  xray-open: '{vm.CharacterName}' status='{vm.Status}' selected={vm.SelectedId} title='{vm.Title}'");
+    }
+
+    /// <summary>xray-lens NAME — switches the visible lens the way the tab strip does.</summary>
+    private async Task XRayLensAsync(string name)
+    {
+        var vm = XRayVm();
+        vm.ActiveLens = Enum.Parse<XRayLensKind>(name, ignoreCase: true);
+        await Task.Delay(250);
+        var win = XRayWin();
+        win.UpdateLayout();
+        var visible = win.Content is Grid grid
+            ? string.Join(",", Descendants(grid).OfType<FrameworkElement>()
+                .Where(e => e.Name.StartsWith("Lens", StringComparison.Ordinal) && e.IsVisible)
+                .Select(e => e.Name))
+            : "n/a";
+        _log.Add($"  xray-lens: active={vm.ActiveLens} visiblePanels=[{visible}] size={win.ActualWidth}x{win.ActualHeight}");
+    }
+
+    private void XRayResize(string spec)
+    {
+        var parts = spec.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var w = double.Parse(parts[0], CultureInfo.InvariantCulture);
+        var h = parts.Length > 1 ? double.Parse(parts[1], CultureInfo.InvariantCulture) : XRayWin().Height;
+        var win = XRayWin();
+        win.WindowState = WindowState.Normal;
+        win.Width = w;
+        win.Height = h;
+        win.UpdateLayout();
+        _log.Add($"  xray-resize: {w}x{h} -> actual {win.ActualWidth}x{win.ActualHeight}");
+    }
+
+    private void XRayShot(string path)
+    {
+        var win = XRayWin();
+        win.UpdateLayout();
+        Render((FrameworkElement)win.Content, path);
+    }
+
+    /// <summary>
+    /// xray-dump PATH — the observable state of the live window: the shared selection, the details/source
+    /// panel and, for every lens, how many rows exist and how many the current selection highlighted.
+    /// That is what proves one selection really does propagate to the other five lenses.
+    /// </summary>
+    private void DumpXRay(string path)
+    {
+        var win = XRayWin();
+        var vm = XRayVm();
+        win.UpdateLayout();
+
+        var lenses = new List<object>();
+        foreach (var lens in vm.Lenses)
+        {
+            var collections = new List<object>();
+            foreach (var prop in lens.GetType().GetProperties())
+            {
+                if (prop.GetIndexParameters().Length != 0) continue;
+                if (!prop.PropertyType.IsGenericType ||
+                    prop.PropertyType.GetGenericTypeDefinition() != typeof(ObservableCollection<>)) continue;
+
+                var items = ((System.Collections.IEnumerable?)prop.GetValue(lens))?.Cast<object>().ToList() ?? [];
+                int Flag(string n) => items.Count(i => i.GetType().GetProperty(n)?.GetValue(i) is true);
+                collections.Add(new
+                {
+                    name = prop.Name,
+                    total = items.Count,
+                    highlighted = Flag("IsHighlighted"),
+                    selected = Flag("IsSelected"),
+                    center = Flag("IsCenter"),
+                    confidences = items.Select(i => i.GetType().GetProperty("Confidence")?.GetValue(i)
+                                                 ?? i.GetType().GetProperty("SpriteConfidence")?.GetValue(i))
+                                       .Where(c => c is not null)
+                                       .GroupBy(c => c!.ToString())
+                                       .Select(g => new { level = g.Key, count = g.Count() })
+                                       .ToArray()
+                });
+            }
+
+            lenses.Add(new { lens = lens.GetType().Name, collections });
+        }
+
+        var state = new
+        {
+            character = vm.CharacterName,
+            status = vm.Status,
+            isLoading = vm.IsLoading,
+            activeLens = vm.ActiveLens.ToString(),
+            selectedId = vm.SelectedId,
+            title = vm.Title,
+            kind = vm.KindText,
+            idText = vm.IdText,
+            hasSource = vm.HasSource,
+            sourceText = vm.SourceText,
+            sourceLines = vm.SourceLines.Count,
+            sourceLinesInSpan = vm.SourceLines.Count(l => l.InSpan),
+            searchText = vm.SearchText,
+            searchResults = vm.SearchResults.Select(r => new { r.Id, r.Title }),
+            legend = vm.Legend,
+            labels = vm.Labels.Select(l => new { l.Text, l.Category, l.Glyph }),
+            sections = vm.Sections.Select(s => new
+            {
+                s.Title,
+                count = s.Items.Count,
+                confidences = s.Items.GroupBy(i => i.Confidence?.ToString() ?? "none")
+                             .Select(g => new { level = g.Key, count = g.Count() }).ToArray(),
+                firstId = s.Items.FirstOrDefault()?.Id
+            }),
+            index = new { objects = vm.Index?.Objects.Count, relationships = vm.Index?.Relationships.Count },
+            lenses,
+            window = new { state = win.WindowState.ToString(), width = win.ActualWidth, height = win.ActualHeight, resize = win.ResizeMode.ToString() }
+        };
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        File.WriteAllText(path, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }));
+    }
+
     private static void Render(FrameworkElement root, string path)
     {
         var width = (int)Math.Ceiling(Math.Max(root.ActualWidth, 1));
@@ -364,6 +557,10 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         var visual = new DrawingVisual();
         using (var dc = visual.RenderOpen())
         {
+            // Opaque base first. Over a transparent surface every semi-transparent brush in the app
+            // (buttons, chips, hover fills) reads as a solid block and the snapshot misreports the UI.
+            var background = root is Control c && c.Background is Brush b ? b : Brushes.Black;
+            dc.DrawRectangle(background, null, new Rect(0, 0, width, height));
             dc.DrawRectangle(new VisualBrush(root), null, new Rect(0, 0, width, height));
         }
 

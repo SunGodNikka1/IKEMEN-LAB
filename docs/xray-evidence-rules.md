@@ -81,6 +81,7 @@ Could not be determined: an expression that does not parse, a dynamic `ChangeSta
 | `command.undefined` | Command name is not defined in the CMD. |
 | `expr.unparsed` | The expression could not be parsed. |
 | `helper.dynamic-spawn` | Helper stateno/id is not a literal. |
+| `state.ambiguous-owner` | The controller block names a state other than the `[Statedef]` it sits in, so which state owns it — and therefore owns everything the block does — is a reading of the layout, not a literal. |
 | `state.dynamic-target` | ChangeState target is an expression that is not constant. |
 | `state.missing` | Target state is not defined in any indexed file. |
 | `var.dynamic-index` | var/fvar index is not a literal. |

@@ -60,6 +60,85 @@ public class XRayIndexTests : IDisposable
         Assert.Equal(_v.Get("state:200/ctrl:0")!.Source!.Value.StartLine + 5, shifted.Get("state:200/ctrl:0")!.Source!.Value.StartLine);
     }
 
+    private const string SummonBlock = @"\[State 3000,\s*Summon detector\]";
+
+    [Fact]
+    public void AControllerWhoseHeaderStateDiffersFromItsStatedefIsNotAProvenOwner()
+    {
+        // Real packages (Funny Valentine among them) park a shared "[State 0, …]" block inside a per-move
+        // [Statedef N]. The engine still runs it as state 0, so "state N spawns helper 340" is a reading of
+        // the layout and must not be reported as something the files state literally.
+        var cns = Path.Combine(_fx.Root, "chars", "Valentine", "Valentine.cns");
+        var text = File.ReadAllText(cns);
+        var m = System.Text.RegularExpressions.Regex.Match(text, SummonBlock);
+        Assert.True(m.Success, "fixture no longer has the helper controller under [Statedef 3000]");
+
+        // Control: as written the block matches its Statedef, so the spawn really is literal.
+        Assert.Equal(Confidence.StaticProven,
+            Rel(_v, RelationKind.SpawnsHelper, "state:3000/ctrl:0", "helper:340").Confidence);
+
+        File.WriteAllText(cns, text.Remove(m.Index, m.Length).Insert(m.Index, "[State 0, Summon detector]"));
+        try
+        {
+            var idx = CharacterSemanticIndexer.Build(_fx.Root, _fx.Valentine);
+            var spawn = Rel(idx, RelationKind.SpawnsHelper, "state:3000/ctrl:0", "helper:340");
+            Assert.Equal(Confidence.Inferred, spawn.Confidence);
+            Assert.Equal("state.ambiguous-owner", spawn.Evidence[0].RuleId);
+            Assert.Contains(idx.Diagnostics, d => d.Code == "state.ambiguous-owner");
+            // Identity is untouched; only the claim about it is downgraded.
+            Assert.Equal("0", idx.Get("state:3000/ctrl:0")!.Prop("p.declaredState"));
+        }
+        finally
+        {
+            File.WriteAllText(cns, text);
+        }
+    }
+
+    [Fact]
+    public void InsertingAControllerRenumbersOnlyItsOwnState()
+    {
+        // The structural-edit counterpart of the line-shift test above: what does adding a controller do
+        // to semantic identity across the whole index?
+        var cns = Path.Combine(_fx.Root, "chars", "Valentine", "Valentine.cns");
+        var text = File.ReadAllText(cns);
+        var m = System.Text.RegularExpressions.Regex.Match(text, SummonBlock);
+        Assert.True(m.Success, "fixture no longer has the helper controller under [Statedef 3000]");
+
+        var beforeIds = _v.Objects.Select(o => o.Id).ToList();
+        File.WriteAllText(cns, text.Insert(m.Index, "[State 3000, unrelated]\ntype = Null\ntrigger1 = 1\n\n"));
+        try
+        {
+            var after = CharacterSemanticIndexer.Build(_fx.Root, _fx.Valentine);
+            var afterIds = after.Objects.Select(o => o.Id).ToList();
+            var added = afterIds.Except(beforeIds).ToList();
+            var removed = beforeIds.Except(afterIds).ToList();
+
+            // State identity is keyed by the state number, so no state is renamed, lost or gained.
+            Assert.Empty(removed);
+            // The whole cascade stays inside the one state that was edited.
+            Assert.All(added, id => Assert.StartsWith("state:3000/ctrl:", id, StringComparison.Ordinal));
+            Assert.Single(added);
+
+            // The set of controllers in that state is the old set plus the inserted one: the ordinal is
+            // positional, so identities inside the state move but nothing outside it does.
+            var beforeNames = _v.Of(ObjectKind.Controller).Where(c => c.Id.StartsWith("state:3000/ctrl:", StringComparison.Ordinal))
+                .Select(c => c.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+            var afterNames = after.Of(ObjectKind.Controller).Where(c => c.Id.StartsWith("state:3000/ctrl:", StringComparison.Ordinal))
+                .Select(c => c.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+            Assert.Equal(beforeNames.Append("unrelated").OrderBy(n => n, StringComparer.Ordinal).ToList(), afterNames);
+
+            // Everything outside state 3000 keeps both its id and its content.
+            foreach (var id in beforeIds.Where(i => !i.StartsWith("state:3000", StringComparison.Ordinal)))
+            {
+                Assert.Equal(_v.Get(id)!.Name, after.Get(id)!.Name);
+            }
+        }
+        finally
+        {
+            File.WriteAllText(cns, text);
+        }
+    }
+
     // ------------------------------------------------------------------ commands and gates
 
     [Fact]

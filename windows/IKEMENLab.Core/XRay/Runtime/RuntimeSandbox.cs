@@ -114,17 +114,60 @@ public sealed class RuntimeSandbox : IDisposable
     /// <summary>Deletes a sandbox folder. Refuses anything that lacks the marker this class writes, so it can never remove a real install.</summary>
     public static bool Delete(string path)
     {
-        try
+        var marker = Path.Combine(path, MarkerFileName);
+        LastFailure = null;
+        if (!Directory.Exists(path) || !File.Exists(marker))
         {
-            if (!Directory.Exists(path) || !File.Exists(Path.Combine(path, MarkerFileName))) return false;
-            Directory.Delete(path, recursive: true);
-            return true;
+            LastFailure = !Directory.Exists(path) ? "folder does not exist" : $"no {MarkerFileName} marker";
+            return false;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+
+        // The engine is usually still closing its own handles when this is first called, and a single
+        // Directory.Delete can then remove part of the tree — including the marker — before failing. The
+        // folder would be left in place and, without its marker, refuse every later attempt. So keep the
+        // marker until the very end, and retry: the sandbox is disposable, waiting costs nothing.
+        string? lastError = null;
+        for (var attempt = 0; attempt < 5; attempt++)
         {
-            return false; // best effort; the folder is disposable
+            try
+            {
+                if (attempt > 0) Thread.Sleep(400);
+                if (Directory.Exists(path))
+                {
+                    // Copied media keeps its read-only attribute, and Directory.Delete(recursive) refuses
+                    // to remove a read-only file — it throws UnauthorizedAccessException and leaves the
+                    // rest of the tree behind. Clear the attributes first, the way a user would.
+                    foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                    {
+                        var info = new FileInfo(file);
+                        if (info.IsReadOnly)
+                        {
+                            info.IsReadOnly = false;
+                            info.Attributes &= ~FileAttributes.ReadOnly;
+                        }
+                    }
+
+                    Directory.Delete(path, recursive: true);
+                }
+
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                lastError = $"{ex.GetType().Name}: {ex.Message}";
+                if (!Directory.Exists(path)) return true;
+            }
         }
+
+        // Out of retries. Restore the marker so the folder stays recognisable and can be cleaned later.
+        try { File.WriteAllText(marker, "Disposable IKEMEN Lab runtime sandbox. Safe to delete.\n"); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+        LastFailure = lastError;
+        return false;
     }
+
+    /// <summary>Why the last <see cref="Delete"/> failed, for the CLI to print. Null when it did not fail.</summary>
+    public static string? LastFailure { get; private set; }
 
     // ------------------------------------------------------------------ pieces
 

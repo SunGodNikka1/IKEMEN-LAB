@@ -28,6 +28,13 @@ internal sealed class LinkContext
 
     public SourceRef Line(ControllerData c, string key) =>
         c.Params.TryGetValue(key, out var e) ? SourceRef.At(c.FileId, e.Line) : c.Span;
+
+    /// <summary>
+    /// Keeps a "the files say this literally" rule only while the controller's owning state is itself
+    /// literal. A "[State 0, …]" block parked inside a per-move [Statedef N] runs as state 0 in the
+    /// engine, so anything asserted about "state N spawns/drops into…" is a reading of the layout.
+    /// </summary>
+    public string Literal(ControllerData c, string rule) => c.OwnerInferred ? "state.ambiguous-owner" : rule;
 }
 
 /// <summary>Phase 2: relationships between the objects of phase 1 (state changes, victim states, helpers, animations, power…).</summary>
@@ -138,7 +145,7 @@ internal static class StateLinker
 
             case "targetstate":
                 if (ctx.Param(c, "value") is { } tv)
-                    LinkStateTarget(ctx, c.Id, RelationKind.SetsVictimState, tv, ctx.Line(c, "value"), c.Gate, "state.literal-victim");
+                    LinkStateTarget(ctx, c, c.Id, RelationKind.SetsVictimState, tv, ctx.Line(c, "value"), c.Gate, "state.literal-victim");
                 break;
 
             case "targetbind":
@@ -178,26 +185,30 @@ internal static class StateLinker
             return;
         }
 
-        LinkStateTarget(ctx, c.Id, RelationKind.ChangesState, value, ctx.Line(c, "value"), c.Gate, "state.literal-change");
+        LinkStateTarget(ctx, c, c.Id, RelationKind.ChangesState, value, ctx.Line(c, "value"), c.Gate, "state.literal-change");
     }
 
-    /// <summary>Adds an edge from <paramref name="from"/> to the state the expression names, with the right confidence.</summary>
-    private static void LinkStateTarget(LinkContext ctx, string from, RelationKind kind, Expr target, SourceRef source, Gate? gate, string literalRule)
+    /// <summary>
+    /// Adds an edge to the state the expression names, with the right confidence. <paramref name="owner"/>
+    /// supplies the controller whose ownership decides whether a literal rule is allowed; <paramref name="fromId"/>
+    /// is the object the edge starts from (the controller, or the HitDef that wraps it).
+    /// </summary>
+    private static void LinkStateTarget(LinkContext ctx, ControllerData owner, string fromId, RelationKind kind, Expr target, SourceRef source, Gate? gate, string literalRule)
     {
         var b = ctx.B;
         if (ConstNumber(target) is { } number && Math.Abs(number - Math.Round(number)) < 1e-9)
         {
             var n = (int)Math.Round(number);
             var (id, rule) = ResolveState(ctx, n);
-            b.Relate(kind, from, id, rule == "state.literal-change" ? literalRule : rule, source, gate);
+            b.Relate(kind, fromId, id, rule == "state.literal-change" ? ctx.Literal(owner, literalRule) : rule, source, gate);
             return;
         }
 
         var text = target is RawExpr raw ? raw.Text : ExprPrinter.ToSExpr(target);
-        var dyn = $"dynamic:{from}";
+        var dyn = $"dynamic:{fromId}";
         var stub = b.Stub(ObjectKind.State, dyn, "dynamic target", "target is an expression");
         stub.Props["expr"] = text;
-        b.Relate(kind, from, dyn, target is RawExpr ? "expr.unparsed" : "state.dynamic-target", source, gate, note: text);
+        b.Relate(kind, fromId, dyn, target is RawExpr ? "expr.unparsed" : "state.dynamic-target", source, gate, note: text);
     }
 
     private static (string Id, string Rule) ResolveState(LinkContext ctx, int n)
@@ -232,9 +243,9 @@ internal static class StateLinker
         b.Relate(RelationKind.DefinesHitDef, c.Id, id, "structure.contains", c.Span);
 
         if (ctx.Param(c, "p2stateno") is { } p2)
-            LinkStateTarget(ctx, id, RelationKind.SetsVictimState, p2, ctx.Line(c, "p2stateno"), c.Gate, "state.literal-victim");
+            LinkStateTarget(ctx, c, id, RelationKind.SetsVictimState, p2, ctx.Line(c, "p2stateno"), c.Gate, "state.literal-victim");
         if (ctx.Param(c, "p1stateno") is { } p1)
-            LinkStateTarget(ctx, id, RelationKind.SetsAttackerState, p1, ctx.Line(c, "p1stateno"), c.Gate, "state.literal-attacker");
+            LinkStateTarget(ctx, c, id, RelationKind.SetsAttackerState, p1, ctx.Line(c, "p1stateno"), c.Gate, "state.literal-attacker");
     }
 
     private static void LinkProjectile(LinkContext ctx, ControllerData c)
@@ -244,7 +255,7 @@ internal static class StateLinker
         var n = idExpr is null ? 0 : ConstNumber(idExpr) is { } v ? (int)v : (int?)null;
         var projId = n is null ? $"proj:dynamic@{c.Id}" : $"proj:{n}";
         var proj = b.Add(ObjectKind.Projectile, projId, n is null ? "Projectile (dynamic id)" : $"Projectile {n}");
-        b.Relate(RelationKind.SpawnsProjectile, c.Id, projId, n is null ? "helper.dynamic-spawn" : "projectile.spawn", c.Span, c.Gate);
+        b.Relate(RelationKind.SpawnsProjectile, c.Id, projId, n is null ? "helper.dynamic-spawn" : ctx.Literal(c, "projectile.spawn"), c.Span, c.Gate);
         foreach (var key in new[] { "projanim", "projhitanim", "projremanim", "projcancelanim" })
         {
             if (ctx.Param(c, key) is not { } anim) continue;
@@ -268,7 +279,7 @@ internal static class StateLinker
         if (c.Params.TryGetValue("helpertype", out var ht)) helper.Props["helpertype"] = ht.Value;
 
         var literal = id is not null && stateno is not null;
-        b.Relate(RelationKind.SpawnsHelper, c.Id, helperId, literal ? "helper.literal-spawn" : "helper.dynamic-spawn", c.Span, c.Gate);
+        b.Relate(RelationKind.SpawnsHelper, c.Id, helperId, literal ? ctx.Literal(c, "helper.literal-spawn") : "helper.dynamic-spawn", c.Span, c.Gate);
         if (stateno is not null)
         {
             var (target, rule) = ResolveState(ctx, stateno.Value);

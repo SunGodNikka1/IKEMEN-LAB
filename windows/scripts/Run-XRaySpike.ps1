@@ -40,6 +40,15 @@ $cli = Get-ChildItem (Join-Path $windows "IKEMENLab.Cli\bin\Release") -Recurse -
 if (-not $cli) { throw "ikemenlab.exe was not built" }
 
 Write-Host "Preparing the sandbox (the real install is only read)..."
+
+# The documented safety property is that the source install is only ever read. Prove it: fingerprint
+# every file of the subject character before the run and compare after. Without this the claim is a promise.
+$sourceChar = Join-Path $IkemenRoot "chars\$Subject"
+$sourceFiles = if (Test-Path $sourceChar) { Get-ChildItem $sourceChar -Recurse -File } else { @() }
+$before = @{}
+foreach ($f in $sourceFiles) { $before[$f.FullName] = (Get-FileHash $f.FullName -Algorithm SHA256).Hash }
+Write-Host "Fingerprinting $($before.Count) source file(s) of $Subject..."
+
 $prepJson = & $cli.FullName xray runtime-prepare --root $IkemenRoot --subject $Subject --dummy $Dummy --stage $Stage --frames $Frames
 if ($LASTEXITCODE -ne 0) { throw "runtime-prepare failed: $prepJson" }
 $prep = $prepJson | ConvertFrom-Json
@@ -91,6 +100,19 @@ $ok1 = $launched -and $traceExists -and $traceBytes -gt 0
 $ok2 = $report -and $report.validTrace
 $ok3 = $report -and $report.associatedAtLeastOneState
 
+# Re-fingerprint the source and compare: the install must be byte-identical after the run.
+$changed = @()
+$nowFiles = if (Test-Path $sourceChar) { Get-ChildItem $sourceChar -Recurse -File } else { @() }
+$nowPaths = @{}
+foreach ($f in $nowFiles) {
+    $nowPaths[$f.FullName] = $true
+    if (-not $before.ContainsKey($f.FullName)) { $changed += "added $($f.FullName)" }
+    elseif ((Get-FileHash $f.FullName -Algorithm SHA256).Hash -ne $before[$f.FullName]) { $changed += "modified $($f.FullName)" }
+}
+foreach ($p in $before.Keys) { if (-not $nowPaths.ContainsKey($p)) { $changed += "removed $p" } }
+$sourceIntact = $changed.Count -eq 0
+$ok4 = $sourceIntact
+
 $md = New-Object System.Collections.Generic.List[string]
 $md.Add("# X-Ray runtime spike result")
 $md.Add("")
@@ -101,10 +123,12 @@ $md.Add("|---|---|")
 $md.Add("| Disposable sandbox launched and produced a trace | $(if ($ok1) {'PASS'} else {'FAIL'}) |")
 $md.Add("| Trace is valid JSONL with meta + frames | $(if ($ok2) {'PASS'} else {'FAIL'}) |")
 $md.Add("| A runtime StateNo maps to a static State object | $(if ($ok3) {'PASS'} else {'FAIL'}) |")
+$md.Add("| Source install byte-identical after the run | $(if ($ok4) {'PASS'} else {'FAIL'}) |")
 $md.Add("")
 $md.Add("- Command line: ``$commandLine``")
 $md.Add("- Engine: $exitInfo ($elapsed s), timed out: $timedOut")
 $md.Add("- Trace: $traceBytes bytes")
+$md.Add("- Source integrity: $($before.Count) file(s) of ``chars/$Subject`` fingerprinted with SHA-256; $(if ($ok4) { 'all unchanged' } else { "CHANGED: $($changed -join '; ')" })")
 if ($logs) { $md.Add("- Engine logs in sandbox: $(($logs | ForEach-Object { $_.Name }) -join ', ')") }
 if ($report) {
     $md.Add("- Frames: $($report.frames), state changes: $($report.stateChanges), life changes: $($report.lifeChanges)")
@@ -139,6 +163,6 @@ Write-Host "Wrote $resultPath"
 
 if (-not $KeepSandbox) { & $cli.FullName xray runtime-clean $sandbox | Out-Null } else { Write-Host "Sandbox kept: $sandbox" }
 
-if ($ok1 -and $ok2 -and $ok3) { Write-Host "X-RAY RUNTIME SPIKE: PASS"; exit 0 }
+if ($ok1 -and $ok2 -and $ok3 -and $ok4) { Write-Host "X-RAY RUNTIME SPIKE: PASS"; exit 0 }
 Write-Host "X-RAY RUNTIME SPIKE: FAIL (see $resultPath)"
 exit 1

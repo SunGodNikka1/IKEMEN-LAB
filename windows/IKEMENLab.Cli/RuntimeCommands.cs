@@ -23,7 +23,7 @@ internal static class RuntimeCommands
                 if (path is null) return CliApp.FailWith(output, error, 2, "runtime-clean needs a sandbox folder.");
                 return RuntimeSandbox.Delete(Path.GetFullPath(path))
                     ? 0
-                    : CliApp.FailWith(output, error, 3, "Not deleted: the folder is missing or is not an IKEMEN Lab runtime sandbox.");
+                    : CliApp.FailWith(output, error, 3, "Not deleted: the folder is missing or is not an IKEMEN Lab runtime sandbox." + (RuntimeSandbox.LastFailure is { } why ? $" ({why})" : ""));
             }
 
             default:

@@ -32,6 +32,13 @@ internal sealed class ControllerData
     public Dictionary<string, RawEntry> Params { get; } = new(StringComparer.Ordinal);
     public List<RawEntry> ParamList { get; } = [];
     public SourceRef Span => Block.Span(FileId);
+    /// <summary>
+    /// True when the block header's own state number is not the state of the enclosing [Statedef].
+    /// Characters commonly park a shared "[State 0, …]" block inside a per-move [Statedef N]; the engine
+    /// still runs it as state 0, so which state owns it is an interpretation, not a literal fact.
+    /// Relationships that depend only on ownership must not claim StaticProven while this is set.
+    /// </summary>
+    public bool OwnerInferred { get; init; }
 }
 
 internal sealed class StateIndexResult
@@ -60,6 +67,7 @@ public static partial class StateIndexer
     {
         StateData? current = null;
         var ctrlOrdinal = 0;
+        var ambiguousOwners = 0;
 
         foreach (var block in blocks)
         {
@@ -126,6 +134,14 @@ public static partial class StateIndexer
                 var name = comma >= 0 ? rest[(comma + 1)..].Trim() : string.Empty;
                 var id = $"{current.Id}/ctrl:{ctrlOrdinal++}";
 
+                // The header names its own state. When that is not the enclosing [Statedef]'s state the
+                // owner is a reading of the layout, not something the file states: the engine runs the
+                // block under the number in the header. Flag it so the linker cannot call the
+                // consequences literal.
+                var headerState = int.TryParse(rest.AsSpan(0, comma < 0 ? rest.Length : comma).Trim(), out var hs) ? hs : (int?)null;
+                var ownerInferred = headerState is not null && headerState.Value != current.Number;
+                if (ownerInferred) ambiguousOwners++;
+
                 var type = string.Empty;
                 var entries = new List<RawEntry>();
                 foreach (var e in block.Entries)
@@ -149,10 +165,12 @@ public static partial class StateIndexer
                 obj.Props["type"] = type;
                 if (name.Length > 0) obj.Props["name"] = name;
                 if (block.LeadingComments.Count > 0) obj.Props["comment"] = string.Join(" / ", block.LeadingComments);
+                if (ownerInferred && headerState is { } hs2) obj.Props["p.declaredState"] = hs2.ToString();
 
                 var ctrl = new ControllerData
                 {
-                    Id = id, State = current, Obj = obj, Type = type, Block = block, FileId = file.Id, Gate = gate
+                    Id = id, State = current, Obj = obj, Type = type, Block = block, FileId = file.Id, Gate = gate,
+                    OwnerInferred = ownerInferred
                 };
                 foreach (var e in entries)
                 {
@@ -171,6 +189,17 @@ public static partial class StateIndexer
             }
 
             // [Command], [Defaults], [Info], [Files]… are handled by other indexers or are not behaviour.
+        }
+
+        // One note per file rather than per controller: this idiom is common enough that per-row
+        // diagnostics would bury everything else.
+        if (ambiguousOwners > 0)
+        {
+            b.Warn("state.ambiguous-owner",
+                $"{ambiguousOwners} controller block(s) name a state other than the [Statedef] they sit in. " +
+                "The engine runs them under the number in the header, so the owning state shown here is a reading of the layout; " +
+                "relationships that depend only on it are reported as inferred, not proven.",
+                SourceRef.At(file.Id, 1), DiagnosticSeverity.Warning);
         }
     }
 

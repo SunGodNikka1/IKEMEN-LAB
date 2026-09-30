@@ -1,8 +1,9 @@
 # X-Ray runtime compatibility spike
 
-**Status: built and unit-tested, NOT yet run against a real IKEMEN GO build.** The Linux environment this was written in has no
-engine. The spike is complete when `scripts/Run-XRaySpike.ps1` reports PASS on Windows; its output lands in
-`docs/xray-runtime-spike-result.md`. Until then nothing below is a claim about the engine.
+**Status: run against a real IKEMEN GO build on Windows (2026-09-30).** 3 of the 4 checks pass: the disposable sandbox launches,
+the trace is valid JSONL, and the source install is proven byte-identical afterwards. The remaining check —
+associating a runtime StateNo with a static State object — **fails because this engine build does not expose the probe's
+state accessor**. See "Windows result" at the bottom. Until that is resolved nothing about runtime state association is a claim.
 
 ## Goal (and only this)
 
@@ -72,3 +73,31 @@ Anim 200       ←──────────────  p1.anim  = 200
 2. Which registration path worked (`hook:loop`, `wrap:loop`)? → `meta.hooks`.
 3. Do `-p1 <folder> -p2 <folder> -s <stage> -p1.ai 1 -p2.ai 1 -nosound` start a match in this build? If not, pass different flags with `-ExtraArgs` and record the working command line in the result file.
 4. Does `esc(true)` / `os.exit` end the run, or does the runner's timeout have to?
+
+## Windows result (2026-09-30, first real run)
+
+Engine: `v1.0.0-jg-policy-5 - ffa-build`, Lua 5.1, `Ikemen_GO.exe`. Subject `chars/Funny_Valentine` vs dummy `kfm` on `stages/kfm.def`.
+
+The launcher arguments in the request work as written — no `-ExtraArgs` were needed:
+
+```
+Ikemen_GO.exe -p1 Funny_Valentine -p2 kfm -s stages/kfm.def -p1.ai 1 -p2.ai 1 -nosound
+```
+
+The engine exits cleanly (code 0) and the probe registers on `hook:loop`, so the deferred registration works. The match really
+starts: frames carry `life=3000`, `anim=190`, `x=-70/+70`, `facing=±1`.
+
+**The blocker.** The probe reads player state through bare Lua globals (`xray_probe.lua`: `{ "state", num, { function() return call("stateno") end } }`).
+On this build `stateno`, `prevstateno`, `statetype`, `movetype`, `animelemno`, `velx` and `vely` are **not** exposed as globals, so
+`p1.state` is reported `false` in `meta.capabilities` and written as `null` in every frame. The globals that *do* exist
+(`anim`, `ctrl`, `facing`, `life`, `power`, `posx`, `posy`) are all simple value getters.
+
+With no StateNo in the trace, `RuntimeLink.Associate` has nothing to tie to `state:<n>`, the "Subject states seen at runtime"
+table is empty, and the third check cannot pass. The probe is honest about this — it records `false` rather than guessing, which
+is the intended behaviour.
+
+To unblock, the probe needs a player-scoped accessor for the fields it currently reads globally (IKEMEN exposes these through the
+`player(id)` table), and `meta.capabilities` must keep reporting per-field `true`/`false` so a build that exposes neither is still
+described accurately. That is a change to the probe's field readers, which is milestone 3 work and is deliberately not started here.
+
+`RuntimeVerified` therefore stays unused, and no runtime evidence has been allowed to raise any static confidence.

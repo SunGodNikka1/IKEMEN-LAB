@@ -73,6 +73,7 @@ public static class EvidenceRules
         new("anim.sprite-missing", Confidence.Unknown, "Sprite named by an AIR frame is not in the SFF."),
         new("expr.unparsed", Confidence.Unknown, "The expression could not be parsed."),
         new("helper.dynamic-spawn", Confidence.Unknown, "Helper stateno/id is not a literal."),
+        new("state.ambiguous-owner", Confidence.Inferred, "The controller block names a state other than the [Statedef] it sits in, so which state owns it (and therefore owns everything the block does) is a reading of the layout."),
     ];
 
     private static readonly Dictionary<string, EvidenceRule> ById = All.ToDictionary(r => r.Id, StringComparer.Ordinal);
