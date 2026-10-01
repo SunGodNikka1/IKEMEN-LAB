@@ -119,6 +119,7 @@ public class XRayVerifyTests : IDisposable
             new(state, null, state == 0, "S", moveType, null, null, 1000, 0, 0, 0, null, null, 1, hit, contact, null);
 
         public TraceBuilder Driver(string kind, string? detail = null) { _events.Add(new DriverEvent(_f, null, kind, null, detail)); return this; }
+    public TraceBuilder DriverStep(string kind, int step, string? detail = null) { _events.Add(new DriverEvent(_f, null, kind, step, detail)); return this; }
         public TraceBuilder Input(int step, params string[] keys) { _events.Add(new InputEvent(_f, null, 1, keys, step, "input")); return this; }
 
         public TraceBuilder Frames(int n, int? p1, int? p2State = 0, string? p2Move = "I", int hit = 0)
@@ -186,6 +187,15 @@ public class XRayVerifyTests : IDisposable
         var r1 = RouteVerifier.Verify(plan, whiff.Build());
         Assert.Equal((VerifyStatus.Failed, 2, VerifyReason.NoContact), (r1.Status, r1.FailedStep, r1.Reason));
 
+        // Same trace, but the driver says it stopped feeding step 2 because the precondition never held.
+        // That happened before the move was ever attempted, so it must outrank NoContact.
+        var stopped = new TraceBuilder().Driver("plan_start").Frames(2, 0);
+        stopped.Input(1, "x").Frames(3, 200).Frames(3, 0);
+        stopped.DriverStep("timeout", 2, "precondition never met for cand:state:200>state:210");
+        var r1b = RouteVerifier.Verify(plan, stopped.Build());
+        Assert.Equal((VerifyStatus.Failed, 2, VerifyReason.PreconditionNeverMet), (r1b.Status, r1b.FailedStep, r1b.Reason));
+        Assert.Contains("never attempted", r1b.Steps[1].Detail);
+
         var wrong = new TraceBuilder().Driver("plan_start").Frames(2, 0);
         wrong.Input(1, "x").Frames(2, 200, 5000, "H", 1).Input(2, "y").Frames(3, 9999, 5000, "H");
         var r2 = RouteVerifier.Verify(plan, wrong.Build());
@@ -238,6 +248,7 @@ public class XRayVerifyTests : IDisposable
     [InlineData("verified", VerifyStatus.Verified, null)]
     [InlineData("dropped", VerifyStatus.Failed, VerifyReason.ComboDropped)]
     [InlineData("nocontact", VerifyStatus.Failed, VerifyReason.NoContact)]
+    [InlineData("driverstop", VerifyStatus.Failed, VerifyReason.PreconditionNeverMet)]
     [InlineData("wrongstate", VerifyStatus.Failed, VerifyReason.WrongState)]
     [InlineData("noinject", VerifyStatus.Inconclusive, VerifyReason.InputInjectionUnavailable)]
     public void TracesFromTheLuaDriverAreJudgedAsExpected(string scenario, VerifyStatus status, string? reason)

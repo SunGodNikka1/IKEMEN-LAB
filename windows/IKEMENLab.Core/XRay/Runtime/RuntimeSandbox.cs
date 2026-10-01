@@ -239,7 +239,7 @@ public sealed class RuntimeSandbox : IDisposable
             var adapter = request.AdapterPath is { } a ? File.ReadAllText(a) : RuntimeProbe.AdapterTemplate;
             File.WriteAllText(Path.Combine(mods, "xray_inject.lua"), adapter, new UTF8Encoding(false));
             if (request.AdapterPath is null)
-                notes.Add("No input adapter was supplied: the template injects nothing, so a verify run will end Inconclusive (InputInjectionUnavailable).");
+                notes.Add("No input adapter was supplied: the bundled template still ships xray_inject.lua, so injection only " + "fails when the engine in the sandbox lacks __xraySetVirtualInput (an unpatched engine ends Inconclusive / InputInjectionUnavailable).");
             planConfig = ", plan = \"external/mods/xray_plan.lua\", driver = \"external/mods/xray_driver.lua\", adapter = \"external/mods/xray_inject.lua\"";
         }
 

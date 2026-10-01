@@ -77,6 +77,20 @@ public static class RouteVerifier
         var inputs = log.Events.OfType<InputEvent>().Where(e => e.Player == subject && e.Keys.Count > 0).ToList();
         var playStart = driver.FirstOrDefault(d => d.Kind == "plan_start")?.Frame ?? frames[0].Frame;
 
+        // The driver stops feeding a step once its own precondition stops holding, and says so. That happens
+        // *before* the contact question is even meaningful, so it has to outrank NoContact: reporting a whiff
+        // when the move was never actually attempted misdescribes the run.
+        var driverStop = driver.LastOrDefault(d => d.Kind == "timeout" && d.Step is not null);
+
+        // A step the driver stopped feeding was never attempted, so its verdict must say that
+        // instead of inheriting whatever the frame diagnosis happened to produce.
+        (string?, string?) Prefer(int index, (string?, string?) diagnosis)
+        {
+            if (driverStop is null || driverStop.Step != index) return diagnosis;
+            return (VerifyReason.PreconditionNeverMet,
+                $"The driver stopped feeding this step ({driverStop.Detail ?? "precondition never met"}), so the move was never attempted and contact could not occur.");
+        }
+
         var verdicts = new List<StepVerdict>();
         var cursor = 0; // index into frames: each step searches forward only
         long? firstHit = null;
@@ -95,7 +109,7 @@ public static class RouteVerifier
             {
                 // The driver never pressed anything for this step. Usually that is because its precondition never held; only when it
                 // did hold and still nothing was fed is the run untestable rather than failed.
-                var (why, detail) = Diagnose(frames, step, cursor, subject);
+                var (why, detail) = Prefer(step.Index, Diagnose(frames, step, cursor, subject));
                 failed = step.Index;
                 if (why is null)
                 {
@@ -129,7 +143,7 @@ public static class RouteVerifier
             if (found < 0)
             {
                 failed = step.Index;
-                var (why, detail) = Diagnose(frames, step, cursor, subject);
+                var (why, detail) = Prefer(step.Index, Diagnose(frames, step, cursor, subject));
                 var reason = why ?? (seenInstead is { } other ? VerifyReason.WrongState : VerifyReason.TransitionNotObserved);
                 if (why is null)
                     detail = seenInstead is { } o2
@@ -154,11 +168,17 @@ public static class RouteVerifier
 
                 if (contactFrame is null)
                 {
-                    failed = step.Index; failReason = VerifyReason.NoContact;
+                    // The driver gave up on this step before it ever pressed: say that, not "whiff".
+                    var stoppedEarly = driverStop is not null && driverStop.Step == step.Index;
+                    var why = stoppedEarly ? VerifyReason.PreconditionNeverMet : VerifyReason.NoContact;
+                    var whyText = stoppedEarly
+                        ? $"The driver stopped feeding this step ({driverStop!.Detail ?? "precondition never met"}), so the move was never attempted and contact could not occur."
+                        : $"P1 entered state {step.ToState}, but the required contact ({step.Contact}) was not observed before it.";
+                    failed = step.Index; failReason = why;
                     verdicts.Add(pending[step.Index - 1] with
                     {
-                        Outcome = StepOutcome.NotObserved, Reason = VerifyReason.NoContact, InputFrame = inputFrame, TransitionFrame = frames[found].Frame,
-                        Detail = $"P1 entered state {step.ToState}, but the required contact ({step.Contact}) was not observed before it."
+                        Outcome = StepOutcome.NotObserved, Reason = why, InputFrame = inputFrame, TransitionFrame = frames[found].Frame,
+                        Detail = whyText
                     });
                     continue;
                 }

@@ -280,7 +280,16 @@ local function sample()
 	frame[#frame + 1] = { "round", extra.round == nil and NULL or extra.round }
 	frame[#frame + 1] = { "p1", p1 }
 	frame[#frame + 1] = { "p2", p2 }
-	frame[#frame + 1] = { "distance", extra.distance == nil and NULL or extra.distance }
+	-- P2DistX has no Lua binding on this build, so distance came through as null and the driver gave up on
+-- approaching. Both positions are recorded raw every frame, so derive it from them: still engine facts,
+-- just arithmetic on two facts rather than a trigger. p1.x/p2.x are body positions, which is what
+-- P2DistX measures.
+if extra.distance == nil and p1 ~= nil and p2 ~= nil then
+	local ax, bx = value(p1, "x"), value(p2, "x")
+	if type(ax) == "number" and type(bx) == "number" then extra.distance = bx - ax end
+end
+
+frame[#frame + 1] = { "distance", extra.distance == nil and NULL or extra.distance }
 	frame[#frame + 1] = { "p1TargetCount", extra.p1TargetCount == nil and NULL or extra.p1TargetCount }
 	frame[#frame + 1] = { "p1TargetId", extra.p1TargetId == nil and NULL or extra.p1TargetId }
 	frame[#frame + 1] = { "combo", extra.combo == nil and NULL or extra.combo }
