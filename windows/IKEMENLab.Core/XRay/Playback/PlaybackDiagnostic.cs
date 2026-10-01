@@ -22,11 +22,13 @@ public sealed record DiagWindowRow(
 public sealed record DiagSpacing(
     int ConfiguredApproachDistance, string ConfiguredMeaning, double? DerivedSeparationAtInput, string? MeasuredWindow, double? DerivedSeparationAtWindowStart,
     double? DerivedSeparationAtWindowEnd, double? DerivedSeparationMin, double? DerivedSeparationMax, IReadOnlyList<string> DistanceSources, string Note);
+/// <summary>What the verifier recorded for one route step: where its input went out, where contact was seen, where the transition was observed.</summary>
+public sealed record DiagStepOutcome(int Index, string Edge, string Outcome, string? Reason, long? InputFrame, long? ContactFrame, long? TransitionFrame);
 public sealed record DiagRuntime(
     string? FailureReason, StepEvidence? Failure, string? Narrative, IReadOnlyList<DiagReportedInput> DriverReportedInputs, long? FailureAnchorFrame,
     DiagTelemetry? PreInputTelemetry, DiagTelemetry? SourceOccurrenceStartTelemetry, DiagTelemetry? SourceOccurrenceEndTelemetry,
     DiagSpacing Spacing, long? DecisiveFrame, IReadOnlyList<DiagWindowRow> DecisiveWindow, IReadOnlyList<string> MissingTelemetry, IReadOnlyList<string> TraceIntegrityIssues,
-    string ExecutedController);
+    string ExecutedController, IReadOnlyList<DiagStepOutcome> StepOutcomes);
 public sealed record DiagEngine(string? Executable, string? Sha256, string? Version, string? Source);
 public sealed record DiagSetup(string? Dummy, string? Stage, int ApproachDistance, string? PlanFingerprint);
 
@@ -118,7 +120,8 @@ public sealed record PlaybackDiagnostic(
             "Separation is derived telemetry (see its source). 'At input' exists only when an input was attempted; the window figures describe the source occurrence (or the attempt window) and are not input telemetry. None of it is the configured approach distance.");
 
         var runtime = new DiagRuntime(report.Reason, ev, failure?.Detail, reported, ev?.FailureAnchorFrame, pre, occStart, occEnd, spacing, focus, window, MissingTelemetry(frames, log.Meta),
-            log.Issues.Select(i => $"line {i.Line}: {i.Message}").ToList(), "unknown");
+            log.Issues.Select(i => $"line {i.Line}: {i.Message}").ToList(), "unknown",
+            report.Steps.Select(x => new DiagStepOutcome(x.Index, x.EdgeId, x.Outcome.ToString(), x.Reason, x.InputFrame, x.ContactFrame, x.TransitionFrame)).ToList());
         var engine = new DiagEngine(report.EngineExecutable, report.EngineSha256, report.EngineVersion, report.EngineSource);
         return new PlaybackDiagnostic(SchemaVersion, kind, attempt, result, character, route, report.FailedStep, s.Snapshot?.Steps ?? [], planned, runtime, engine, setup, limitations);
     }
@@ -217,26 +220,57 @@ public sealed record PlaybackDiagnostic(
             if (rt.Narrative is { Length: > 0 } nar) L("  " + nar);
             if (rt.Failure is { } ev)
             {
-                L($"  failure: {F(ev.Failure)}");
-                L($"  expected state: {F((long?)ev.ExpectedState)}  expected state ever observed: {F(ev.ExpectedStateEverObserved)}" + (ev.ExpectedStateFirstFrame is { } ef ? $" (first at frame {ef})" : string.Empty));
+                var stepNo = FailedStep is { } fsn ? fsn.ToString(CultureInfo.InvariantCulture) : "?";
+                L($"  failed step {stepNo}; failure: {F(ev.Failure)}");
+                L($"  expected state: {F((long?)ev.ExpectedState)}  expected state ever observed (anywhere in the trace): {F(ev.ExpectedStateEverObserved)}" + (ev.ExpectedStateFirstFrame is { } ef ? $" (first at frame {ef})" : string.Empty));
+                L($"  judged attempt window: frames {F(ev.JudgedAttemptStartFrame)}-{F(ev.JudgedAttemptEndFrame)}; expected state entered inside it at: {F(ev.ExpectedTargetFirstFrame)}; transition preceded the input: {F(ev.TransitionPrecededInput)}");
                 L($"  first mismatch: state {F((long?)ev.FirstMismatchState)} at frame {F(ev.FirstMismatchFrame)}");
                 L($"  source state observed: {F(ev.SourceStateObserved)}" + (ev.SourceOccurrenceStartFrame is { } sf ? $" (occurrence frames {sf}-{F(ev.SourceOccurrenceEndFrame)})" : string.Empty));
                 L($"  required contact: {F(ev.RequiredContact)}  observed: {F(ev.RequiredContactObserved)}");
                 L($"  timing: required earliest tick {F((long?)ev.RequiredEarliestTick)}; source tick at the attempted input {F((long?)ev.SourceTickAtInput)}; satisfied: {F(ev.TimingSatisfied)}");
-                L($"  planned input attempted: {F(ev.InputAttempted)}" + (ev.AttemptedKeys.Count > 0 ? $" ({string.Join("+", ev.AttemptedKeys)} at frame {F(ev.InputAttemptFrame)})" : string.Empty));
-                L($"  failure anchor frame: {F(ev.FailureAnchorFrame)}");
+                L(ev.InputAttempted
+                    ? $"  Step {stepNo} input was attempted ({string.Join("+", ev.AttemptedKeys)} at frame {F(ev.InputAttemptFrame)})"
+                    : $"  Step {stepNo} input was not attempted.");
+                L($"  failure anchor: frame {F(ev.FailureAnchorFrame)} ({F(ev.FailureAnchorKind)})");
                 L($"  driver reported: {F(ev.DriverClaim)}" + (ev.DriverClaimFrame is { } df ? $" (frame {df}); this is the driver's claim, not a measurement" : string.Empty));
+            }
+            else
+            {
+                // No failed-step context exists. That is not the same as "an input was not attempted": say which situation this is.
+                L(Result?.Verdict == "Verified"
+                    ? "  failed-step context: none — run Verified (see the recorded step outcomes and driver-reported inputs below)"
+                    : $"  failed-step context: none — no single step is blamed (verdict {F(Result?.Verdict)}{(Result?.Reason is { } rr ? " / " + rr : string.Empty)})");
+            }
+
+            if (rt.StepOutcomes.Count > 0)
+            {
+                L("  recorded step outcomes:");
+                foreach (var o in rt.StepOutcomes)
+                    L($"    step {o.Index}: {o.Outcome}" + (o.Reason is null ? string.Empty : $" ({o.Reason})") + $"  input frame {F(o.InputFrame)}  contact frame {F(o.ContactFrame)}  transition frame {F(o.TransitionFrame)}");
             }
 
             L($"  executed controller: {rt.ExecutedController} (the trace does not record it)");
             L("  driver-reported inputs: " + (rt.DriverReportedInputs.Count == 0 ? "none" : string.Join(", ", rt.DriverReportedInputs.Select(x => $"f{x.Frame} step {F((long?)x.Step)} {(x.Keys.Count == 0 ? "release" : string.Join("+", x.Keys))}"))));
             string Tel(DiagTelemetry t) => $"frame {t.Frame}: state {F((long?)t.State)} ctrl {F(t.Ctrl)} statetype {F(t.StateType)} movetype {F(t.MoveType)} power {F(t.Power)} facing {F((long?)t.Facing)} pos ({F(t.X)}, {F(t.Y)}) derived distance {F(t.DerivedDistance)} [{F(t.DistanceSource)}]";
-            L("  telemetry at the attempted input: " + (rt.PreInputTelemetry is { } t ? Tel(t) : "n/a (no input was attempted)"));
-            if (rt.SourceOccurrenceStartTelemetry is { } ts) L("  source occurrence start: " + Tel(ts));
-            if (rt.SourceOccurrenceEndTelemetry is { } te) L("  source occurrence end: " + Tel(te));
+            var attempted = rt.Failure?.InputAttempted;
+            var stepLabel = FailedStep is { } fsl ? $"Step {fsl}" : "The step";
+            if (rt.Failure is not null)
+            {
+                // Three different situations are never merged: not attempted, attempted-but-missing, and (above) no failed step at all.
+                L("  telemetry at the attempted input: " + (attempted != true ? $"n/a — {stepLabel} input was not attempted"
+                    : rt.PreInputTelemetry is { } t ? Tel(t) : $"unavailable / not recorded (input at frame {F(rt.Failure.InputAttemptFrame)})"));
+                if (rt.SourceOccurrenceStartTelemetry is { } ts) L("  source occurrence start: " + Tel(ts));
+                if (rt.SourceOccurrenceEndTelemetry is { } te) L("  source occurrence end: " + Tel(te));
+            }
+
             L($"  configured approach distance: {rt.Spacing.ConfiguredApproachDistance} — {rt.Spacing.ConfiguredMeaning}");
-            L($"  derived separation at the attempted input: {F(rt.Spacing.DerivedSeparationAtInput)}" + (rt.Spacing.DerivedSeparationAtInput is null ? " (no input)" : string.Empty));
-            L($"  derived separation over the {F(rt.Spacing.MeasuredWindow)}: start {F(rt.Spacing.DerivedSeparationAtWindowStart)}, end {F(rt.Spacing.DerivedSeparationAtWindowEnd)}, min {F(rt.Spacing.DerivedSeparationMin)}, max {F(rt.Spacing.DerivedSeparationMax)} [{string.Join(",", rt.Spacing.DistanceSources)}]");
+            if (rt.Failure is not null)
+            {
+                L("  derived separation at the attempted input: " + (attempted != true ? $"n/a — {stepLabel} input was not attempted"
+                    : rt.Spacing.DerivedSeparationAtInput is { } di ? F(di) : "unavailable / not recorded"));
+                L($"  derived separation over the {F(rt.Spacing.MeasuredWindow)}: start {F(rt.Spacing.DerivedSeparationAtWindowStart)}, end {F(rt.Spacing.DerivedSeparationAtWindowEnd)}, min {F(rt.Spacing.DerivedSeparationMin)}, max {F(rt.Spacing.DerivedSeparationMax)} [{string.Join(",", rt.Spacing.DistanceSources)}]");
+            }
+
             L($"  decisive frame: {F(rt.DecisiveFrame)}; window ±{WindowRadius}:");
             foreach (var w in rt.DecisiveWindow)
                 L($"    f{w.Frame}{(w.Frame == rt.DecisiveFrame ? "*" : " ")} P1 {F((long?)w.P1State)}/{F(w.P1MoveType)} ctrl {F(w.P1Ctrl)} hit {F((long?)w.P1MoveHit)} contact {F((long?)w.P1MoveContact)} | P2 {F((long?)w.P2State)}/{F(w.P2MoveType)} life {F(w.P2Life)} | x {F(w.P1X)},{F(w.P2X)} dist {F(w.DerivedDistance)} | {w.Notes}");

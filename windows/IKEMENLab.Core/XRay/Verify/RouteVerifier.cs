@@ -408,6 +408,11 @@ public static class RouteVerifier
         L("firstMismatchFrame", e.FirstMismatchFrame);
         w.WriteBoolean("expectedStateEverObserved", e.ExpectedStateEverObserved);
         L("expectedStateFirstFrame", e.ExpectedStateFirstFrame);
+        L("judgedAttemptStartFrame", e.JudgedAttemptStartFrame);
+        L("judgedAttemptEndFrame", e.JudgedAttemptEndFrame);
+        L("expectedTargetFirstFrame", e.ExpectedTargetFirstFrame);
+        B("transitionPrecededInput", e.TransitionPrecededInput);
+        S("failureAnchorKind", e.FailureAnchorKind);
         S("driverClaim", e.DriverClaim);
         L("driverClaimFrame", e.DriverClaimFrame);
         L("failureAnchorFrame", e.FailureAnchorFrame);

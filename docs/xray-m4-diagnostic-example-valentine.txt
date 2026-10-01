@@ -14,22 +14,28 @@ planned input (· = release):
 
 runtime evidence:
   Step 2 was not attempted: the opening attack did not connect. State 200 occurred (frames 274–287), but the required contact (contact) was never observed.
-  failure: RequiredContactNotObserved
-  expected state: 210  expected state ever observed: no
-  first mismatch: state 0 at frame 288
+  failed step 2; failure: RequiredContactNotObserved
+  expected state: 210  expected state ever observed (anywhere in the trace): no
+  judged attempt window: frames 274-499; expected state entered inside it at: n/a; transition preceded the input: n/a
+  first mismatch: state n/a at frame n/a
   source state observed: yes (occurrence frames 274-287)
   required contact: contact  observed: no
   timing: required earliest tick n/a; source tick at the attempted input n/a; satisfied: n/a
-  planned input attempted: no
-  failure anchor frame: 287
+  Step 2 input was not attempted.
+  failure anchor: frame 287 (SourceOccurrenceEnd)
   driver reported: precondition never met for cand:state:200>state:210@state:200/ctrl:6#0 (frame 456); this is the driver's claim, not a measurement
+  recorded step outcomes:
+    step 1: Observed  input frame 273  contact frame n/a  transition frame 274
+    step 2: NotObserved (PreconditionNeverMet)  input frame n/a  contact frame n/a  transition frame n/a
+    step 3: NotReached  input frame n/a  contact frame n/a  transition frame n/a
+    step 4: NotReached  input frame n/a  contact frame n/a  transition frame n/a
   executed controller: unknown (the trace does not record it)
   driver-reported inputs: f231 step n/a F, f271 step n/a release, f273 step 1 a, f274 step 1 release
-  telemetry at the attempted input: n/a (no input was attempted)
+  telemetry at the attempted input: n/a — Step 2 input was not attempted
   source occurrence start: frame 274: state 200 ctrl no statetype S movetype A power 30 facing 1 pos (10, 0) derived distance 60 [derived:p2.x-p1.x]
   source occurrence end: frame 287: state 200 ctrl no statetype S movetype A power 30 facing 1 pos (11, 0) derived distance 59 [derived:p2.x-p1.x]
   configured approach distance: 60 — The distance P1 walks to before the route starts. It is a threshold, not the attack's range.
-  derived separation at the attempted input: n/a (no input)
+  derived separation at the attempted input: n/a — Step 2 input was not attempted
   derived separation over the source-occurrence: start 60, end 59, min 59, max 60 [derived:p2.x-p1.x]
   decisive frame: 287; window ±12:
     f275  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 10,70 dist 60 | step_done (step 1): 200 · step_wait (step 2): cand:state:200>state:210@state:200/ctrl:6#0

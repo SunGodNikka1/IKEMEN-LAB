@@ -12,15 +12,19 @@ planned input (· = release):
 
 runtime evidence:
   Step 1 failed: different move. Expected State 17200. Observed State 200 at frame 291 after the reported a input. State 17200 was never observed.
-  failure: DifferentMoveEntered
-  expected state: 17200  expected state ever observed: no
+  failed step 1; failure: DifferentMoveEntered
+  expected state: 17200  expected state ever observed (anywhere in the trace): no
+  judged attempt window: frames 290-337; expected state entered inside it at: n/a; transition preceded the input: n/a
   first mismatch: state 200 at frame 291
   source state observed: n/a
   required contact: n/a  observed: n/a
   timing: required earliest tick n/a; source tick at the attempted input n/a; satisfied: n/a
-  planned input attempted: yes (a at frame 290)
-  failure anchor frame: 291
+  Step 1 input was attempted (a at frame 290)
+  failure anchor: frame 291 (FirstMismatch)
   driver reported: expected state 17200, saw 0 (frame 338); this is the driver's claim, not a measurement
+  recorded step outcomes:
+    step 1: NotObserved (WrongState)  input frame 290  contact frame n/a  transition frame n/a
+    step 2: NotReached  input frame n/a  contact frame n/a  transition frame n/a
   executed controller: unknown (the trace does not record it)
   driver-reported inputs: f290 step 1 a, f291 step 1 release
   telemetry at the attempted input: frame 290: state 0 ctrl yes statetype S movetype I power 0 facing 1 pos (-5, 0) derived distance 55 [derived:p2.x-p1.x]

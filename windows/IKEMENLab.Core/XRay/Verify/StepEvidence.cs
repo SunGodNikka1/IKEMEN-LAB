@@ -12,6 +12,10 @@ public static class PrerequisiteFailure
     public const string InputNotAttempted = "InputNotAttempted";
     public const string DifferentMoveEntered = "DifferentMoveEntered";
     public const string ExpectedStateNeverObserved = "ExpectedStateNeverObserved";
+    /// <summary>The expected transition happened before the planned input (the verifier reports WrongState).</summary>
+    public const string TransitionPrecededInput = "TransitionPrecededInput";
+    /// <summary>An input was attempted but no decisive transition happened inside the judged attempt window (the verifier reports TransitionNotObserved).</summary>
+    public const string NoTransitionBeforeDeadline = "NoTransitionBeforeDeadline";
 }
 
 /// <summary>
@@ -41,6 +45,15 @@ public sealed record StepEvidence(
     long? FirstMismatchFrame,
     bool ExpectedStateEverObserved,
     long? ExpectedStateFirstFrame,
+    /// <summary>The frames the verifier judged for this step: from the start of the source occurrence (or the previous transition) to its attempt deadline. Evidence never looks beyond them.</summary>
+    long? JudgedAttemptStartFrame,
+    long? JudgedAttemptEndFrame,
+    /// <summary>First frame inside the judged window where P1 entered the expected state (null when it did not, even if it occurs later in the trace).</summary>
+    long? ExpectedTargetFirstFrame,
+    /// <summary>The expected transition happened at or before the attempted input (the premature transition). Null when not applicable.</summary>
+    bool? TransitionPrecededInput,
+    /// <summary>What <see cref="FailureAnchorFrame"/> is: FirstMismatch | PrematureTransition | SourceOccurrenceEnd | InputAttempt | AttemptDeadline.</summary>
+    string? FailureAnchorKind,
     string? DriverClaim,
     long? DriverClaimFrame,
     /// <summary>The frame where the failure is decided: the first mismatch, else the end of the source occurrence (missing contact / source), else the input frame. Null when none applies.</summary>
@@ -106,10 +119,22 @@ public static class StepEvidenceBuilder
         int? tickAtInput = inputFrame is { } inf && occStart is { } os ? (int)(inf - os) : null;
         bool? timing = step.EarliestTick is { } minTick && tickAtInput is { } t ? t >= minTick : null;
 
-        var limit = inputFrame is { } first ? first + step.Input.Count + step.TimeoutFrames : (long?)null;
-        var (mismatchState, mismatchFrame) = FirstMismatch(step, frames, cursor, inputFrame, limit);
-        var expected = frames.Skip(cursor).FirstOrDefault(f => f.P1.State == step.ToState);
+        // The verifier's own window for this step: from the cursor to input + command length + timeout (or cursor + 180 + timeout without an input).
+        var judgedStart = frames[cursor].Frame;
+        var judgedEnd = inputFrame is { } first ? first + step.Input.Count + step.TimeoutFrames : judgedStart + 180 + step.TimeoutFrames;
+        var inWindow = frames.Skip(cursor + 1).TakeWhile(f => f.Frame <= judgedEnd).ToList();
+        var (mismatchState, mismatchFrame) = FirstMismatch(step, frames, cursor, inputFrame, judgedEnd);
+        var expected = frames.Skip(cursor).FirstOrDefault(f => f.P1.State == step.ToState);               // anywhere in the trace (informational)
+        var expectedInWindow = inWindow.FirstOrDefault(f => f.P1.State == step.ToState)?.Frame;           // inside the judged window only
         var claim = driver.LastOrDefault(d => d.Step == step.Index && d.Kind is "timeout" or "step_timeout");
+
+        // The expected transition itself, for a step with a source state: the first state change of the occurrence, if it is into the target and not after the input.
+        bool? precededInput = null;
+        if (step.FromState is not null && inputFrame is { } pin)
+        {
+            var firstChange = inWindow.FirstOrDefault(f => f.P1.State != frames[cursor].P1.State);
+            precededInput = firstChange is { } fc && fc.P1.State == step.ToState && fc.Frame <= pin;
+        }
 
         // Separation: at the input only if an input happened; otherwise the source occurrence (or attempt window) is reported under its own label.
         double? atInput = inputFrame is { } ip ? frames.LastOrDefault(f => f.Frame <= ip && f.Distance is not null)?.Distance : null;
@@ -118,7 +143,7 @@ public static class StepEvidenceBuilder
         if (occurrence.Count > 0) { window = occurrence; windowKind = "source-occurrence"; }
         else if (inputFrame is { } w0)
         {
-            var end = Math.Min(limit ?? w0, mismatchFrame ?? long.MaxValue);
+            var end = Math.Min(judgedEnd, mismatchFrame ?? long.MaxValue);
             window = frames.Where(f => f.Frame >= w0 && f.Frame <= end).ToList();
             windowKind = "attempt-window";
         }
@@ -129,36 +154,44 @@ public static class StepEvidenceBuilder
         string? failure = null;
         // An attempted input that led to a different move is the decisive fact, whatever the contact flags say.
         if (inputFrame is not null && mismatchState is not null) failure = PrerequisiteFailure.DifferentMoveEntered;
+        else if (precededInput == true) failure = PrerequisiteFailure.TransitionPrecededInput;
         else if (step.FromState is not null && sourceObserved == false) failure = PrerequisiteFailure.SourceStateNeverObserved;
         else if (step.Contact is not null && contactObserved == false) failure = PrerequisiteFailure.RequiredContactNotObserved;
         else if (timing == false) failure = PrerequisiteFailure.TimingNotSatisfied;
         else if (inputFrame is null) failure = PrerequisiteFailure.InputNotAttempted;
-        else if (expected is null) failure = PrerequisiteFailure.ExpectedStateNeverObserved;
+        else if (expectedInWindow is null) failure = PrerequisiteFailure.NoTransitionBeforeDeadline;
 
-        long? anchor = failure switch
+        var lastFrame = frames.Count > 0 ? frames[^1].Frame : judgedEnd;
+        (long? anchor, string? kind) = failure switch
         {
-            PrerequisiteFailure.DifferentMoveEntered => mismatchFrame,
-            PrerequisiteFailure.RequiredContactNotObserved or PrerequisiteFailure.SourceStateNeverObserved => occEnd ?? inputFrame,
-            PrerequisiteFailure.TimingNotSatisfied => inputFrame,
-            PrerequisiteFailure.InputNotAttempted => occEnd,
-            _ => mismatchFrame ?? inputFrame
+            PrerequisiteFailure.DifferentMoveEntered => (mismatchFrame, "FirstMismatch"),
+            PrerequisiteFailure.TransitionPrecededInput => (expectedInWindow, "PrematureTransition"),
+            PrerequisiteFailure.RequiredContactNotObserved or PrerequisiteFailure.SourceStateNeverObserved => (occEnd ?? inputFrame, occEnd is not null ? "SourceOccurrenceEnd" : "InputAttempt"),
+            PrerequisiteFailure.TimingNotSatisfied => (inputFrame, "InputAttempt"),
+            PrerequisiteFailure.InputNotAttempted => (occEnd, occEnd is not null ? "SourceOccurrenceEnd" : null),
+            PrerequisiteFailure.NoTransitionBeforeDeadline => (Math.Min(judgedEnd, lastFrame), "AttemptDeadline"),
+            _ => (null, null)
         };
 
         return new StepEvidence(step.ToState, step.FromState, sourceObserved, occStart, occEnd, step.Contact, contactObserved, step.EarliestTick, tickAtInput, timing,
-            inputFrame is not null, inputFrame, keys.ToList(), mismatchState, mismatchFrame, expected is not null, expected?.Frame, claim?.Detail, claim?.Frame, anchor,
+            inputFrame is not null, inputFrame, keys.ToList(), mismatchState, mismatchFrame, expected is not null, expected?.Frame,
+            judgedStart, judgedEnd, expectedInWindow, precededInput, kind, claim?.Detail, claim?.Frame, anchor,
             approachDistance, atInput, occurrence.Count > 0 ? occurrence[0].Distance : null, occurrence.Count > 0 ? occurrence[^1].Distance : null, windowKind,
             measured.Count == 0 ? null : measured.Min(f => f.Distance), measured.Count == 0 ? null : measured.Max(f => f.Distance), sources, failure);
     }
 
     /// <summary>
-    /// The first decisive wrong move within the verifier's own attempt: for a step with a source state, how that source occurrence ENDED (its first exit — exits before the
-    /// input count, a later repeated occurrence of the same state never replaces it); for a neutral start, the first attack/control-loss after the input up to the verifier's
-    /// attempt limit. Found once; a later return to neutral or a driver timeout never replaces it.
+    /// The first decisive wrong move within the verifier's judged attempt (<paramref name="limit"/> is its deadline; nothing later is considered), and only when an input was
+    /// attempted. For a step with a source state it is how that source occurrence ENDED (its first exit — before the input counts; a later repeated occurrence never replaces it);
+    /// an exit INTO the expected state is not a mismatch (a premature expected transition is reported separately). For a neutral start it is the first attack/control-loss after
+    /// the input. Found once; a later return to neutral or a driver timeout never replaces it.
     /// </summary>
     public static (int? State, long? Frame) FirstMismatch(PlanStep step, IReadOnlyList<FrameEvent> frames, int cursor, long? inputFrame, long? limit = null)
     {
+        if (inputFrame is null) return (null, null);
         for (var i = Math.Max(cursor + 1, 1); i < frames.Count; i++)
         {
+            if (limit is { } l && frames[i].Frame > l) return (null, null);
             var prev = frames[i - 1].P1;
             var cur = frames[i].P1;
             if (cur.State == prev.State) continue;
@@ -169,8 +202,7 @@ public static class StepEvidenceBuilder
                 return cur.State == step.ToState ? (null, null) : (cur.State, frames[i].Frame);
             }
 
-            if (inputFrame is null || frames[i].Frame <= inputFrame) continue;
-            if (limit is { } l && frames[i].Frame > l) return (null, null);
+            if (frames[i].Frame <= inputFrame) continue;
             if (cur.State == step.ToState) return (null, null);
             if (cur.MoveType is "A" or "Attack" || (prev.Ctrl == true && cur.Ctrl == false)) return (cur.State, frames[i].Frame);
         }
@@ -204,6 +236,10 @@ public static class FailureNarrative
             }
             case PrerequisiteFailure.SourceStateNeverObserved when e.SourceState is { } src2:
                 return $"Step {step.Index} {(e.InputAttempted ? "was attempted" : "was not attempted")}: State {src2}, the state it starts from, was never observed.";
+            case PrerequisiteFailure.TransitionPrecededInput when e.SourceState is { } ps:
+                return $"Step {step.Index} failed: the expected transition (State {ps} → {e.ExpectedState}) happened at frame {e.ExpectedTargetFirstFrame}, before the planned input at frame {e.InputAttemptFrame}.";
+            case PrerequisiteFailure.NoTransitionBeforeDeadline:
+                return $"Step {step.Index} was attempted at frame {e.InputAttemptFrame}, but State {e.ExpectedState} was not entered by the end of the judged attempt (frame {e.JudgedAttemptEndFrame}).";
             case PrerequisiteFailure.TimingNotSatisfied:
                 return $"Step {step.Index} was attempted too early: its input was sent {e.SourceTickAtInput} tick(s) into State {e.SourceState}, but the transition needs tick {e.RequiredEarliestTick} or later.";
             default:

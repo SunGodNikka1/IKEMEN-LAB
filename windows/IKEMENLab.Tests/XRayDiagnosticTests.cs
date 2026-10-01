@@ -12,8 +12,9 @@ namespace IKEMENLab.Tests;
 
 /// <summary>
 /// Permanent regression fixtures from two real user-found playbacks.
-/// Funny Valentine (m4_fv_*): the REAL plan and trace from a Windows run. Goku (m4_goku_*): reconstructed from the frame numbers the user reported
-/// (see scripts/make_m4_goku_fixture.py); the real Goku trace was not available.
+/// Funny Valentine (m4_fv_*): the REAL plan and trace from a Windows run. Goku (m4_goku_reconstructed_*): RECONSTRUCTED from the frame numbers the user reported
+/// (see scripts/make_m4_goku_reconstructed_fixture.py), kept only because the verifier tests need a plan and the real Goku plan is unavailable. The REAL Goku trace is
+/// m4_goku_real_trace.jsonl (see XRayDiagnosticAnchoringTests).
 /// </summary>
 public class XRayDiagnosticTests : IDisposable
 {
@@ -29,10 +30,10 @@ public class XRayDiagnosticTests : IDisposable
         return (plan, TraceReader.Read(editTrace is null ? text : editTrace(text)));
     }
 
-    private static (InputPlan Plan, TraceLog Log) Goku(Func<string, string>? editTrace = null)
+    private static (InputPlan Plan, TraceLog Log) GokuReconstructed(Func<string, string>? editTrace = null)
     {
-        var plan = InputPlanner.FromJson(File.ReadAllText(Fx("m4_goku_plan.json")));
-        var text = File.ReadAllText(Fx("m4_goku_trace.jsonl")).Replace("\"planFingerprint\":null", "\"planFingerprint\":\"" + InputPlanner.Fingerprint(plan) + "\"");
+        var plan = InputPlanner.FromJson(File.ReadAllText(Fx("m4_goku_reconstructed_plan.json")));
+        var text = File.ReadAllText(Fx("m4_goku_reconstructed_trace.jsonl")).Replace("\"planFingerprint\":null", "\"planFingerprint\":\"" + InputPlanner.Fingerprint(plan) + "\"");
         return (plan, TraceReader.Read(editTrace is null ? text : editTrace(text)));
     }
 
@@ -60,9 +61,9 @@ public class XRayDiagnosticTests : IDisposable
     // ------------------------------------------------------------------ Goku: the first decisive wrong move
 
     [Fact]
-    public void GokuKeepsWrongStateAndRecordsTheFirstMismatchAtFrame291()
+    public void ReconstructedGokuKeepsWrongStateAndRecordsTheFirstMismatchAtFrame291()
     {
-        var (plan, log) = Goku();
+        var (plan, log) = GokuReconstructed();
         var report = RouteVerifier.Verify(plan, log);
         Assert.Equal((VerifyStatus.Failed, VerifyReason.WrongState, 1), (report.Status, report.Reason, report.FailedStep));
 
@@ -85,9 +86,9 @@ public class XRayDiagnosticTests : IDisposable
     }
 
     [Fact]
-    public void GokuInspectionFocusesFrame291AndDoesNotClaimAControllerWon()
+    public void ReconstructedGokuInspectionFocusesFrame291AndDoesNotClaimAControllerWon()
     {
-        var (plan, log) = Goku();
+        var (plan, log) = GokuReconstructed();
         var report = RouteVerifier.Verify(plan, log);
         var f = PlaybackInspector.Inspect(report, log)!;
         Assert.Equal(291, f.FocusFrame);
@@ -104,7 +105,7 @@ public class XRayDiagnosticTests : IDisposable
     public void AMismatchFollowedByTheExpectedStateIsSaidToHaveBeenObservedLater()
     {
         // Same wrong move at 291, but the expected state appears at 330: the first mismatch is still frame 291, and the text no longer says "never".
-        var (plan, log) = Goku(t => t.Replace("\"frame\":330,", "\"frame\":330,").Replace(
+        var (plan, log) = GokuReconstructed(t => t.Replace("\"frame\":330,", "\"frame\":330,").Replace(
             "\"frame\":330,\"engineTick\":332,\"round\":1,\"p1\":{\"state\":0,\"prevState\":null,\"ctrl\":true,\"stateType\":\"S\",\"moveType\":\"I\",\"anim\":0",
             "\"frame\":330,\"engineTick\":332,\"round\":1,\"p1\":{\"state\":17200,\"prevState\":null,\"ctrl\":false,\"stateType\":\"S\",\"moveType\":\"A\",\"anim\":0"));
         var step = PlanStepOf(plan);
@@ -234,10 +235,11 @@ public class XRayDiagnosticTests : IDisposable
         Assert.Contains("Step 2 was not attempted: the opening attack did not connect.", text);
         Assert.Contains("source state observed: yes", text);
         Assert.Contains("required contact: contact  observed: no", text);
-        Assert.Contains("planned input attempted: no", text);
+        Assert.Contains("Step 2 input was not attempted.", text);
         Assert.Contains("configured approach distance: 60", text);
-        Assert.Contains("telemetry at the attempted input: n/a (no input was attempted)", text);   // Step 2 had no input: nothing is labelled as input telemetry
-        Assert.Contains("derived separation at the attempted input: n/a (no input)", text);
+        Assert.Contains("telemetry at the attempted input: n/a — Step 2 input was not attempted", text);   // case A: Step 2 genuinely had no input
+        Assert.Contains("derived separation at the attempted input: n/a — Step 2 input was not attempted", text);
+        Assert.Contains("first mismatch: state n/a at frame n/a", text);   // a never-attempted step has no "wrong move": the move merely ended
         Assert.Contains("derived separation over the source-occurrence: start 60, end 59, min 59, max 60", text);
         Assert.Contains("source occurrence start: frame 274", text);
         Assert.Contains("does not mean the engine has none", text);
@@ -245,9 +247,9 @@ public class XRayDiagnosticTests : IDisposable
     }
 
     [Fact]
-    public void TheGokuDiagnosticFocusesTheFirstMismatch()
+    public void TheReconstructedGokuDiagnosticFocusesTheFirstMismatch()
     {
-        var (plan, log) = Goku();
+        var (plan, log) = GokuReconstructed();
         var d = PlaybackDiagnostic.Build(DiagSource(RouteVerifier.Verify(plan, log), log, plan));
         Assert.Equal(291, d.Runtime!.DecisiveFrame);
         Assert.Equal((200, 291L), (d.Runtime.Failure!.FirstMismatchState, d.Runtime.Failure.FirstMismatchFrame));

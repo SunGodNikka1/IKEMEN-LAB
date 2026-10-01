@@ -83,6 +83,7 @@ public static class PlaybackInspector
             headline = $"Step {step!.Index} was not attempted: " + (ev.Failure == PrerequisiteFailure.RequiredContactNotObserved
                 ? (step.Index == 2 ? "the opening attack did not connect." : "the previous attack did not connect.")
                 : ev.Failure == PrerequisiteFailure.SourceStateNeverObserved ? $"State {ev.SourceState} never occurred." : "its input was never sent.");
+        else if (step is not null && ev?.Failure == PrerequisiteFailure.TransitionPrecededInput) headline = $"Step {step.Index} failed: the transition happened before the input.";
         else if (step is not null && report.Reason == VerifyReason.WrongState) headline = $"Step {step.Index} failed: different move.";
         else if (step is not null && report.Reason != VerifyReason.ComboDropped) headline = $"Failed at step {step.Index}: {Describe(report.Reason)}";
         else headline = "Failed: " + Describe(report.Reason);

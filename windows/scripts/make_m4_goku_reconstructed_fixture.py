@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Writes the Goku regression fixture (IKEMENLab.Tests/Fixtures/m4_goku_plan.json, m4_goku_trace.jsonl).
+Writes the Goku regression fixture (IKEMENLab.Tests/Fixtures/m4_goku_reconstructed_plan.json, m4_goku_reconstructed_trace.jsonl).
 
-PROVENANCE: the raw Goku trace was not available when this fixture was made. It is RECONSTRUCTED from the frame numbers a user reported from a real
+RECONSTRUCTED FIXTURE, kept only because the verifier tests need a PLAN and the real Goku plan is unavailable (the real trace is m4_goku_real_trace.jsonl). It is RECONSTRUCTED from the frame numbers a user reported from a real
 playback (input a reported at frame 290; P1 enters State 200 / Anim 200 / MoveType A at frame 291; returns to neutral at 308; the driver times out
 at frame 338 saying "expected 17200, saw 0"). Everything else (life, distance, intro) is filler consistent with the Funny Valentine trace. Replace the
 two files with the real ones when available; the tests assert only the reported facts.
@@ -27,7 +27,7 @@ plan = {
     ],
     "warnings": [],
 }
-with open(os.path.join(fx, "m4_goku_plan.json"), "w", newline="\n") as f:
+with open(os.path.join(fx, "m4_goku_reconstructed_plan.json"), "w", newline="\n") as f:
     json.dump(plan, f, indent=2)
     f.write("\n")
 
@@ -70,6 +70,6 @@ for frame in range(1, last + 1):
         events.append({"type": "driver", "frame": last, "event": "step_timeout", "step": 1, "detail": "expected state 17200, saw 0"})
         events.append({"type": "end", "frame": last, "reason": "stepTimeout"})
 
-with open(os.path.join(fx, "m4_goku_trace.jsonl"), "w", newline="\n") as f:
+with open(os.path.join(fx, "m4_goku_reconstructed_trace.jsonl"), "w", newline="\n") as f:
     for e in events:
         f.write(json.dumps(e, separators=(",", ":")) + "\n")
