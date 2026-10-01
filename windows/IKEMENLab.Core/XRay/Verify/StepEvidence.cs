@@ -16,6 +16,8 @@ public static class PrerequisiteFailure
     public const string TransitionPrecededInput = "TransitionPrecededInput";
     /// <summary>An input was attempted but no decisive transition happened inside the judged attempt window (the verifier reports TransitionNotObserved).</summary>
     public const string NoTransitionBeforeDeadline = "NoTransitionBeforeDeadline";
+    /// <summary>The samples ended (with no end marker) before the judged deadline, so nothing can be said about the rest of the attempt.</summary>
+    public const string TelemetryEndedBeforeDeadline = "TelemetryEndedBeforeDeadline";
 }
 
 /// <summary>
@@ -31,6 +33,8 @@ public sealed record StepEvidence(
     /// <summary>First and last frame of the verifier-selected source occurrence (null for a step that starts from neutral, or when the source never occurred).</summary>
     long? SourceOccurrenceStartFrame,
     long? SourceOccurrenceEndFrame,
+    /// <summary>How the occurrence stopped being observed: "Exit" (a later sample inside the judged window shows another state), "Deadline" (still in the source state when the judged window ended — a boundary, NOT an observed exit), "TraceEnd" (the samples ended inside the window), or null.</summary>
+    string? SourceOccurrenceEndKind,
     string? RequiredContact,
     bool? RequiredContactObserved,
     int? RequiredEarliestTick,
@@ -48,6 +52,10 @@ public sealed record StepEvidence(
     /// <summary>The frames the verifier judged for this step: from the start of the source occurrence (or the previous transition) to its attempt deadline. Evidence never looks beyond them.</summary>
     long? JudgedAttemptStartFrame,
     long? JudgedAttemptEndFrame,
+    /// <summary>The last sampled frame inside the judged window.</summary>
+    long? ObservedThroughFrame,
+    /// <summary>True when the samples cover the whole judged window, or the trace carries an end marker. False = the evidence is incomplete: absence of an event is not shown.</summary>
+    bool ObservationComplete,
     /// <summary>First frame inside the judged window where P1 entered the expected state (null when it did not, even if it occurs later in the trace).</summary>
     long? ExpectedTargetFirstFrame,
     /// <summary>The expected transition happened at or before the attempted input (the premature transition). Null when not applicable.</summary>
@@ -80,19 +88,34 @@ public static class StepEvidenceBuilder
     /// <paramref name="cursor"/> is the verifier's index of the frame where the preceding step's transition was observed — the start of this step's source occurrence.
     /// </summary>
     public static StepEvidence Build(PlanStep step, IReadOnlyList<FrameEvent> frames, int cursor, IReadOnlyList<InputEvent> stepInputs,
-        IReadOnlyList<DriverEvent> driver, int approachDistance)
+        IReadOnlyList<DriverEvent> driver, int approachDistance, bool traceEnded = true)
     {
         cursor = Math.Clamp(cursor, 0, Math.Max(0, frames.Count - 1));
         var inputFrame = stepInputs.Select(e => (long?)e.Frame).FirstOrDefault();
         var keys = stepInputs.FirstOrDefault()?.Keys ?? [];
 
-        // The source occurrence: the contiguous run of frames in the source state starting at the cursor. Nothing later in the trace belongs to it.
+        // The verifier's own window for this step: from the cursor to input + command length + timeout (or cursor + 180 + timeout without an input).
+        // Everything below — the occurrence, contact, separation, anchors — is confined to it; nothing after the deadline can change the diagnosis.
+        var judgedStart = frames[cursor].Frame;
+        var judgedEnd = inputFrame is { } first ? first + step.Input.Count + step.TimeoutFrames : judgedStart + 180 + step.TimeoutFrames;
+        var lastSample = frames.Count > 0 ? frames[^1].Frame : judgedStart;
+        var observedThrough = Math.Min(lastSample, judgedEnd);
+        var complete = lastSample >= judgedEnd || traceEnded;
+
+        // The source occurrence: the contiguous run of frames in the source state starting at the cursor, up to the judged deadline.
         var occurrence = step.FromState is { } src
-            ? frames.Skip(cursor).TakeWhile(f => f.P1.State == src).ToList()
+            ? frames.Skip(cursor).TakeWhile(f => f.P1.State == src && f.Frame <= judgedEnd).ToList()
             : [];
         bool? sourceObserved = step.FromState is null ? null : occurrence.Count > 0;
         long? occStart = occurrence.Count > 0 ? occurrence[0].Frame : null;
         long? occEnd = occurrence.Count > 0 ? occurrence[^1].Frame : null;
+        string? occEndKind = null;
+        if (occurrence.Count > 0)
+        {
+            var next = cursor + occurrence.Count < frames.Count ? frames[cursor + occurrence.Count] : null;
+            occEndKind = next is { } n && n.Frame <= judgedEnd && n.P1.State != step.FromState ? "Exit"
+                : lastSample >= judgedEnd || next is not null ? "Deadline" : "TraceEnd";
+        }
 
         bool? contactObserved = null;
         if (step.Contact is { } need && occurrence.Count > 0)
@@ -111,7 +134,7 @@ public static class StepEvidenceBuilder
                     if (Contacted(sample, need) && (reset || fresh)) { seen = true; break; }
                 }
 
-                contactObserved = seen;
+                contactObserved = seen ? true : complete ? false : null;   // not seen in an INCOMPLETE trace is unknown, not absent
             }
         }
 
@@ -119,9 +142,6 @@ public static class StepEvidenceBuilder
         int? tickAtInput = inputFrame is { } inf && occStart is { } os ? (int)(inf - os) : null;
         bool? timing = step.EarliestTick is { } minTick && tickAtInput is { } t ? t >= minTick : null;
 
-        // The verifier's own window for this step: from the cursor to input + command length + timeout (or cursor + 180 + timeout without an input).
-        var judgedStart = frames[cursor].Frame;
-        var judgedEnd = inputFrame is { } first ? first + step.Input.Count + step.TimeoutFrames : judgedStart + 180 + step.TimeoutFrames;
         var inWindow = frames.Skip(cursor + 1).TakeWhile(f => f.Frame <= judgedEnd).ToList();
         var (mismatchState, mismatchFrame) = FirstMismatch(step, frames, cursor, inputFrame, judgedEnd);
         var expected = frames.Skip(cursor).FirstOrDefault(f => f.P1.State == step.ToState);               // anywhere in the trace (informational)
@@ -152,30 +172,33 @@ public static class StepEvidenceBuilder
         var sources = window.Where(f => f.DistanceSource is not null).Select(f => f.DistanceSource!).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList();
 
         string? failure = null;
-        // An attempted input that led to a different move is the decisive fact, whatever the contact flags say.
+        // Hard facts first: an attempted input that led to a different move, or an expected transition that came before the input, or a measured early input.
         if (inputFrame is not null && mismatchState is not null) failure = PrerequisiteFailure.DifferentMoveEntered;
         else if (precededInput == true) failure = PrerequisiteFailure.TransitionPrecededInput;
+        else if (timing == false) failure = PrerequisiteFailure.TimingNotSatisfied;
+        // Then incompleteness: samples that stop before the deadline cannot show that something did NOT happen.
+        else if (!complete) failure = PrerequisiteFailure.TelemetryEndedBeforeDeadline;
         else if (step.FromState is not null && sourceObserved == false) failure = PrerequisiteFailure.SourceStateNeverObserved;
         else if (step.Contact is not null && contactObserved == false) failure = PrerequisiteFailure.RequiredContactNotObserved;
-        else if (timing == false) failure = PrerequisiteFailure.TimingNotSatisfied;
         else if (inputFrame is null) failure = PrerequisiteFailure.InputNotAttempted;
         else if (expectedInWindow is null) failure = PrerequisiteFailure.NoTransitionBeforeDeadline;
 
-        var lastFrame = frames.Count > 0 ? frames[^1].Frame : judgedEnd;
         (long? anchor, string? kind) = failure switch
         {
             PrerequisiteFailure.DifferentMoveEntered => (mismatchFrame, "FirstMismatch"),
             PrerequisiteFailure.TransitionPrecededInput => (expectedInWindow, "PrematureTransition"),
-            PrerequisiteFailure.RequiredContactNotObserved or PrerequisiteFailure.SourceStateNeverObserved => (occEnd ?? inputFrame, occEnd is not null ? "SourceOccurrenceEnd" : "InputAttempt"),
+            PrerequisiteFailure.RequiredContactNotObserved or PrerequisiteFailure.SourceStateNeverObserved =>
+                (occEnd ?? inputFrame, occEnd is null ? "InputAttempt" : occEndKind == "Exit" ? "SourceOccurrenceEnd" : "SourceOccurrenceDeadline"),
             PrerequisiteFailure.TimingNotSatisfied => (inputFrame, "InputAttempt"),
-            PrerequisiteFailure.InputNotAttempted => (occEnd, occEnd is not null ? "SourceOccurrenceEnd" : null),
-            PrerequisiteFailure.NoTransitionBeforeDeadline => (Math.Min(judgedEnd, lastFrame), "AttemptDeadline"),
+            PrerequisiteFailure.InputNotAttempted => (occEnd, occEnd is null ? null : occEndKind == "Exit" ? "SourceOccurrenceEnd" : "SourceOccurrenceDeadline"),
+            PrerequisiteFailure.NoTransitionBeforeDeadline => (judgedEnd, "AttemptDeadline"),
+            PrerequisiteFailure.TelemetryEndedBeforeDeadline => (observedThrough, "TraceEnd"),
             _ => (null, null)
         };
 
-        return new StepEvidence(step.ToState, step.FromState, sourceObserved, occStart, occEnd, step.Contact, contactObserved, step.EarliestTick, tickAtInput, timing,
+        return new StepEvidence(step.ToState, step.FromState, sourceObserved, occStart, occEnd, occEndKind, step.Contact, contactObserved, step.EarliestTick, tickAtInput, timing,
             inputFrame is not null, inputFrame, keys.ToList(), mismatchState, mismatchFrame, expected is not null, expected?.Frame,
-            judgedStart, judgedEnd, expectedInWindow, precededInput, kind, claim?.Detail, claim?.Frame, anchor,
+            judgedStart, judgedEnd, observedThrough, complete, expectedInWindow, precededInput, kind, claim?.Detail, claim?.Frame, anchor,
             approachDistance, atInput, occurrence.Count > 0 ? occurrence[0].Distance : null, occurrence.Count > 0 ? occurrence[^1].Distance : null, windowKind,
             measured.Count == 0 ? null : measured.Min(f => f.Distance), measured.Count == 0 ? null : measured.Max(f => f.Distance), sources, failure);
     }
@@ -232,12 +255,14 @@ public static class FailureNarrative
             {
                 var lead = step.Index == 2 ? "the opening attack" : "the previous attack";
                 var attempted = e.InputAttempted ? $"Step {step.Index} was attempted, but {lead} did not connect." : $"Step {step.Index} was not attempted: {lead} did not connect.";
-                return $"{attempted} State {src} occurred (frames {e.SourceOccurrenceStartFrame}–{e.SourceOccurrenceEndFrame}), but the required contact ({e.RequiredContact}) was never observed.";
+                return $"{attempted} State {src} occurred (frames {e.SourceOccurrenceStartFrame}–{e.SourceOccurrenceEndFrame}{(e.SourceOccurrenceEndKind == "Deadline" ? "; still in that state when the judged attempt ended at the deadline, not an observed exit" : string.Empty)}), but the required contact ({e.RequiredContact}) was not observed within the judged attempt.";
             }
             case PrerequisiteFailure.SourceStateNeverObserved when e.SourceState is { } src2:
                 return $"Step {step.Index} {(e.InputAttempted ? "was attempted" : "was not attempted")}: State {src2}, the state it starts from, was never observed.";
             case PrerequisiteFailure.TransitionPrecededInput when e.SourceState is { } ps:
                 return $"Step {step.Index} failed: the expected transition (State {ps} → {e.ExpectedState}) happened at frame {e.ExpectedTargetFirstFrame}, before the planned input at frame {e.InputAttemptFrame}.";
+            case PrerequisiteFailure.TelemetryEndedBeforeDeadline:
+                return $"Step {step.Index} could not be judged: the samples ended at frame {e.ObservedThroughFrame}, before the judged attempt deadline (frame {e.JudgedAttemptEndFrame}), and no end marker was recorded. Nothing is claimed about the rest of the attempt.";
             case PrerequisiteFailure.NoTransitionBeforeDeadline:
                 return $"Step {step.Index} was attempted at frame {e.InputAttemptFrame}, but State {e.ExpectedState} was not entered by the end of the judged attempt (frame {e.JudgedAttemptEndFrame}).";
             case PrerequisiteFailure.TimingNotSatisfied:

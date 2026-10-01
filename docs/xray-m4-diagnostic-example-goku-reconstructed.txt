@@ -14,6 +14,7 @@ runtime evidence:
   Step 1 failed: different move. Expected State 17200. Observed State 200 at frame 291 after the reported a input. State 17200 was never observed.
   failed step 1; failure: DifferentMoveEntered
   expected state: 17200  expected state ever observed (anywhere in the trace): no
+  samples observed through frame 337; observation of the judged window complete: yes
   judged attempt window: frames 290-337; expected state entered inside it at: n/a; transition preceded the input: n/a
   first mismatch: state 200 at frame 291
   source state observed: n/a

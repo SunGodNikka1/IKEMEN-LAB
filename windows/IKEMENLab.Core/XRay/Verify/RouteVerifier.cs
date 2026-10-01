@@ -146,7 +146,7 @@ public static class RouteVerifier
             {
                 // Evidence comes from the frames themselves. When it supports a sharper statement than the generic detail it replaces the text,
                 // but the reason code is never changed here.
-                var evidence = StepEvidenceBuilder.Build(step, frames, cursor, stepInputs, driver, plan.ApproachDistance);
+                var evidence = StepEvidenceBuilder.Build(step, frames, cursor, stepInputs, driver, plan.ApproachDistance, log.Events.OfType<EndEvent>().Any());
                 var sharper = FailureNarrative.Describe(step, evidence, reason);
                 return pending[step.Index - 1] with
                     { Outcome = StepOutcome.NotObserved, Reason = reason, Detail = sharper ?? detail, InputFrame = inputFrame, Evidence = evidence };
@@ -393,6 +393,7 @@ public static class RouteVerifier
         B("sourceStateObserved", e.SourceStateObserved);
         L("sourceOccurrenceStartFrame", e.SourceOccurrenceStartFrame);
         L("sourceOccurrenceEndFrame", e.SourceOccurrenceEndFrame);
+        S("sourceOccurrenceEndKind", e.SourceOccurrenceEndKind);
         S("requiredContact", e.RequiredContact);
         B("requiredContactObserved", e.RequiredContactObserved);
         I("requiredEarliestTick", e.RequiredEarliestTick);
@@ -410,6 +411,8 @@ public static class RouteVerifier
         L("expectedStateFirstFrame", e.ExpectedStateFirstFrame);
         L("judgedAttemptStartFrame", e.JudgedAttemptStartFrame);
         L("judgedAttemptEndFrame", e.JudgedAttemptEndFrame);
+        L("observedThroughFrame", e.ObservedThroughFrame);
+        w.WriteBoolean("observationComplete", e.ObservationComplete);
         L("expectedTargetFirstFrame", e.ExpectedTargetFirstFrame);
         B("transitionPrecededInput", e.TransitionPrecededInput);
         S("failureAnchorKind", e.FailureAnchorKind);

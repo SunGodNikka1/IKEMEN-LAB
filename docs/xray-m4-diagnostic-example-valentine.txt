@@ -13,12 +13,13 @@ planned input (· = release):
   step 4 [a]: a ·
 
 runtime evidence:
-  Step 2 was not attempted: the opening attack did not connect. State 200 occurred (frames 274–287), but the required contact (contact) was never observed.
+  Step 2 was not attempted: the opening attack did not connect. State 200 occurred (frames 274–287), but the required contact (contact) was not observed within the judged attempt.
   failed step 2; failure: RequiredContactNotObserved
   expected state: 210  expected state ever observed (anywhere in the trace): no
+  samples observed through frame 456; observation of the judged window complete: yes
   judged attempt window: frames 274-499; expected state entered inside it at: n/a; transition preceded the input: n/a
   first mismatch: state n/a at frame n/a
-  source state observed: yes (occurrence frames 274-287)
+  source state observed: yes (occurrence frames 274-287; end: Exit)
   required contact: contact  observed: no
   timing: required earliest tick n/a; source tick at the attempted input n/a; satisfied: n/a
   Step 2 input was not attempted.

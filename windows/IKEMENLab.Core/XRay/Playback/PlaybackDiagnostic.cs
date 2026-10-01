@@ -223,9 +223,10 @@ public sealed record PlaybackDiagnostic(
                 var stepNo = FailedStep is { } fsn ? fsn.ToString(CultureInfo.InvariantCulture) : "?";
                 L($"  failed step {stepNo}; failure: {F(ev.Failure)}");
                 L($"  expected state: {F((long?)ev.ExpectedState)}  expected state ever observed (anywhere in the trace): {F(ev.ExpectedStateEverObserved)}" + (ev.ExpectedStateFirstFrame is { } ef ? $" (first at frame {ef})" : string.Empty));
+                L($"  samples observed through frame {F(ev.ObservedThroughFrame)}; observation of the judged window complete: {F(ev.ObservationComplete)}" + (ev.ObservationComplete ? string.Empty : " — INCOMPLETE: absence of an event is not shown"));
                 L($"  judged attempt window: frames {F(ev.JudgedAttemptStartFrame)}-{F(ev.JudgedAttemptEndFrame)}; expected state entered inside it at: {F(ev.ExpectedTargetFirstFrame)}; transition preceded the input: {F(ev.TransitionPrecededInput)}");
                 L($"  first mismatch: state {F((long?)ev.FirstMismatchState)} at frame {F(ev.FirstMismatchFrame)}");
-                L($"  source state observed: {F(ev.SourceStateObserved)}" + (ev.SourceOccurrenceStartFrame is { } sf ? $" (occurrence frames {sf}-{F(ev.SourceOccurrenceEndFrame)})" : string.Empty));
+                L($"  source state observed: {F(ev.SourceStateObserved)}" + (ev.SourceOccurrenceStartFrame is { } sf ? $" (occurrence frames {sf}-{F(ev.SourceOccurrenceEndFrame)}; end: {F(ev.SourceOccurrenceEndKind)})" : string.Empty));
                 L($"  required contact: {F(ev.RequiredContact)}  observed: {F(ev.RequiredContactObserved)}");
                 L($"  timing: required earliest tick {F((long?)ev.RequiredEarliestTick)}; source tick at the attempted input {F((long?)ev.SourceTickAtInput)}; satisfied: {F(ev.TimingSatisfied)}");
                 L(ev.InputAttempted

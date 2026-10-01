@@ -16,21 +16,22 @@ public class XRayDiagnosticAnchoringTests
     private const string Edge1 = "cand:neutral>state:200@c0";
     private const string Edge2 = "cand:state:200>state:210@c1";
 
-    private static InputPlan Plan(int? earliestTick) => new("char:Synth", Edge1 + ">" + Edge2,
+    private static InputPlan Plan(int? earliestTick, string? contact = null) => new("char:Synth", Edge1 + ">" + Edge2,
     [
         new PlanStep(1, Edge1, "Start", "neutral", "state:200", null, 200, "a", [new InputFrame(["a"]), new InputFrame([])], null, null, 45, []),
-        new PlanStep(2, Edge2, "Cancel", "state:200", "state:210", 200, 210, "a", [new InputFrame(["a"]), new InputFrame([])], null, earliestTick, 45, [])
+        new PlanStep(2, Edge2, "Cancel", "state:200", "state:210", 200, 210, "a", [new InputFrame(["a"]), new InputFrame([])], contact, earliestTick, 45, [])
     ], 60, 20, 20, 1800, []);
 
-    private static PlayerSample P1(int state, double x = 0) =>
-        new(state, null, state == 0, "S", state == 0 ? "I" : "A", null, null, 3000, 0, x, 0, 0, 0, 1, 0, 0, null);
+    private static PlayerSample P1(int state, double x = 0, int hit = 0) =>
+        new(state, null, state == 0, "S", state == 0 ? "I" : "A", null, null, 3000, 0, x, 0, 0, 0, 1, hit, hit, null);
 
     private static PlayerSample P2() => new(0, null, true, "S", "I", null, null, 3000, 0, 50, 0, 0, 0, -1, 0, 0, null);
 
     /// <summary>Frames 1..last. <paramref name="p1State"/> gives P1's state per frame. Step 1's input is at frame 20; <paramref name="step2Input"/> is the frame of step 2's input.</summary>
-    private static (InputPlan Plan, TraceLog Log) Run(int? earliestTick, Func<long, int> p1State, long step2Input, long last, bool withDistance = true)
+    private static (InputPlan Plan, TraceLog Log) Run(int? earliestTick, Func<long, int> p1State, long step2Input, long last, bool withDistance = true,
+        string? contact = null, Func<long, int>? hit = null, Func<long, double>? distance = null, bool endMarker = true)
     {
-        var plan = Plan(earliestTick);
+        var plan = Plan(earliestTick, contact);
         var events = new List<TraceEvent>
         {
             new TraceMeta("ikemenlab.xray.trace/0", "synthetic", "0.2", "Synth", "other", new Dictionary<string, bool>(), ["hook:loop"], InputPlanner.Fingerprint(plan)),
@@ -38,7 +39,7 @@ public class XRayDiagnosticAnchoringTests
         };
         for (long f = 1; f <= last; f++)
         {
-            events.Add(new FrameEvent(f, f + 2, 1, P1(p1State(f), -10 + f % 3), P2(), withDistance ? 60 - f % 3 : null, null, null, null, withDistance ? "derived:p2.x-p1.x" : null));
+            events.Add(new FrameEvent(f, f + 2, 1, P1(p1State(f), -10 + f % 3, hit?.Invoke(f) ?? 0), P2(), withDistance ? distance?.Invoke(f) ?? 60 - f % 3 : null, null, null, null, withDistance ? "derived:p2.x-p1.x" : null));
             if (f == 19) { events.Add(new DriverEvent(f, null, "step_wait", 1, Edge1)); events.Add(new DriverEvent(f, null, "step_ready", 1, Edge1)); }
             if (f == 20) events.Add(new InputEvent(f, null, 1, ["a"], 1, "input"));
             if (f == 21) events.Add(new InputEvent(f, null, 1, [], 1, "input"));
@@ -49,7 +50,7 @@ public class XRayDiagnosticAnchoringTests
             if (f == step2Input + 1) events.Add(new InputEvent(f, null, 1, [], 2, "input"));
         }
 
-        events.Add(new EndEvent(last, null, "stepTimeout"));
+        if (endMarker) events.Add(new EndEvent(last, null, "stepTimeout"));
         return (plan, new TraceLog { Meta = (TraceMeta)events[0], Events = events, Issues = [], LineCount = events.Count });
     }
 
@@ -214,6 +215,111 @@ public class XRayDiagnosticAnchoringTests
         Assert.Null(ev.FirstMismatchFrame);
         Assert.Equal((287L, "SourceOccurrenceEnd"), (ev.FailureAnchorFrame, ev.FailureAnchorKind));
         Assert.Equal(274, ev.JudgedAttemptStartFrame);
+    }
+
+    // ------------------------------------------------------------------ nothing after the deadline may change the diagnosis
+
+    [Fact]
+    public void ASourceThatContinuesPastTheDeadlineWithoutContactIsNotDescribedAsExited()
+    {
+        // Input at 25 → judged to frame 72. State 200 simply keeps running to 120 (no exit); the required hit is absent throughout the judged window.
+        var (plan, log) = Run(null, f => f is >= 22 and <= 120 ? 200 : 0, step2Input: 25, last: 130, contact: "hit");
+        var report = RouteVerifier.Verify(plan, log);
+        Assert.Equal((VerifyStatus.Failed, VerifyReason.TransitionNotObserved, 2), (report.Status, report.Reason, report.FailedStep));   // the verdict is unchanged
+
+        var ev = report.Steps[1].Evidence!;
+        Assert.Equal((22L, 72L), (ev.SourceOccurrenceStartFrame, ev.SourceOccurrenceEndFrame));   // the occurrence stops at the judged deadline, not at frame 120
+        Assert.Equal("Deadline", ev.SourceOccurrenceEndKind);                                      // a boundary, NOT an observed exit
+        Assert.False(ev.RequiredContactObserved);
+        Assert.Equal(PrerequisiteFailure.RequiredContactNotObserved, ev.Failure);
+        Assert.Equal((72L, "SourceOccurrenceDeadline"), (ev.FailureAnchorFrame, ev.FailureAnchorKind));
+        Assert.Null(ev.FirstMismatchState);
+        var text = report.Steps[1].Detail!;
+        Assert.Contains("still in that state when the judged attempt ended at the deadline, not an observed exit", text);
+        Assert.DoesNotContain("ended", text.Replace("judged attempt ended at the deadline", string.Empty));   // nothing says the move ended
+        Assert.Equal(72, PlaybackInspector.Inspect(report, log)!.FocusFrame);
+    }
+
+    [Fact]
+    public void ContactAndSpacingThatChangeOnlyAfterTheDeadlineDoNotChangeTheDiagnosis()
+    {
+        static bool Same(string a, string b) => a == b;
+        // Same run twice. In the second, a hit lands at frame 100 and the players move from 60 to 10 apart at frame 80 — both after the deadline (72).
+        var (planA, logA) = Run(null, f => f is >= 22 and <= 120 ? 200 : 0, 25, 130, contact: "hit", hit: _ => 0, distance: _ => 60);
+        var (planB, logB) = Run(null, f => f is >= 22 and <= 120 ? 200 : 0, 25, 130, contact: "hit", hit: f => f >= 100 ? 1 : 0, distance: f => f >= 80 ? 10 : 60);
+        var a = RouteVerifier.Verify(planA, logA);
+        var b = RouteVerifier.Verify(planB, logB);
+        Assert.Equal(a.Reason, b.Reason);
+
+        var evA = a.Steps[1].Evidence!;
+        var evB = b.Steps[1].Evidence!;
+        Assert.False(evB.RequiredContactObserved);                                     // the hit at 100 is outside the judged attempt
+        Assert.Equal((60.0, 60.0), (evB.SeparationMin, evB.SeparationMax));              // the closer spacing at 80 is outside it too
+        Assert.Equal(60, evB.SeparationAtSourceEnd);
+        Assert.True(Same(StepJson(a), StepJson(b)), "Evidence changed because of samples after the deadline.");
+        Assert.Equal(evA.FailureAnchorFrame, evB.FailureAnchorFrame);
+    }
+
+    private static string StepJson(VerificationReport r)
+    {
+        // The evidence block of step 2 as serialised, so every field (not just the ones asserted above) is compared.
+        var json = RouteVerifier.ToJson(r);
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.GetProperty("steps")[1].GetProperty("evidence").GetRawText();
+    }
+
+    [Fact]
+    public void ContactSeenWithinTheWindowStillCountsAndContactBeforeTheDeadlineIsNotLost()
+    {
+        var (plan, log) = Run(null, f => f is >= 22 and <= 120 ? 200 : 0, 25, 130, contact: "hit", hit: f => f >= 40 && f <= 45 ? 1 : 0);
+        var ev = RouteVerifier.Verify(plan, log).Steps[1].Evidence!;
+        Assert.True(ev.RequiredContactObserved);                                         // inside the judged window: counted
+    }
+
+    // ------------------------------------------------------------------ incomplete telemetry stays incomplete
+
+    [Fact]
+    public void SamplesThatEndBeforeTheDeadlineWithoutAnEndMarkerAreIncompleteNotNoTransition()
+    {
+        // Input at 25 (deadline 72) but the samples stop at frame 50 and no end marker was written.
+        var (plan, log) = Run(null, f => f is >= 22 ? 200 : 0, 25, 50, endMarker: false);
+        var report = RouteVerifier.Verify(plan, log);
+        Assert.Equal((VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, 2), (report.Status, report.Reason, report.FailedStep));   // the verifier already refuses to judge
+
+        var ev = report.Steps[1].Evidence!;
+        Assert.False(ev.ObservationComplete);
+        Assert.Equal(50, ev.ObservedThroughFrame);
+        Assert.Equal(72, ev.JudgedAttemptEndFrame);
+        Assert.Equal(PrerequisiteFailure.TelemetryEndedBeforeDeadline, ev.Failure);        // never NoTransitionBeforeDeadline
+        Assert.NotEqual(PrerequisiteFailure.NoTransitionBeforeDeadline, ev.Failure);
+        Assert.Equal((50L, "TraceEnd"), (ev.FailureAnchorFrame, ev.FailureAnchorKind));
+        Assert.Equal("TraceEnd", ev.SourceOccurrenceEndKind);
+        var detail = report.Steps[1].Detail!;
+        Assert.Contains("could not be judged", detail);
+        Assert.Contains("ended at frame 50, before the judged attempt deadline (frame 72)", detail);
+        Assert.DoesNotContain("was not entered by the end of the judged attempt", detail);   // no claim of observation through the deadline
+
+        var text = PlaybackDiagnostic.Build(new PlaybackDiagnostic.Source(1, AttemptState.VerdictProduced, null, report.RouteKey, null, null, null, Outcome(report, log, plan), 1)).ToText();
+        Assert.Contains("observation of the judged window complete: no — INCOMPLETE: absence of an event is not shown", text);
+        Assert.Equal(50, PlaybackInspector.Inspect(report, log)!.FocusFrame);
+    }
+
+    [Fact]
+    public void ContactNotSeenInATruncatedTraceIsUnknownNotAbsent()
+    {
+        var (plan, log) = Run(null, f => f is >= 22 ? 200 : 0, 25, 50, contact: "hit", endMarker: false);
+        var ev = RouteVerifier.Verify(plan, log).Steps[1].Evidence!;
+        Assert.Null(ev.RequiredContactObserved);                                         // not seen in an incomplete trace: unknown
+        Assert.NotEqual(PrerequisiteFailure.RequiredContactNotObserved, ev.Failure);
+    }
+
+    [Fact]
+    public void ATraceWithAnEndMarkerBeforeTheDeadlineIsStillComplete()
+    {
+        // The recording ended deliberately (end marker) at 50, before the deadline: the driver stopped, so the observation is as complete as it will ever be.
+        var (plan, log) = Run(null, f => f is >= 22 ? 200 : 0, 25, 50, endMarker: true);
+        var ev = RouteVerifier.Verify(plan, log).Steps[1].Evidence!;
+        Assert.True(ev.ObservationComplete);
     }
 
     // ------------------------------------------------------------------ three different "missing" situations
