@@ -23,6 +23,7 @@ internal sealed class XRayFixtures : IDisposable
         WriteValentine();
         WriteIkemen();
         WriteComboGuy();
+        WriteAizenStyle();
     }
 
     public void Dispose() { try { Directory.Delete(Root, true); } catch { /* best effort */ } }
@@ -30,6 +31,8 @@ internal sealed class XRayFixtures : IDisposable
     public CharacterEntry Valentine => Entry("Valentine", "Funny Valentine");
     public CharacterEntry Ikemen => Entry("IkemenGuy", "Ikemen Guy");
     public CharacterEntry ComboGuy => Entry("ComboGuy", "Combo Guy");
+    /// <summary>Synthetic, reconstructed from a description of an AI-only-branch diagnostic; NOT the real Aizen character or its diagnostic file.</summary>
+    public CharacterEntry AizenStyle => Entry("AizenStyle", "Aizen Style (synthetic)");
 
     private static CharacterEntry Entry(string folder, string name) => new()
     {
@@ -565,6 +568,122 @@ internal sealed class XRayFixtures : IDisposable
         File.WriteAllText(Path.Combine(d, "ComboGuy.cns"), ComboCns);
         File.WriteAllText(Path.Combine(d, "ComboGuy.air"), ComboAir);
     }
+
+    // ------------------------------------------------------------------ Aizen-style fixture (SYNTHETIC; see AizenStyleCmd)
+
+    private void WriteAizenStyle()
+    {
+        var d = Dir("AizenStyle");
+        File.WriteAllText(Path.Combine(d, "AizenStyle.def"), "[Info]\nname = \"Aizen Style\"\n[Files]\ncmd = AizenStyle.cmd\ncns = AizenStyle.cns\nstcommon = common1.cns\n");
+        File.WriteAllText(Path.Combine(d, "AizenStyle.cmd"), AizenStyleCmd);
+        File.WriteAllText(Path.Combine(d, "AizenStyle.cns"), AizenStyleCns);
+    }
+
+    /// <summary>
+    /// A synthetic character built to reproduce the shape of a real diagnostic in which the planner's route used AI-only branches
+    /// (AILevel-gated duplicates of player transitions). It is reconstructed from a description; it is not the real character.
+    /// </summary>
+    public const string AizenStyleCmd = """
+        [Command]
+        name = "x"
+        command = x
+        [Command]
+        name = "y"
+        command = y
+        [Command]
+        name = "z"
+        command = z
+        [Command]
+        name = "w"
+        command = a
+        [Command]
+        name = "QCF_x"
+        command = ~D, DF, F, x
+
+        [Statedef -1]
+
+        [State -1, x player]
+        type = ChangeState
+        value = 200
+        triggerall = command = "x"
+        trigger1 = statetype = S && ctrl
+
+        [State -1, x AI duplicate]
+        type = ChangeState
+        value = 200
+        triggerall = AILevel > 0
+        triggerall = command = "x"
+        trigger1 = statetype = S && ctrl
+
+        [State -1, y player]
+        type = ChangeState
+        value = 210
+        triggerall = command = "y"
+        trigger1 = stateno = 200 && movehit
+
+        [State -1, y AI duplicate]
+        type = ChangeState
+        value = 210
+        triggerall = AILevel > 0
+        triggerall = command = "y"
+        trigger1 = stateno = 200 && movehit
+
+        [State -1, special player]
+        type = ChangeState
+        value = 1000
+        triggerall = command = "QCF_x"
+        trigger1 = stateno = [200,210] && movecontact
+
+        [State -1, special AI-only]
+        type = ChangeState
+        value = 1000
+        triggerall = AILevel >= 1
+        triggerall = command = "QCF_x"
+        trigger1 = stateno = [200,210] && movecontact
+
+        [State -1, z with a variable]
+        type = ChangeState
+        value = 220
+        triggerall = command = "z"
+        triggerall = var(5) = 1
+        trigger1 = statetype = S && ctrl
+
+        [State -1, auto follow-up with no command]
+        type = ChangeState
+        value = 230
+        trigger1 = stateno = 200 && movehit
+
+        [State -1, AILevel inside an OR]
+        type = ChangeState
+        value = 240
+        triggerall = command = "w"
+        trigger1 = (AILevel > 0 || var(1) = 1) && statetype = S && ctrl
+
+        [State -1, player only]
+        type = ChangeState
+        value = 250
+        triggerall = command = "w"
+        triggerall = AILevel = 0
+        trigger1 = statetype = S && ctrl
+        """;
+
+    public static readonly string AizenStyleCns = string.Join("\n\n", new[] { 200, 210, 220, 230, 240, 250, 1000 }.Select(n => $"""
+        [Statedef {n}]
+        type = S
+        movetype = A
+        ctrl = 0
+
+        [State {n}, hit]
+        type = HitDef
+        trigger1 = Time = 1
+        attr = S, NA
+        damage = {n / 10}
+
+        [State {n}, end]
+        type = ChangeState
+        value = 0
+        trigger1 = Time > 30
+        """));
 
     public const string ComboCmd = """
         [Command]

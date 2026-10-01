@@ -868,6 +868,8 @@ case "xray-combos-find":
         _log.Add($"  status.attemptId={p.AttemptId}");
         _log.Add($"  status.attemptState={p.AttemptState}");
         _log.Add($"  status.attemptIssue={p.AttemptIssue}");
+        _log.Add($"  status.playerEligibility={p.EligibilityClass}");
+        _log.Add($"  status.eligibilityNotice={p.EligibilityNotice}");
         _log.Add($"  status.attemptRouteKey={p.AttemptRouteKey}");
         _log.Add($"  status.runRouteKey={p.RunRouteKey}");
         _log.Add($"  status.runId={r?.Id ?? string.Empty}");

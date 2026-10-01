@@ -93,3 +93,44 @@ verdict/reason/record/engine-hash/dummy/stage fields are printed **only when the
 `playback-wait verdict` is attempt-bound as above and throws on a preflight-refused attempt.
 Route selection: `xray-combo-route-index N` (1-based, as `--route N`), `xray-combo-route-key <exact key>` (ordinal, exact); the historical `xray-combo-route <substring>` now **errors when the substring matches more than one route** (listing them) instead of taking the first.
 Every selection logs `selected route #N of M by …; key=…; title=…` and re-checks that the lens really selected it.
+
+## Player playback eligibility
+
+Three things are kept apart for every candidate route and never merged into one badge:
+
+| Axis | Values | Source |
+|---|---|---|
+| Static confidence | StaticProven / Inferred / Unknown | the semantic index (unchanged) |
+| **Player playback eligibility** | `PlayerScriptable` / `NotPlayerScriptable` / `EligibilityUnknown` | `PlaybackEligibility.Classify` (static, before Play) |
+| Runtime verdict | Verified / Failed / Inconclusive | `RouteVerifier`, only from real trace evidence |
+
+`PlaybackEligibility` is a classifier, not a solver. For each step it re-reads the *selected branch* (the controller's `triggerall` plus
+the `triggerN` group the edge came from) and checks fixed-context facts only, under `PlaybackContext(AiLevel = 0)`:
+
+* **AILevel comparisons** — `AILevel`, `!AILevel`, `AILevel <op> N` and `N <op> AILevel` are evaluated against the playback context
+  (operator and value are read from the AST; the index's `ReadsAiLevel` facet alone cannot say which). A false comparison is *proven*
+  incompatibility.
+* **Command presence** — a Start/Cancel step must name an injectable command. No command, and no opaque command test that might hide
+  one, is proven `NotPlayerScriptable` ("no supported player entry").
+* A command that is not readable from the CMD, an AILevel inside an OR / expression the analyzer does not model, any other unmodelled
+  condition, a Link/Recovery step, or a non-neutral start make the step `EligibilityUnknown`. Unknown is never a rejection.
+
+StateType, Ctrl, power, contact, time and variables change between steps and are **not** treated as constants; they never produce a finding.
+
+A route is `NotPlayerScriptable` when any step is proven incompatible, `EligibilityUnknown` when none is but at least one step is unknown,
+and `PlayerScriptable` otherwise (a statement about the selected branches only, not a promise the move will fire).
+
+**UI.** The Combos lens lists player-scriptable and unknown routes as *playable candidate routes*. Proven not-scriptable routes are kept
+for inspection in a separate "Not player-scriptable" list (X-Ray keeps the AI-only branches themselves). Selecting any route shows its
+eligibility above Play; pressing Play on a not-scriptable route is refused before any engine launch, as a preflight-refused attempt (its
+own attempt id, no runtime verdict), with the exact reason, e.g.
+
+> Cannot script this candidate: Step 1 requires AILevel > 0 in the selected branch; player playback uses AILevel = 0. Step 3 also selects an AI-only branch.
+
+QA status prints `status.playerEligibility` and `status.eligibilityNotice`.
+
+**Fixture.** `XRayFixtures.AizenStyle` is a **synthetic** character reconstructed from a description of the Aizen diagnostic; the real
+character and its diagnostic file were not available, so it only reproduces the *shape* (AILevel-gated duplicates of player
+transitions). `XRayEligibilityTests` pins the reason text above against it.
+
+Not in this milestone: timing search, spacing search, optimisation, a general symbolic solver.

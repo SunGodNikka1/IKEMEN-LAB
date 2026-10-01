@@ -4,6 +4,7 @@ using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.Core.XRay.Combo;
 using IKEMENLab.Core.XRay.Model;
+using IKEMENLab.Core.XRay.Playback;
 using IKEMENLab.Core.XRay.Verify;
 
 namespace IKEMENLab.App.ViewModels;
@@ -29,6 +30,8 @@ public sealed class ComboLens : XRayLens
     private string _routeStatus = "Choose options and press Find routes.";
     private string _readiness = string.Empty;
     private IReadOnlyList<ComboRoute> _routes = [];
+    private readonly Dictionary<string, RouteEligibility> _eligibility = new(StringComparer.Ordinal);
+    private XRayRow? _selectedAiRoute;
     private VerificationReport? _report;
 
     public ComboLens(XRayViewModel owner) : base(owner)
@@ -57,7 +60,15 @@ public sealed class ComboLens : XRayLens
         SelectedStep = index >= 1 && index <= RouteSteps.Count ? RouteSteps[index - 1] : SelectedStep;
 
     public ObservableCollection<XRayRow> Edges { get; } = [];
+    /// <summary>The default Playable Combos view: routes that are player-scriptable or whose eligibility is unknown.</summary>
     public ObservableCollection<XRayRow> Routes { get; } = [];
+    /// <summary>Routes proven not player-scriptable (AI-only branches, no injectable command). Kept for inspection, never in the default view.</summary>
+    public ObservableCollection<XRayRow> AiOnlyRoutes { get; } = [];
+    public bool HasAiOnlyRoutes => AiOnlyRoutes.Count > 0;
+    public string AiOnlyHeader => $"Not player-scriptable ({AiOnlyRoutes.Count}) — kept for inspection";
+
+    /// <summary>Eligibility of a route found by the last search; null for an unknown key.</summary>
+    public RouteEligibility? EligibilityFor(string? routeKey) => routeKey is not null && _eligibility.TryGetValue(routeKey, out var e) ? e : null;
     public ObservableCollection<XRayRow> RouteSteps { get; } = [];
     public ICommand FindRoutesCommand { get; }
 
@@ -97,8 +108,20 @@ public sealed class ComboLens : XRayLens
         set
         {
             if (!SetProperty(ref _selectedRoute, value)) return;
+            if (value is not null && !AiOnlyRoutes.Contains(value)) SelectedAiRoute = null;
             ShowSteps(value is null ? null : _routes.FirstOrDefault(r => r.Key == value.Id));
             Playback.OnRouteChanged();
+        }
+    }
+
+    /// <summary>Selecting a not-player-scriptable route selects it like any other, so its steps and reason show; Play is refused with the exact reason.</summary>
+    public XRayRow? SelectedAiRoute
+    {
+        get => _selectedAiRoute;
+        set
+        {
+            if (!SetProperty(ref _selectedAiRoute, value) || value is null) return;
+            SelectedRoute = value;
         }
     }
 
@@ -232,21 +255,35 @@ public sealed class ComboLens : XRayLens
             _routes = result.Routes;
 
             Routes.Clear();
+            AiOnlyRoutes.Clear();
             RouteSteps.Clear();
+            _eligibility.Clear();
             foreach (var r in result.Routes)
             {
+                var eligibility = PlaybackEligibility.Classify(graph, r);
+                _eligibility[r.Key] = eligibility;
                 var names = new List<string> { r.StartState == CandidateGraph.NeutralId ? string.Empty : ShortName(r.StartState) };
                 names.AddRange(r.Steps.Select(s => ShortName(s.Move.StateId)));
-                Routes.Add(new XRayRow(r.Key, string.Join(" → ", names.Where(n => n.Length > 0)),
+                var tag = eligibility.Eligibility switch
+                {
+                    PlayerEligibility.NotPlayerScriptable => " · not player-scriptable",
+                    PlayerEligibility.EligibilityUnknown => " · player eligibility unknown",
+                    _ => " · player-scriptable"
+                };
+                var row = new XRayRow(r.Key, string.Join(" → ", names.Where(n => n.Length > 0)),
                     $"{r.DamageKnown:0.##}{(r.DamageComplete ? string.Empty : "+")} damage · {r.MeterSpent} meter · {r.UnmodelledCount} unmodelled" +
-                    (r.MinFrames is { } f ? $" · ≥ {f}f{(r.FramesComplete ? string.Empty : "?")}" : string.Empty),
-                    r.Confidence, tooltip: string.Join("\n", r.Notes)));
+                    (r.MinFrames is { } f ? $" · ≥ {f}f{(r.FramesComplete ? string.Empty : "?")}" : string.Empty) + tag,
+                    r.Confidence, tooltip: string.Join("\n", r.Notes.Append(eligibility.Reason ?? eligibility.UnknownNote ?? "Player-scriptable: no fixed-context condition rules it out.")));
+                (eligibility.IsNotPlayerScriptable ? AiOnlyRoutes : Routes).Add(row);
             }
 
+            OnPropertyChanged(nameof(HasAiOnlyRoutes));
+            OnPropertyChanged(nameof(AiOnlyHeader));
             RouteStatus = result.Routes.Count == 0
                 ? "No candidate routes under these options. " + string.Join(" ", result.Warnings.Where(w => !w.StartsWith("Routes are candidates", StringComparison.Ordinal)))
-                : $"{result.Routes.Count} candidate route(s), best first · {result.Expansions:N0} expansions{(result.Truncated ? " (search capped)" : string.Empty)} · candidates, not verified combos";
-            SelectedRoute = Routes.FirstOrDefault();
+                : $"{Routes.Count} playable candidate route(s), best first" + (AiOnlyRoutes.Count > 0 ? $" · {AiOnlyRoutes.Count} not player-scriptable (listed separately)" : string.Empty) +
+                  $" · {result.Expansions:N0} expansions{(result.Truncated ? " (search capped)" : string.Empty)} · candidates, not verified combos";
+            SelectedRoute = Routes.FirstOrDefault() ?? AiOnlyRoutes.FirstOrDefault();
         }
         finally
         {
@@ -262,6 +299,7 @@ public sealed class ComboLens : XRayLens
         RouteSteps.Clear();
         if (route is null) return;
         var verdicts = _report is { } rep && rep.RouteKey == route.Key ? rep.Steps : null;
+        var eligibility = EligibilityFor(route.Key);
         foreach (var (s, i) in route.Steps.Select((s, i) => (s, i)))
         {
             var mark = verdicts is not null && i < verdicts.Count
@@ -269,7 +307,8 @@ public sealed class ComboLens : XRayLens
                 : string.Empty;
             var seen = verdicts is not null && i < verdicts.Count && verdicts[i].Detail is { Length: > 0 } d ? " — " + d : string.Empty;
             RouteSteps.Add(new XRayRow(s.Move.StateId, $"{mark}{KindText(s.Edge.Kind)} → {s.Move.Name}" + (s.Damage is { } dmg ? $"  ({dmg:0.##} dmg)" : string.Empty),
-                Describe(s.Edge) + (s.Move.PowerCost > 0 ? $" · costs {s.Move.PowerCost:0}" : string.Empty) + seen, s.Edge.Confidence, tooltip: Tooltip(s.Edge)));
+                Describe(s.Edge) + (s.Move.PowerCost > 0 ? $" · costs {s.Move.PowerCost:0}" : string.Empty) +
+                (eligibility?.Steps.ElementAtOrDefault(i)?.FirstProven is { } proven ? " · player: " + proven.Short : string.Empty) + seen, s.Edge.Confidence, tooltip: Tooltip(s.Edge)));
         }
 
         foreach (var note in route.Notes.Take(4))

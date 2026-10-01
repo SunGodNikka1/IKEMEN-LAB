@@ -468,12 +468,20 @@
                             </WrapPanel>
                             <DockPanel Grid.Row="2">
                                 <TextBlock DockPanel.Dock="Top" Text="{Binding Combos.RouteStatus}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4" Foreground="{DynamicResource TextTertiary}"/>
+                                <Expander DockPanel.Dock="Bottom" Margin="0,4,0,0" Header="{Binding Combos.AiOnlyHeader}" Foreground="{DynamicResource TextSecondary}"
+                                          Visibility="{Binding Combos.HasAiOnlyRoutes, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Not player-scriptable routes">
+                                    <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}" MaxHeight="140"
+                                             ItemsSource="{Binding Combos.AiOnlyRoutes}" SelectedItem="{Binding Combos.SelectedAiRoute, Mode=TwoWay}"
+                                             ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Not player-scriptable candidate routes"/>
+                                </Expander>
                                 <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
                                          ItemsSource="{Binding Combos.Routes}" SelectedItem="{Binding Combos.SelectedRoute, Mode=TwoWay}"
-                                         ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Candidate routes"/>
+                                         ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Playable candidate routes"/>
                             </DockPanel>
                             <!-- Milestone 4: play the selected candidate route in a disposable IKEMEN match and bring the verdict back here -->
                             <StackPanel Grid.Row="3" Margin="0,8,0,0" x:Name="PlaybackBar">
+                                <TextBlock Text="{Binding Combos.Playback.EligibilityNotice}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="{DynamicResource TextSecondary}"
+                                           Visibility="{Binding Combos.Playback.HasEligibilityNotice, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Player playback eligibility"/>
                                 <WrapPanel>
                                     <Button Content="▶ Play Combo" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.PlayCommand}"
                                             AutomationProperties.Name="Play the selected combo in IKEMEN" ToolTip="Plays the selected candidate route in a disposable sandbox match and reports Verified, Failed or Inconclusive."/>

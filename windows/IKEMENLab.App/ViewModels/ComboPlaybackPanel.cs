@@ -113,6 +113,10 @@ public sealed class ComboPlaybackPanel : ObservableObject
     public bool IsBusy => _session.IsBusy;
     public bool HasResult => _session.HasResultFor(SelectedKey);
     public bool CanInspect => _session.CanInspectFor(SelectedKey);
+    /// <summary>Player playback eligibility of the selected route, shown before Play: the exact reason when it cannot be scripted, a note when unknown, empty when scriptable.</summary>
+    public string EligibilityNotice => _lens.EligibilityFor(SelectedKey) is { } e ? e.Reason ?? e.UnknownNote ?? string.Empty : string.Empty;
+    public string EligibilityClass => _lens.EligibilityFor(SelectedKey)?.Eligibility.ToString() ?? string.Empty;
+    public bool HasEligibilityNotice => EligibilityNotice.Length > 0;
     public bool HasStatus => Headline.Length > 0;
     public string Headline => _session.HeadlineFor(SelectedKey);
 
@@ -164,7 +168,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
 
     private void RaiseScoped()
     {
-        foreach (var name in new[] { nameof(IsBusy), nameof(HasResult), nameof(CanInspect), nameof(HasStatus), nameof(Headline), nameof(ResultKind), nameof(ResultGlyph), nameof(ShowFailure) })
+        foreach (var name in new[] { nameof(IsBusy), nameof(HasResult), nameof(CanInspect), nameof(HasStatus), nameof(Headline), nameof(EligibilityNotice), nameof(HasEligibilityNotice), nameof(ResultKind), nameof(ResultGlyph), nameof(ShowFailure) })
             OnPropertyChanged(name);
     }
 
@@ -176,6 +180,14 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private async Task PlayAsync()
     {
         if (_lens.CurrentRoute is not { } current || _lens.Graph is not { } graph) return;
+        // Proven incompatibility with player playback is reported before anything is launched, with the exact reason. It is a refused
+        // attempt (no engine, no verdict), never a runtime Inconclusive.
+        if (_lens.EligibilityFor(current.Route.Key) is { IsNotPlayerScriptable: true } blocked)
+        {
+            _session.RefuseAttempt(current.Route.Key, blocked.Reason!, null);
+            return;
+        }
+
         var setup = RefreshSetup(showIssuesAsSetup: true);
         if (setup is null || !setup.Ready)
         {
