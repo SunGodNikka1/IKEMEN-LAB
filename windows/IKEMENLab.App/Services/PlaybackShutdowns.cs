@@ -44,6 +44,26 @@ public static class PlaybackShutdowns
 public sealed record ExitReport(int Unfinished, IReadOnlyList<string> Problems)
 {
     public bool Complete => Unfinished == 0;
-    public string? Message => Complete ? null
-        : $"{Unfinished} combo playback cleanup(s) had not finished when IKEMEN Lab exited; an engine process or a sandbox folder (under runtime-sandboxes, safe to delete) may remain.";
+
+    /// <summary>
+    /// Summarises the two independent things the exit wait can observe. A finished shutdown is not automatically a clean
+    /// one: cleanup can complete and still report a problem (a sandbox that would not delete, for example), and App.OnExit
+    /// shows only this string, so dropping Problems here would swallow a real warning.
+    /// </summary>
+    public string? Message
+    {
+        get
+        {
+            if (Unfinished == 0 && Problems.Count == 0) return null;
+            var parts = new List<string>();
+            if (Unfinished > 0)
+                parts.Add($"{Unfinished} combo playback cleanup(s) had not finished when IKEMEN Lab exited; " +
+                          "an engine process or a sandbox folder (under runtime-sandboxes, safe to delete) may remain.");
+            if (Problems.Count > 0)
+                parts.Add(Problems.Count == 1
+                    ? "A cleanup problem was reported: " + Problems[0]
+                    : $"{Problems.Count} cleanup problems were reported: " + string.Join("; ", Problems));
+            return string.Join(" ", parts);
+        }
+    }
 }
