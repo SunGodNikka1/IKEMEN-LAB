@@ -76,7 +76,7 @@ internal static class VerifyCommands
         var seconds = int.TryParse(opts.Get("timeout"), out var t) && t > 0 ? t : 120;
         var request = new VerifyRunRequest(
             new SandboxRequest(located.Root, subjectFolder, located.Entry.DefPath["chars/".Length..], dummy, dummyLoc.Entry.DefPath["chars/".Length..], stage,
-                frames, opts.Get("out"), AdapterPath: adapter),
+                frames, opts.Get("out"), AdapterPath: adapter, EngineExePath: opts.Get("engine"), EngineRuntimeDlls: opts.Get("engine-dlls")),
             TimeSpan.FromSeconds(seconds), opts.Flag("keep"));
         try
         {

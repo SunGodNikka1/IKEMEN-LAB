@@ -25,7 +25,11 @@ public sealed record SandboxRequest(
     /// <summary>Milestone 3: play this input plan (verify mode). Null = observe only, both sides on the engine's own AI.</summary>
     Verify.InputPlan? Plan = null,
     /// <summary>Verify mode: an engine adapter (Lua) that defines __ikemenlab_xray_inject. Null installs the template, which injects nothing.</summary>
-    string? AdapterPath = null);
+    string? AdapterPath = null,
+    /// <summary>Use this engine binary in the sandbox instead of the one in the install (X-Ray sandbox build).</summary>
+    string? EngineExePath = null,
+    /// <summary>Directory of runtime DLLs the sandbox engine needs; copied next to it (a self-built Go engine).</summary>
+    string? EngineRuntimeDlls = null);
 
 public static class RuntimeProbe
 {
@@ -84,6 +88,35 @@ public sealed class RuntimeSandbox : IDisposable
                 var ext = Path.GetExtension(file);
                 if (ext.Equals(".log", StringComparison.OrdinalIgnoreCase) || ext.Equals(".bak", StringComparison.OrdinalIgnoreCase)) continue;
                 File.Copy(file, Path.Combine(root, Path.GetFileName(file)), overwrite: true);
+            }
+
+            // A caller may run the sandbox on a different engine binary — the X-Ray verifier does, because it
+            // needs the virtual-input override, which only the sandbox build carries. The production install is
+            // never written to: only the copy inside this disposable sandbox is replaced, and the substitution
+            // is recorded in the notes so a report can never mistake the two apart.
+            if (request.EngineExePath is { } engine && File.Exists(engine))
+            {
+                // Overwrite the sandbox's own copy under the name the sandbox actually launches. Only this
+                // disposable copy changes; the production install is never written to.
+                var sandboxExe = Path.Combine(root, Services.IkemenInstallationValidator.ExeFileName);
+                File.Copy(engine, sandboxExe, overwrite: true);
+
+                // A self-built engine links against its own toolchain's SDL/FFmpeg DLLs, which the install does
+                // not ship. Without them it exits with STATUS_DLL_NOT_FOUND before anything is traced.
+                if (request.EngineRuntimeDlls is { } dllDir && Directory.Exists(dllDir))
+                {
+                    var dlls = 0;
+                    foreach (var dll in Directory.EnumerateFiles(dllDir, "*.dll"))
+                    {
+                        File.Copy(dll, Path.Combine(root, Path.GetFileName(dll)), overwrite: true);
+                        dlls++;
+                    }
+                    notes.Add($"Copied {dlls} engine runtime DLL(s) from {dllDir} into the sandbox.");
+                }
+
+                notes.Add($"Engine binary overridden for this sandbox: {Path.GetFileName(engine)} " +
+                          $"(sha256 {Sha256(engine)}) replacing the install's copy of {Path.GetFileName(sandboxExe)}. " +
+                          "The production install is untouched and is NOT the binary that ran.");
             }
 
             foreach (var dir in CopiedDirectories)
@@ -175,6 +208,13 @@ public sealed class RuntimeSandbox : IDisposable
 
     /// <summary>Why the last <see cref="Delete"/> failed, for the CLI to print. Null when it did not fail.</summary>
     public static string? LastFailure { get; private set; }
+
+    private static string Sha256(string path)
+    {
+        using var sha = System.Security.Cryptography.SHA256.Create();
+        using var fs = File.OpenRead(path);
+        return Convert.ToHexString(sha.ComputeHash(fs));
+    }
 
     // ------------------------------------------------------------------ pieces
 

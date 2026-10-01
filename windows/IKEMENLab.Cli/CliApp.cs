@@ -37,7 +37,7 @@ public static class CliApp
           runtime-report  <character> --trace <file.jsonl>   parses a trace and links its states to the static index
           verify-plan     <character> [combo options] [--route N] [--approach N]   the input plan (JSON) for one candidate route
           verify-trace    <character> [combo options] [--route N] --trace <file.jsonl>   judges a recorded trace against that route
-          runtime-verify  <character> --root R --dummy <folder> --stage <stages/x.def> [--route N] [--adapter <lua>] [--timeout S] [--keep]
+          runtime-verify  <character> --root R --dummy <folder> --stage <stages/x.def> [--route N] [--adapter <lua>] [--engine <exe>] [--timeout S] [--keep]
                        plays the route in a disposable match and reports Verified / Failed / Inconclusive (needs an input adapter for the engine build)
           rank-subjects   --root R [--limit N]      ranks the installed characters as runtime-verification subjects
           runtime-clean   <sandbox dir>            deletes a sandbox (only folders carrying the sandbox marker)
