@@ -64,3 +64,12 @@ a detached window never realises its content tree. Close/notification tests asse
 
 Timing-window search, conditional routes, infinites, recording video, choosing P2 behaviour, playing a route that starts from a
 state (neutral-start routes only), and the non-default `inputRemap` case.
+
+## Notification delivery vs close (diagnosis note)
+
+`PlaybackSession` guarantees: **once `ShutdownAsync` has taken effect, no listener callback is running and none will start; queued ones are dropped (counted).**
+Delivery (`closed` check + `Changed` invoke) and the close (`closed = true`) both run under one delivery lock (order: delivery → gate), so a callback that passed its
+closed check can no longer invoke the listener after the close. In the application both run on the UI thread, which already serialised them; the lock makes the
+guarantee hold for a close issued from another thread too (a QA verb, a test). A counter that moves after `IsClosed` was read as true therefore indicates a
+sampling-order problem in the observer (counters read from a different instance, or a baseline taken before the close actually ran), not a delivery after the close.
+Regressions: an in-flight delivery blocks the close until it finishes; a 300-round contention test asserts no listener ever observes `IsClosed`.

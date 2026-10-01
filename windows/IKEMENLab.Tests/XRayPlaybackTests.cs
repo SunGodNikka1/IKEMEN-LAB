@@ -787,4 +787,61 @@ public class XRayPlaybackSessionTests : IDisposable
     }
 
     private string Temp2() { var d = Path.Combine(Path.GetTempPath(), "xray-ps2-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(d); _cleanup.Add(d); return d; }
+
+    [Fact]
+    public void ACallbackThatPassedTheClosedCheckCannotRunItsListenerAfterTheCloseTakesEffect()
+    {
+        // Deterministic interleaving: the listener is mid-delivery (past the closed check) when another thread closes the session.
+        var queue = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        var (_, request, _) = Arrange();
+        var session = new PlaybackSession(new ComboPlaybackService(new GateRunner(), Temp2(), Temp2()), queue.Enqueue);
+        using var inListener = new ManualResetEventSlim();
+        using var letListenerFinish = new ManualResetEventSlim();
+        var finishedBeforeClose = false;
+        session.Changed += () => { inListener.Set(); letListenerFinish.Wait(TimeSpan.FromSeconds(10)); finishedBeforeClose = !session.IsClosed; };
+
+        _ = session.PlayAsync(request);                       // queues "play requested" (the runner is never reached: we never drain the rest)
+        Assert.True(SpinWait.SpinUntil(() => !queue.IsEmpty, 5000));
+        queue.TryDequeue(out var first);
+        var ui = Task.Run(first!);                            // "UI thread" delivering: now inside the listener
+        Assert.True(inListener.Wait(TimeSpan.FromSeconds(10)));
+
+        var closing = Task.Run(() => session.ShutdownAsync(TimeSpan.FromSeconds(5)).GetAwaiter().GetResult());
+        Assert.False(SpinWait.SpinUntil(() => session.IsClosed, 300));   // the close waits for the in-flight delivery ...
+        letListenerFinish.Set();
+        ui.Wait(TimeSpan.FromSeconds(10));
+        closing.Wait(TimeSpan.FromSeconds(10));
+        Assert.True(finishedBeforeClose);                                 // ... which therefore finished against an open session
+        Assert.True(session.IsClosed);
+
+        var deliveredAtClose = session.DeliveredNotifications;
+        while (queue.TryDequeue(out var late)) late();                    // everything queued afterwards is dropped
+        Assert.Equal(deliveredAtClose, session.DeliveredNotifications);
+        Assert.True(session.DroppedNotifications > 0);
+    }
+
+    [Fact]
+    public void UnderContentionNoListenerRunsOnceClosedHasBeenObserved()
+    {
+        var (_, baseRequest, _) = Arrange();
+        var notReady = baseRequest with { Setup = PlaybackPreflight.Check(baseRequest.Root, "ComboGuy", new AppSettings()) };   // each PlayAsync raises notifications and fails fast
+        var exercised = 0;
+        for (var round = 0; round < 300; round++)
+        {
+            var queue = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+            var session = new PlaybackSession(new ComboPlaybackService(new GateRunner(), Temp2(), Temp2()), queue.Enqueue);
+            var lateDelivery = false;
+            session.Changed += () => { if (session.IsClosed) lateDelivery = true; };
+            var raiser = Task.Run(async () => { for (var i = 0; i < 20; i++) await session.PlayAsync(notReady); });
+            var drain = Task.Run(() => { for (var i = 0; i < 2000; i++) if (queue.TryDequeue(out var a)) a(); });
+            var close = Task.Run(() => session.ShutdownAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult());
+            Task.WaitAll(raiser, drain, close);
+            var before = session.DeliveredNotifications;
+            while (queue.TryDequeue(out var a)) a();
+            Assert.False(lateDelivery, "A listener ran after the session was observed closed.");
+            exercised += session.DeliveredNotifications + session.DroppedNotifications;
+            Assert.Equal(before, session.DeliveredNotifications);
+        }
+        Assert.True(exercised > 0, "The contention test never produced a notification, so it proved nothing.");
+    }
 }

@@ -17,6 +17,8 @@ public sealed class PlaybackSession
 {
     private readonly ComboPlaybackService _service;
     private readonly object _gate = new();
+    /// <summary>Held while a notification is delivered to listeners and while the session closes (lock order: delivery, then gate). Makes "closed" and "a listener is running" mutually exclusive.</summary>
+    private readonly object _delivery = new();
     private readonly Action<Action> _post;
     private PlaybackCancellation? _cancel;
     private Task _run = Task.CompletedTask;
@@ -153,6 +155,9 @@ public sealed class PlaybackSession
     /// </summary>
     public Task<ShutdownResult> ShutdownAsync(TimeSpan timeout)
     {
+        // Taking the delivery lock first means: when this returns, no listener callback is in flight and none can start. A callback that already
+        // passed its closed check on another thread completes before the close takes effect, instead of running against a closed view afterwards.
+        lock (_delivery)
         lock (_gate)
         {
             if (_shutdown is not null) return _shutdown;
@@ -182,9 +187,13 @@ public sealed class PlaybackSession
         if (_closed) return;
         _post(() =>
         {
-            if (_closed) { Interlocked.Increment(ref _dropped); return; }
-            Interlocked.Increment(ref _delivered);
-            Changed?.Invoke();
+            // The closed check and the delivery are one step under the delivery lock; ShutdownAsync takes the same lock to close.
+            lock (_delivery)
+            {
+                if (_closed) { Interlocked.Increment(ref _dropped); return; }
+                Interlocked.Increment(ref _delivered);
+                Changed?.Invoke();
+            }
         });
     }
 
