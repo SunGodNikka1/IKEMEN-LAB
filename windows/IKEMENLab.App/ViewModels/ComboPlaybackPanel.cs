@@ -36,8 +36,10 @@ public sealed class ComboPlaybackPanel : ObservableObject
     {
         _owner = owner;
         _lens = lens;
-        _session = new PlaybackSession(owner.PlaybackService);
-        _session.Changed += () => _ui.Invoke(OnSessionChanged);
+        // Notifications are posted to the UI thread, never invoked synchronously: the UI thread may be waiting on this worker (closing),
+        // and a worker that blocks on the UI thread would deadlock it. A post queued before a close is dropped when it runs.
+        _session = new PlaybackSession(owner.PlaybackService, a => _ui.Post(a));
+        _session.Changed += OnSessionChanged;
 
         var saved = SafeLoad();
         _enginePath = saved.XRayEnginePath ?? string.Empty;
@@ -126,8 +128,8 @@ public sealed class ComboPlaybackPanel : ObservableObject
             OnPropertyChanged(name);
     }
 
-    /// <summary>The window is closing: cancel the run, kill its engine, let the sandbox clean up, and stop reacting to the session.</summary>
-    public void Shutdown() => _session.Shutdown(TimeSpan.FromSeconds(6));
+    /// <summary>The window is closing: cancel the run, kill its engine, let the sandbox clean up, and stop reacting to the session. Returns at once; the task completes when cleanup has.</summary>
+    public Task<ShutdownResult> ShutdownAsync() => _session.ShutdownAsync(TimeSpan.FromSeconds(20));
 
     // ------------------------------------------------------------------ actions
 

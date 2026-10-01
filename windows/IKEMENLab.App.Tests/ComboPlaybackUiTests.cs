@@ -338,15 +338,18 @@ public class ComboPlaybackUiTests : IDisposable
     }
 
     [Fact]
-    public void ClosingTheWindowDuringLivePlaybackStopsTheEngineAndCleansUp() => WpfHost.Run(() =>
+    public void ClosingTheWindowDuringLivePlaybackStopsTheEngineAndCleansUpWithoutBlocking() => WpfHost.Run(() =>
     {
         var (vm, window, runner, store, sandboxes) = WindowWithLivePlayback();
         vm.Combos.Playback.PlayCommand.Execute(null);
         Assert.True(WpfHost.PumpUntil(() => runner.Entered.IsSet), "The engine never started.");
 
-        window.Close();                                            // Closed → XRayViewModel.Close → cancels, kills, cleans up (bounded wait)
-        WpfHost.Pump();
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        window.Close();                                            // Closed → XRayViewModel.Close: starts cleanup and returns; it never waits for the worker
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Closing the window stalled the UI thread for {sw.Elapsed.TotalSeconds:0.0} s.");
 
+        Assert.True(WpfHost.PumpUntil(() => vm.ShutdownTask.IsCompleted), "The playback cleanup never completed.");
+        Assert.True(vm.ShutdownTask.Result.Clean, vm.ShutdownTask.Result.Problem);
         Assert.False(Directory.Exists(runner.SandboxRoot), "The sandbox survived the window closing.");
         Assert.Empty(Directory.EnumerateDirectories(store));       // a cancelled playback saves no record
         Assert.Empty(Directory.EnumerateDirectories(sandboxes));
@@ -356,16 +359,23 @@ public class ComboPlaybackUiTests : IDisposable
     });
 
     [Fact]
-    public void ClosingTheWindowRightAfterPressingPlayLeavesNothingWhetherItWasPreparingOrRunning() => WpfHost.Run(() =>
+    public void ClosingWhileWorkerNotificationsAreStillPendingNeitherDeadlocksNorUpdatesTheClosedView() => WpfHost.Run(() =>
     {
-        // Close immediately: depending on timing the run is still copying the sandbox (preparation) or already in the engine.
-        // Both must end the same way — no engine left running, no sandbox, no record.
+        // Press Play and close WITHOUT pumping: the worker's phase notifications are queued on this dispatcher, unprocessed, when the window closes.
+        // The old design had the worker invoke the UI thread synchronously while the UI thread waited for the worker (up to the 6 s timeout).
         var (vm, window, runner, store, sandboxes) = WindowWithLivePlayback();
         vm.Combos.Playback.PlayCommand.Execute(null);
-        window.Close();
-        WpfHost.Pump();
 
-        Assert.Empty(Directory.EnumerateDirectories(store));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        window.Close();
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Closing stalled the UI thread for {sw.Elapsed.TotalSeconds:0.0} s.");
+
+        var before = vm.Combos.Playback.Headline;
+        Assert.True(WpfHost.PumpUntil(() => vm.ShutdownTask.IsCompleted), "The playback cleanup never completed (a worker waiting on the UI thread?).");
+        WpfHost.Pump();                                            // the queued notifications run now — after the close
+        Assert.True(vm.ShutdownTask.Result.Clean, vm.ShutdownTask.Result.Problem);
+        Assert.Equal(before, vm.Combos.Playback.Headline);         // none of them mutated the closed view model
+        Assert.Empty(Directory.EnumerateDirectories(store));       // pre-commit close: no record
         Assert.Empty(Directory.EnumerateDirectories(sandboxes));
         if (runner.Started) Assert.False(Directory.Exists(runner.SandboxRoot));
     });

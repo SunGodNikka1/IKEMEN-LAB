@@ -252,13 +252,15 @@ end
 -- Linger (watched playback). With cfg.lingerFrames unset the old behaviour stands: ask the engine to leave the match at once.
 -- With it set, the match is HELD running for that many ticks after the plan ends (no input is fed: the held keys were released),
 -- and only then is esc requested, so the final position stays on screen. Both ends are recorded as driver events with the engine tick
--- (when readable) and os.clock(), so an acceptance run can check from the trace how long the match really kept running.
+-- (when readable) and the probe tick count. These are EXECUTION evidence only (how many ticks the match advanced). They say nothing about
+-- how long a person saw the screen: os.clock() is CPU time, not elapsed time, and is deliberately not recorded. Measure that on the
+-- machine with a wall clock. During the hold the match keeps advancing with no input; it is not frozen on the final pose.
 local lingerLeft = nil
 local lingerTotal = 0
 
 local function lingerStamp()
 	local t = call("tickcount") or call("gametick") or call("gametime")
-	return string.format("engineTick=%s clock=%.2f", t ~= nil and tostring(t) or "nil", os and os.clock and os.clock() or 0)
+	return string.format("probeTick=%d engineTick=%s", tick, t ~= nil and tostring(t) or "nil")
 end
 
 local function leaveMatch()

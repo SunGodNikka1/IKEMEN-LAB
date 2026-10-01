@@ -67,6 +67,8 @@ public sealed record VerifyRunRequest(
     /// <summary>Called with the plan and the raw trace after the engine exits and before the sandbox is deleted.</summary>
     public Action<VerifyArtifacts>? Collect { get; init; }
     public CancellationToken Cancel { get; init; }
+    /// <summary>Called (path, reason) when the sandbox could not be deleted after the run.</summary>
+    public Action<string, string?>? CleanupFailed { get; init; }
 }
 
 public sealed record VerifyRunResult(VerificationReport Report, string? SandboxPath, string? TracePath, EngineRunResult Engine)
@@ -117,7 +119,11 @@ public static class VerifyRunner
         }
         finally
         {
-            if (!keep) sandbox.Dispose();
+            if (!keep)
+            {
+                var root = sandbox.Root;
+                if (!RuntimeSandbox.Delete(root)) request.CleanupFailed?.Invoke(root, RuntimeSandbox.LastFailure);
+            }
         }
     }
 }

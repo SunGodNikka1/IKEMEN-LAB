@@ -52,6 +52,23 @@ public sealed class ComboPlaybackService
     /// <summary>Plays the route and returns the saved outcome. Throws InvalidOperationException (route cannot be scripted / setup incomplete) or OperationCanceledException.</summary>
     public PlaybackOutcome Play(PlaybackRequest request, Action<string>? progress = null, CancellationToken cancel = default)
     {
+        using var gate = new PlaybackCancellation(cancel);
+        return Play(request, progress, gate);
+    }
+
+    /// <summary>Test seam: called with "before-commit" (after the last pre-commit check, before the atomic commit) and "after-commit". Null in production.</summary>
+    public Action<string>? CommitSeam { get; init; }
+
+    /// <summary>Raised when a sandbox could not be deleted (path, reason). The folder carries the sandbox marker and is safe to delete by hand.</summary>
+    public event Action<string, string?>? CleanupFailed;
+
+    /// <summary>
+    /// Plays the route. Cancellation and result commit share one atomic decision (<see cref="PlaybackCancellation"/>): either the cancel is
+    /// accepted first and nothing is published, or the commit wins and the record survives a later cancel.
+    /// </summary>
+    public PlaybackOutcome Play(PlaybackRequest request, Action<string>? progress, PlaybackCancellation gate)
+    {
+        var cancel = gate.Token;
         var setup = request.Setup;
         if (!setup.Ready) throw new InvalidOperationException("Playback is not set up: " + string.Join(" ", setup.Issues));
 
@@ -67,6 +84,7 @@ public sealed class ComboPlaybackService
         {
             Progress = progress,
             Cancel = cancel,
+            CleanupFailed = (path, why) => CleanupFailed?.Invoke(path, why),
             Collect = a =>
             {
                 File.WriteAllText(Path.Combine(dir, "plan.json"), InputPlanner.ToJson(a.Plan), new UTF8Encoding(false));
@@ -74,10 +92,11 @@ public sealed class ComboPlaybackService
             }
         };
 
-        // Everything up to and including meta.json is the uncommitted part: a cancel (or any failure) until then deletes the folder and
-        // yields no result. Writing meta.json is the commit; a cancel after it no longer takes the result back.
+        // Everything before the commit is uncommitted: a cancel (or any failure) deletes the folder and yields no result. The commit is one
+        // atomic transition shared with Cancel(): meta.json (what makes a record visible) only appears inside it.
         VerifyRunResult result;
         PlaybackRecord record;
+        var tmp = Path.Combine(dir, "meta.json.tmp");
         try
         {
             result = VerifyRunner.Run(request.Graph, request.Route, run, _runner, planOptions);
@@ -86,15 +105,18 @@ public sealed class ComboPlaybackService
             File.WriteAllText(Path.Combine(dir, "report.json"), RouteVerifier.ToJson(report0), new UTF8Encoding(false));
             record = new PlaybackRecord(id, started, report0.Character, report0.RouteKey, request.RouteSummary, report0.Status.ToString(), report0.Reason, report0.FailedStep,
                 setup.Dummy, setup.Stage, report0.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir);
-            cancel.ThrowIfCancellationRequested();
-            File.WriteAllText(Path.Combine(dir, "meta.json"), MetaJson(record), new UTF8Encoding(false));
+            File.WriteAllText(tmp, MetaJson(record), new UTF8Encoding(false));
+            CommitSeam?.Invoke("before-commit");
+            if (!gate.TryCommit(() => File.Move(tmp, Path.Combine(dir, "meta.json"))))
+                throw new OperationCanceledException(cancel);
         }
         catch
         {
-            TryDelete(dir);   // cancelled, refused or crashed: no half-written record is left behind
+            TryDelete(dir);   // cancelled, refused or crashed before the commit: no half-written record is left behind
             throw;
         }
 
+        CommitSeam?.Invoke("after-commit");
         var report = result.Report;
         Prune();
 

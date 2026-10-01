@@ -77,8 +77,25 @@ public sealed class XRayViewModel : ObservableObject
     public CharacterEntry Entry => _entry;
     public ISettingsStore Settings { get; }
 
-    /// <summary>Called when the window closes: cancels any playback, kills its engine and removes the sandbox.</summary>
-    public void Close() => Combos.Playback.Shutdown();
+    /// <summary>The cleanup started by <see cref="Close"/> (completed when there was nothing to stop).</summary>
+    public Task<ShutdownResult> ShutdownTask { get; private set; } = Task.FromResult(new ShutdownResult(true, null, []));
+
+    /// <summary>
+    /// Called when the window closes. Never blocks: it cancels any playback (engine killed, sandbox deleted, no record unless the result was already
+    /// committed) on the worker's own time. If that cleanup times out, fails, or leaves a sandbox behind, the user is told once the cleanup ends.
+    /// </summary>
+    public void Close()
+    {
+        var ui = new UiDispatcher();
+        var task = Combos.Playback.ShutdownAsync();
+        ShutdownTask = task;
+        PlaybackShutdowns.Track(task);
+        _ = task.ContinueWith(t =>
+        {
+            var problem = t.IsFaulted ? t.Exception!.GetBaseException().Message : t.Result.Clean ? null : string.Join(" ", new[] { t.Result.Problem }.Concat(t.Result.LeftoverSandboxes.Select(l => $"Sandbox left behind (safe to delete): {l}")).Where(x => !string.IsNullOrEmpty(x)));
+            if (problem is not null) ui.Post(() => UserDialogs.Warn("Closing X-Ray left a playback unfinished. " + problem, "Combo playback"));
+        }, TaskScheduler.Default);
+    }
     public ComboPlaybackService PlaybackService { get; }
     public XRayLensKind ActiveLens { get => _activeLens; set => SetProperty(ref _activeLens, value); }
     public string Legend => ConfidenceStyle.Legend;

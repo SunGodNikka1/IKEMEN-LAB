@@ -2,22 +2,40 @@ using IKEMENLab.Core.XRay.Verify;
 
 namespace IKEMENLab.Core.XRay.Playback;
 
+/// <summary>How closing the owner went. <see cref="Clean"/> is false when the run did not stop in time or a sandbox could not be deleted.</summary>
+public sealed record ShutdownResult(bool Clean, string? Problem, IReadOnlyList<string> LeftoverSandboxes);
+
 public enum PlaybackState { Idle, Preparing, Running, Judging, Finished, Cancelled, Error }
 
 /// <summary>
 /// The state machine behind the Combo Lens's Play button, kept out of the UI so it can be tested: one run at a time, a phase text for
 /// the status line, a Cancel that stops the engine, and the last request kept so Replay plays exactly the same route again.
-/// <see cref="Changed"/> may be raised on a background thread; the UI marshals it.
+/// <see cref="Changed"/> is delivered through the <c>post</c> scheduler the owner supplies (the UI passes an asynchronous dispatcher
+/// post), never by blocking the worker, and a notification still queued when the session closes is dropped when it finally runs.
 /// </summary>
 public sealed class PlaybackSession
 {
     private readonly ComboPlaybackService _service;
     private readonly object _gate = new();
-    private CancellationTokenSource? _cts;
+    private readonly Action<Action> _post;
+    private PlaybackCancellation? _cancel;
     private Task _run = Task.CompletedTask;
     private volatile bool _closed;
+    private readonly List<string> _leftovers = [];
+    private Task<ShutdownResult>? _shutdown;
 
-    public PlaybackSession(ComboPlaybackService service) => _service = service;
+    /// <param name="post">How a notification reaches its listener. It must not block waiting for the listener's thread (use a dispatcher BeginInvoke, not Invoke). Null = call inline.</param>
+    public PlaybackSession(ComboPlaybackService service, Action<Action>? post = null)
+    {
+        _service = service;
+        _post = post ?? (a => a());
+        _service.CleanupFailed += OnCleanupFailed;
+    }
+
+    private void OnCleanupFailed(string path, string? why)
+    {
+        lock (_gate) _leftovers.Add(why is null ? path : $"{path} ({why})");
+    }
 
     public event Action? Changed;
 
@@ -71,13 +89,13 @@ public sealed class PlaybackSession
     /// <summary>Plays the request. Never throws: failures become <see cref="PlaybackState.Error"/>, Cancel becomes <see cref="PlaybackState.Cancelled"/>.</summary>
     public async Task PlayAsync(PlaybackRequest request)
     {
-        CancellationToken token;
+        PlaybackCancellation gate;
         lock (_gate)
         {
             if (IsBusy || _closed) return;
-            _cts?.Dispose();
-            _cts = new CancellationTokenSource();
-            token = _cts.Token;
+            _cancel?.Dispose();
+            _cancel = new PlaybackCancellation();
+            gate = _cancel;
             Last = request;
             Outcome = null;
             Error = null;
@@ -88,7 +106,7 @@ public sealed class PlaybackSession
         Raise();
         try
         {
-            var run = Task.Run(() => _service.Play(request, OnPhase, token));
+            var run = Task.Run(() => _service.Play(request, OnPhase, gate));
             lock (_gate) _run = run;
             var outcome = await run.ConfigureAwait(false);
             // The service has already committed this result (it is on disk); a Cancel that arrived after that point does not undo it.
@@ -108,33 +126,56 @@ public sealed class PlaybackSession
 
     public Task ReplayAsync() => Last is { } r ? PlayAsync(r) : Task.CompletedTask;
 
-    public void Cancel()
+    /// <summary>Asks the run to stop. Returns false when it is too late (the result was already committed) or nothing is running; the UI then does not claim to be stopping.</summary>
+    public bool Cancel()
     {
-        lock (_gate) { if (IsBusy) { _cts?.Cancel(); Phase = "Stopping the engine…"; } }
-        Raise();
+        bool accepted;
+        lock (_gate)
+        {
+            accepted = IsBusy && _cancel is { } c && c.Cancel();
+            if (accepted) Phase = "Stopping the engine…";
+        }
+
+        if (accepted) Raise();
+        return accepted;
     }
 
     /// <summary>
-    /// The owner (the X-Ray window) is going away: stop any run, kill its engine, let the sandbox clean up, and never raise
-    /// <see cref="Changed"/> again so nothing touches a closed window. Waits (bounded) for the run to finish unwinding.
+    /// The owner (the X-Ray window) is going away. Never blocks the caller: it marks the session closed at once (queued notifications become
+    /// no-ops), cancels any run (the engine is killed, the sandbox deleted, no record committed unless the commit had already won) and returns a
+    /// task that completes when the run has unwound, or reports that it did not within <paramref name="timeout"/> — a timeout or a sandbox that
+    /// could not be deleted is returned, not swallowed.
     /// </summary>
-    public bool Shutdown(TimeSpan wait)
+    public Task<ShutdownResult> ShutdownAsync(TimeSpan timeout)
     {
-        Task run;
         lock (_gate)
         {
+            if (_shutdown is not null) return _shutdown;
             _closed = true;
-            _cts?.Cancel();
-            run = _run;
+            _cancel?.Cancel();
+            var run = _run;
+            _shutdown = WaitForRun(run, timeout);
+            return _shutdown;
         }
-
-        try { return run.Wait(wait); }
-        catch (AggregateException) { return true; }   // a cancelled or failed run has unwound; the exception is the point of Cancel
     }
 
+    private async Task<ShutdownResult> WaitForRun(Task run, TimeSpan timeout)
+    {
+        string? problem = null;
+        var done = await Task.WhenAny(run, Task.Delay(timeout)).ConfigureAwait(false);
+        if (done != run) problem = $"The playback did not stop within {timeout.TotalSeconds:0} s; its engine or sandbox may still be running.";
+        else if (run.IsFaulted && run.Exception!.GetBaseException() is not OperationCanceledException and { } ex) problem = "The playback ended with an error while closing: " + ex.Message;
+
+        string[] left;
+        lock (_gate) left = _leftovers.ToArray();
+        return new ShutdownResult(problem is null && left.Length == 0, problem, left);
+    }
+
+    /// <summary>Posts a notification without waiting for the listener. The closed check runs again when the post finally executes, so a notification queued before a close never reaches a closed view.</summary>
     private void Raise()
     {
-        if (!_closed) Changed?.Invoke();
+        if (_closed) return;
+        _post(() => { if (!_closed) Changed?.Invoke(); });
     }
 
     private void OnPhase(string phase)

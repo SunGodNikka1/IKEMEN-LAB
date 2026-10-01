@@ -18,6 +18,9 @@ public sealed class UiDispatcher
         else _dispatcher.Invoke(action);
     }
 
+    /// <summary>Queues the action on the UI thread and returns at once. Use this (not <see cref="Invoke"/>) from worker threads that the UI thread may be waiting on.</summary>
+    public void Post(Action action) => _dispatcher.BeginInvoke(action);
+
     public Task InvokeAsync(Action action)
         => _dispatcher.InvokeAsync(action).Task;
 }

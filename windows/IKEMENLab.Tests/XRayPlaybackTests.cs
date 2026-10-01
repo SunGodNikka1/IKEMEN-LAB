@@ -322,6 +322,89 @@ public class XRayPlaybackTests : IDisposable
         Assert.Empty(Directory.EnumerateDirectories(sbxBase));     // the half-built sandbox is gone
     }
 
+    // ------------------------------------------------------------------ atomic cancel / commit
+
+    private (ComboPlaybackService Service, PlaybackRequest Request, string Store, string Sbx) ArrangeWithSeam(Action<string> seam)
+    {
+        var (_, request, _) = Arrange("verified");
+        var runner = new FakeRunner(Trace("verified", request.Route));
+        var store = Temp("xray-store-");
+        var sbx = Temp("xray-sbx-");
+        return (new ComboPlaybackService(runner, store, sbx) { CommitSeam = seam }, request, store, sbx);
+    }
+
+    [Fact]
+    public void ACancelInTheWindowBetweenTheLastCheckAndTheCommitIsAcceptedAndNothingIsPublished()
+    {
+        using var gate = new PlaybackCancellation();
+        var accepted = false;
+        var (service, request, store, sbx) = ArrangeWithSeam(point =>
+        {
+            if (point == "before-commit") accepted = gate.Cancel();   // exactly the previously racy moment: all checks passed, commit not yet taken
+        });
+
+        Assert.Throws<OperationCanceledException>(() => service.Play(request, null, gate));
+        Assert.True(accepted);                                       // the canceller was told yes ...
+        Assert.Empty(service.List());                                // ... and there is no record (both cannot win)
+        Assert.Empty(Directory.EnumerateDirectories(store));
+        Assert.Empty(Directory.EnumerateDirectories(sbx));
+        Assert.True(gate.IsCancelled && !gate.IsCommitted);
+    }
+
+    [Fact]
+    public void ACancelRightAfterTheCommitIsRefusedAndTheRecordSurvives()
+    {
+        using var gate = new PlaybackCancellation();
+        bool? accepted = null;
+        var (service, request, _, _) = ArrangeWithSeam(point =>
+        {
+            if (point == "after-commit") accepted = gate.Cancel();
+        });
+
+        var outcome = service.Play(request, null, gate);
+        Assert.False(accepted);                                      // too late, and the canceller is told so
+        Assert.Single(service.List());
+        Assert.True(File.Exists(Path.Combine(outcome.Record.Directory, "meta.json")));
+        Assert.False(File.Exists(Path.Combine(outcome.Record.Directory, "meta.json.tmp")));
+        Assert.True(gate.IsCommitted && !gate.IsCancelled);
+    }
+
+    [Fact]
+    public void ARawTokenCancelInTheWindowIsRoutedThroughTheSameGate()
+    {
+        using var cts = new CancellationTokenSource();
+        var (service, request, store, _) = ArrangeWithSeam(point => { if (point == "before-commit") cts.Cancel(); });
+        Assert.Throws<OperationCanceledException>(() => service.Play(request, null, cts.Token));
+        Assert.Empty(Directory.EnumerateDirectories(store));
+    }
+
+    [Fact]
+    public void CancelAndCommitNeverBothSucceedUnderContention()
+    {
+        for (var i = 0; i < 3000; i++)
+        {
+            using var gate = new PlaybackCancellation();
+            var published = 0;
+            bool committed = false, cancelAccepted = false;
+            using var start = new ManualResetEventSlim();
+            var t1 = Task.Run(() => { start.Wait(); committed = gate.TryCommit(() => published++); });
+            var t2 = Task.Run(() => { start.Wait(); cancelAccepted = gate.Cancel(); });
+            start.Set();
+            Task.WaitAll(t1, t2);
+            Assert.NotEqual(committed, cancelAccepted);              // exactly one wins
+            Assert.Equal(committed ? 1 : 0, published);              // and the result is published only if the commit won
+        }
+    }
+
+    [Fact]
+    public void AFailingPublishLeavesTheRunPendingAndRethrows()
+    {
+        using var gate = new PlaybackCancellation();
+        Assert.Throws<IOException>(() => gate.TryCommit(() => throw new IOException("disk")));
+        Assert.False(gate.IsCommitted);
+        Assert.True(gate.Cancel());
+    }
+
     // ------------------------------------------------------------------ trace provenance, DLL convention, linger
 
     [Fact]
@@ -362,7 +445,8 @@ public class XRayPlaybackTests : IDisposable
         var start = outcome.Log.Events.OfType<DriverEvent>().Single(d => d.Kind == "linger_start");
         var end = outcome.Log.Events.OfType<DriverEvent>().Single(d => d.Kind == "linger_end");
         Assert.Equal(ComboPlaybackService.LingerFrames, end.Frame - start.Frame);   // acceptance compares this to what was seen on screen
-        Assert.Contains("clock=", start.Detail);
+        Assert.Contains("probeTick=", start.Detail);
+        Assert.DoesNotContain("clock", start.Detail!);                                 // os.clock() is CPU time, never evidence of what was seen
         Assert.DoesNotContain(outcome.Log.Frames, f => f.Frame > start.Frame);       // the hold is silent: no input, no new samples
     }
 
@@ -556,7 +640,7 @@ public class XRayPlaybackSessionTests : IDisposable
         var run = session.PlayAsync(request);
         Assert.True(waiting.Entered.Wait(TimeSpan.FromSeconds(10)));
 
-        Assert.True(session.Shutdown(TimeSpan.FromSeconds(10)));
+        Assert.True(session.ShutdownAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult().Clean);
         var afterShutdown = Volatile.Read(ref events);
         run.Wait(TimeSpan.FromSeconds(10));
 
@@ -572,9 +656,60 @@ public class XRayPlaybackSessionTests : IDisposable
     public async Task ASessionThatIsShutDownIgnoresFurtherPlays()
     {
         var (session, request, runner) = Arrange();
-        Assert.True(session.Shutdown(TimeSpan.FromSeconds(1)));
+        Assert.True(session.ShutdownAsync(TimeSpan.FromSeconds(1)).GetAwaiter().GetResult().Clean);
         await session.PlayAsync(request);
         Assert.Equal(0, runner.Runs);
         Assert.Equal(PlaybackState.Idle, session.State);
+    }
+
+    [Fact]
+    public void ClosingNeverWaitsOnAPendingNotificationAndTheQueuedNotificationIsDroppedWhenItRuns()
+    {
+        var waiting = new WaitingRunner();
+        var queue = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        var (_, request, _) = Arrange(custom: () => waiting);
+        var service = new ComboPlaybackService(waiting, _store, _sbx);
+        var session = new PlaybackSession(service, queue.Enqueue);    // the "UI thread" does not drain the queue until the test says so
+        var delivered = 0;
+        session.Changed += () => Interlocked.Increment(ref delivered);
+
+        var run = session.PlayAsync(request);
+        Assert.True(waiting.Entered.Wait(TimeSpan.FromSeconds(10)));  // the worker reached the engine although nothing drained the queue: posting never blocks it
+        Assert.False(queue.IsEmpty);                                  // notifications are pending
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = session.ShutdownAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();   // the "UI thread" waits only for the worker, which never waits for it
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), sw.Elapsed.ToString());
+        Assert.True(result.Clean, result.Problem);
+        run.Wait(TimeSpan.FromSeconds(10));
+
+        while (queue.TryDequeue(out var late)) late();                // the pending notifications finally run — after the close
+        Assert.Equal(0, delivered);                                   // none reaches the (closed) listener
+        Assert.Empty(Directory.EnumerateDirectories(_store));
+        Assert.Empty(Directory.EnumerateDirectories(_sbx));
+    }
+
+    [Fact]
+    public async Task AShutdownThatCannotStopTheRunReportsItInsteadOfWaitingForever()
+    {
+        var (session, request, runner) = Arrange();               // GateRunner ignores cancellation until released
+        var run = session.PlayAsync(request);
+        Assert.True(runner.Entered.Wait(TimeSpan.FromSeconds(10)));
+
+        var result = await session.ShutdownAsync(TimeSpan.FromMilliseconds(300));
+        Assert.False(result.Clean);
+        Assert.Contains("did not stop", result.Problem);
+        runner.Release.Set();
+        await run;
+    }
+
+    [Fact]
+    public async Task ACancelThatArrivesAfterTheCommitIsRefusedByTheSession()
+    {
+        var (session, request, runner) = Arrange();
+        runner.Release.Set();
+        await session.PlayAsync(request);
+        Assert.False(session.Cancel());                           // nothing is running: not accepted, state stays Finished
+        Assert.Equal(PlaybackState.Finished, session.State);
     }
 }

@@ -17,6 +17,13 @@ namespace IKEMENLab.App;
 
 public partial class App : Application
 {
+    protected override void OnExit(ExitEventArgs e)
+    {
+        // Any playback shutdown started by closing an X-Ray window must finish (engine killed, sandbox deleted) before the process goes.
+        PlaybackShutdowns.WaitAll(TimeSpan.FromSeconds(15));
+        base.OnExit(e);
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);

@@ -106,5 +106,5 @@
 {"type":"frame","frame":74,"engineTick":null,"round":1,"p1":{"state":1000,"prevState":null,"ctrl":false,"stateType":"S","moveType":"A","anim":null,"animElem":null,"life":1000,"power":null,"x":null,"y":null,"velX":null,"velY":null,"facing":null,"moveHit":1,"moveContact":1,"hitPause":null},"p2":{"state":5000,"prevState":null,"ctrl":false,"stateType":"S","moveType":"H","anim":null,"animElem":null,"life":950,"power":null,"x":null,"y":null,"velX":null,"velY":null,"facing":null,"moveHit":0,"moveContact":0,"hitPause":null},"distance":60,"distanceSource":"engine-trigger","p1TargetCount":null,"p1TargetId":null,"combo":null}
 {"type":"driver","frame":74,"event":"plan_complete","step":4,"detail":null}
 {"type":"end","frame":74,"reason":"planComplete"}
-{"type":"driver","frame":74,"event":"linger_start","detail":"holding the match 90 ticks; engineTick=nil clock=0.04"}
-{"type":"driver","frame":164,"event":"linger_end","detail":"held 90 ticks; engineTick=nil clock=0.04"}
+{"type":"driver","frame":74,"event":"linger_start","detail":"holding the match 90 ticks; probeTick=74 engineTick=nil"}
+{"type":"driver","frame":164,"event":"linger_end","detail":"held 90 ticks; probeTick=164 engineTick=nil"}
