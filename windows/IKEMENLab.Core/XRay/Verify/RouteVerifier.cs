@@ -253,9 +253,11 @@ public static class RouteVerifier
             verdicts.Add(new StepVerdict(step.Index, step.EdgeId, step.FromId, step.ToId, StepOutcome.Observed, null, null,
                 inputFrame, contactFrame, lastStepFrame, null, rules));
         }
-        var endFrame = lastStepFrame + Math.Max(0, Math.Min(plan.TailFrames, 3));
-        if (frames[^1].Frame < endFrame)
-            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, verdicts, none, "The continuity tail is incomplete.");
+        // The tail target bounds how long continuity must be observed to claim a Verified route, but an incomplete
+        // tail is missing evidence, not proof of success. A drop we can actually see outranks it: report what we saw.
+        var tailTarget = lastStepFrame + Math.Max(0, Math.Min(plan.TailFrames, 3));
+        var endFrame = Math.Min(tailTarget, frames[^1].Frame);
+        var tailComplete = frames[^1].Frame >= tailTarget;
         if (frames.Any(f => f.Frame < verdicts[0].TransitionFrame && InHitState(f.P2)))
             return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, verdicts, none, "P2 was hit before the tested first move entered.");
         var firstHit = frames.FirstOrDefault(f => f.Frame <= lastStepFrame && InHitState(f.P2))?.Frame;
@@ -264,8 +266,6 @@ public static class RouteVerifier
                 new ContinuityVerdict(true, false, null, endFrame, null, null, "P2 was never hit before the final transition."));
         var interval = frames.Where(f => f.Frame >= firstHit && f.Frame <= endFrame).ToList();
         var usesMoveType = frames.Any(f => f.P2.MoveType is not null);
-        if (usesMoveType && interval.Any(f => f.P2.MoveType is null))
-            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, verdicts, none, "Victim moveType is missing inside the continuity interval.");
         var drop = interval.FirstOrDefault(f => !InHitState(f.P2) || f.P2.Ctrl == true);
         if (drop is not null)
         {
@@ -273,6 +273,10 @@ public static class RouteVerifier
             return Result(VerifyStatus.Failed, VerifyReason.ComboDropped, plan.Steps.Count, verdicts,
                 new ContinuityVerdict(true, false, firstHit, endFrame, drop.Frame, gap, "P2 left hitstun or regained control; zero gap frames are tolerated."));
         }
+        if (usesMoveType && interval.Any(f => f.P2.MoveType is null))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, verdicts, none, "Victim moveType is missing inside the continuity interval.");
+        if (!tailComplete)
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, verdicts, none, "The continuity tail is incomplete.");
         if (driver.Any(d => d.Frame >= playStart && d.Frame <= frames[^1].Frame && (d.Kind is "inject_unavailable" or "driver_error" or "driver_load_failed")))
             return Result(VerifyStatus.Inconclusive, VerifyReason.InputInjectionUnavailable, null, verdicts, none, "The driver did not finish with valid input injection.");
         if (!driver.Any(d => d.Kind == "plan_complete" && d.Frame >= endFrame) ||
