@@ -22,6 +22,10 @@ public static class VerifyReason
     public const string WrongState = "WrongState";
     public const string ComboDropped = "ComboDropped";
     public const string DriverTimeout = "DriverTimeout";
+    public const string TraceIntegrity = "TraceIntegrity";
+    public const string PlanMismatch = "PlanMismatch";
+    public const string RoundChanged = "RoundChanged";
+    public const string PlayerDefeated = "PlayerDefeated";
 }
 
 public sealed record StepVerdict(
@@ -37,240 +41,242 @@ public sealed record VerificationReport(
     public const string SchemaVersion = "ikemenlab.xray.verify/1";
 
     /// <summary>The only place in the product where <see cref="Confidence.RuntimeVerified"/> is produced, and only for a fully verified route.</summary>
+    public string? PlanFingerprint { get; init; }
+
     public Confidence RouteConfidence => Status == VerifyStatus.Verified ? Confidence.RuntimeVerified : Confidence.Inferred;
 }
 
 /// <summary>
-/// Reads a trace against the plan that produced it and decides, from engine facts alone, whether every transition occurred and P2
+/// Reads a trace against the plan that produced it and decides, from raw samples and corroborated driver bookkeeping, whether every transition occurred and P2
 /// stayed in one continuous combo. "Verified" needs all of it; a missing ingredient is Inconclusive, never Verified.
 /// Static edge confidence is not changed here: the verdict is reported beside it.
 /// </summary>
 public static class RouteVerifier
 {
-    /// <summary>Frames of P2 outside a hit state allowed before it counts as a drop (a single sampling flicker is not recovery).</summary>
+    /// <summary>Frames of P2 outside a hit state allowed before it counts as a drop (every recovery sample is a drop).</summary>
     public const int DropToleranceFrames = 0;
 
     public static VerificationReport Verify(InputPlan plan, TraceLog log, int subject = 1, int victim = 2)
     {
+        if (subject != 1 || victim != 2) throw new ArgumentOutOfRangeException(nameof(subject), "M3 plans drive P1 against P2 only.");
         var notes = new List<string>();
         var frames = log.Frames.ToList();
-        var engine = log.Meta?.EngineVersion;
-        VerificationReport Result(VerifyStatus status, string? reason, int? failed, IReadOnlyList<StepVerdict> steps, ContinuityVerdict c, string? note = null)
+        var none = new ContinuityVerdict(false, false, null, null, null, null, null);
+        var pending = plan.Steps.Select(s => new StepVerdict(s.Index, s.EdgeId, s.FromId, s.ToId,
+            StepOutcome.NotReached, null, null, null, null, null, null, [])).ToList();
+        VerificationReport Result(VerifyStatus status, string? reason, int? failed, IReadOnlyList<StepVerdict> steps,
+            ContinuityVerdict continuity, string? note = null)
         {
             if (note is not null) notes.Add(note);
-            return new VerificationReport(plan.Character, plan.RouteKey, status, reason, failed, steps, c, frames.Count, engine, notes);
+            return new VerificationReport(plan.Character, plan.RouteKey, status, reason, failed, steps, continuity,
+                frames.Count, log.Meta?.EngineVersion, notes) { PlanFingerprint = InputPlanner.Fingerprint(plan) };
         }
-
-        var none = new ContinuityVerdict(false, false, null, null, null, null, null);
-        var pending = plan.Steps.Select(s => new StepVerdict(s.Index, s.EdgeId, s.FromId, s.ToId, StepOutcome.NotReached, null, null, null, null, null, null, [])).ToList();
-
+        if (plan.Steps.Count == 0 || !plan.Steps.Select(s => s.Index).SequenceEqual(Enumerable.Range(1, plan.Steps.Count)))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.PlanMismatch, null, pending, none, "Invalid or empty plan.");
+        if (log.Issues.Count > 0 || log.Events.Where(e => e is not TraceMeta).Zip(log.Events.Where(e => e is not TraceMeta).Skip(1))
+            .Any(pair => pair.Second.Frame < pair.First.Frame))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none,
+                "The trace contains dropped, malformed, duplicated or out-of-order evidence: " + string.Join("; ", log.Issues.Select(i => i.Message)));
         var driver = log.Events.OfType<DriverEvent>().ToList();
-        if (driver.Any(d => d.Kind == "inject_unavailable"))
+        // A missing binding stops the shipped driver before it can attempt anything. This is independent of --adapter.
+        if (driver.Any(d => d.Kind == "inject_unavailable") && !log.Events.OfType<InputEvent>().Any(e => e.Phase == "input" && e.Keys.Count > 0))
             return Result(VerifyStatus.Inconclusive, VerifyReason.InputInjectionUnavailable, null, pending, none,
-                driver.First(d => d.Kind == "inject_unavailable").Detail ?? "The engine adapter could not inject input, so the route was never played.");
-        if (frames.Count == 0) return Result(VerifyStatus.Inconclusive, VerifyReason.NoMatchFrames, null, pending, none, "The trace has no match frames.");
-        if (!frames.Any(f => Of(f, subject).State is not null))
-            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, pending, none, "P1 StateNo was never readable, so no transition can be judged.");
-        if (!frames.Any(f => Of(f, victim).State is not null || Of(f, victim).MoveType is not null))
-            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, pending, none, "P2's state/moveType was never readable, so continuity cannot be judged.");
-
-        var inputs = log.Events.OfType<InputEvent>().Where(e => e.Player == subject && e.Keys.Count > 0).ToList();
-        var playStart = driver.FirstOrDefault(d => d.Kind == "plan_start")?.Frame ?? frames[0].Frame;
-
-        // The driver stops feeding a step once its own precondition stops holding, and says so. That happens
-        // *before* the contact question is even meaningful, so it has to outrank NoContact: reporting a whiff
-        // when the move was never actually attempted misdescribes the run.
-        var driverStop = driver.LastOrDefault(d => d.Kind == "timeout" && d.Step is not null);
-
-        // A step the driver stopped feeding was never attempted, so its verdict must say that
-        // instead of inheriting whatever the frame diagnosis happened to produce.
-        (string?, string?) Prefer(int index, (string?, string?) diagnosis)
-        {
-            if (driverStop is null || driverStop.Step != index) return diagnosis;
-            return (VerifyReason.PreconditionNeverMet,
-                $"The driver stopped feeding this step ({driverStop.Detail ?? "precondition never met"}), so the move was never attempted and contact could not occur.");
-        }
-
+                driver.First(d => d.Kind == "inject_unavailable").Detail);
+        if (frames.Count == 0) return Result(VerifyStatus.Inconclusive, VerifyReason.NoMatchFrames, null, pending, none);
+        if (log.Meta?.PlanFingerprint != InputPlanner.Fingerprint(plan))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.PlanMismatch, null, pending, none,
+                "The trace does not identify this exact input plan. Legacy traces remain readable but cannot certify a reconstructed plan.");
+        var starts = driver.Where(d => d.Kind == "plan_start").ToList();
+        if (starts.Count != 1 || (starts[0].Detail is { } route && route != plan.RouteKey))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none, "Expected one matching plan_start.");
+        var playStart = starts[0].Frame;
+        frames = frames.Where(f => f.Frame >= playStart).ToList();
+        if (frames.Count == 0) return Result(VerifyStatus.Inconclusive, VerifyReason.NoMatchFrames, null, pending, none);
+        if (frames.Zip(frames.Skip(1)).Any(pair => pair.Second.Frame != pair.First.Frame + 1))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none, "Match samples must be contiguous and unique.");
+        if (frames.Any(f => f.P1.State is null || f.P2.State is null || f.P2.Ctrl is null || f.P1.Life is null || f.P2.Life is null || f.Round is null))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, pending, none, "State, victim control, life and round telemetry must cover the run.");
+        if (frames.Select(f => f.Round).Distinct().Count() != 1 || frames.Zip(frames.Skip(1)).Any(p => p.Second.P1.Life > p.First.P1.Life || p.Second.P2.Life > p.First.P2.Life))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.RoundChanged, null, pending, none, "Round changed or life reset/healed during the run.");
+        if (frames.Any(f => f.P1.Life <= 0 || f.P2.Life <= 0))
+            return Result(VerifyStatus.Failed, VerifyReason.PlayerDefeated, null, pending, none, "M3 does not certify routes across death/reset.");
+        if (InHitState(frames[0].P2) || frames[0].P2.Ctrl != true)
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none, "The victim was not free before the tested route.");
+        var setupStop = driver.FirstOrDefault(d => d.Kind == "timeout" && d.Step is null && d.Frame >= playStart && d.Frame <= frames[^1].Frame);
+        if (setupStop is not null && !log.Events.OfType<InputEvent>().Any(e => e.Phase == "input" && e.Keys.Count > 0))
+            return Result(VerifyStatus.Failed, VerifyReason.DriverTimeout, null, pending, none, "The driver stopped before any route attempt: " + setupStop.Detail);
+        var inputs = log.Events.OfType<InputEvent>().Where(e => e.Player == subject && e.Phase == "input" && e.Keys.Count > 0 && e.Frame >= playStart).ToList();
         var verdicts = new List<StepVerdict>();
-        var cursor = 0; // index into frames: each step searches forward only
-        long? firstHit = null;
+        var cursor = 0;
         long lastStepFrame = playStart;
-        var failed = (int?)null;
-        string? failReason = null;
-        bool inconclusive = false;
-
         foreach (var step in plan.Steps)
         {
-            if (failed is not null) { verdicts.Add(pending[step.Index - 1]); continue; }
-
-            var rules = new List<string>();
-            var inputFrame = inputs.Where(e => e.Step == step.Index).Select(e => (long?)e.Frame).FirstOrDefault();
+            var stepInputs = inputs.Where(e => e.Step == step.Index).ToList();
+            var inputFrame = stepInputs.Select(e => (long?)e.Frame).FirstOrDefault();
+            // Prefer a wait timeout only when the same step has no attempt and the stop is inside this run.
+            // An attempted move, a stale stop, or arbitrary detail text cannot erase stronger frame evidence.
+            var wait = driver.FirstOrDefault(d => d.Kind == "step_wait" && d.Step == step.Index && d.Detail == step.EdgeId && d.Frame >= frames[cursor].Frame);
+            var stop = wait is null ? null : driver.FirstOrDefault(d => d.Kind == "timeout" && d.Step == step.Index &&
+                d.Frame > wait.Frame + 180 && d.Frame <= frames[^1].Frame &&
+                d.Detail == "precondition never met for " + step.EdgeId &&
+                !driver.Any(ready => ready.Kind == "step_ready" && ready.Step == step.Index && ready.Frame >= wait.Frame && ready.Frame <= d.Frame));
+            StepVerdict Fail(string reason, string detail) => pending[step.Index - 1] with
+                { Outcome = StepOutcome.NotObserved, Reason = reason, Detail = detail, InputFrame = inputFrame };
+            VerificationReport StepFailure(string reason, string detail, bool inconclusive = false)
+            {
+                verdicts.Add(Fail(reason, detail));
+                verdicts.AddRange(pending.Skip(step.Index));
+                return Result(inconclusive ? VerifyStatus.Inconclusive : VerifyStatus.Failed, reason, step.Index, verdicts, none);
+            }
             if (step.Input.Count > 0 && inputFrame is null)
             {
-                // The driver never pressed anything for this step. Usually that is because its precondition never held; only when it
-                // did hold and still nothing was fed is the run untestable rather than failed.
-                var (why, detail) = Prefer(step.Index, Diagnose(frames, step, cursor, subject));
-                failed = step.Index;
-                if (why is null)
-                {
-                    inconclusive = true; failReason = VerifyReason.InputInjectionUnavailable;
-                    verdicts.Add(pending[step.Index - 1] with { Reason = failReason, Detail = "The precondition held but the driver never reported feeding input for this step." });
-                }
-                else
-                {
-                    failReason = why;
-                    verdicts.Add(pending[step.Index - 1] with { Outcome = StepOutcome.NotObserved, Reason = why, Detail = detail });
-                }
-
-                continue;
+                if (stop is not null && !frames.Where(f => f.Frame >= wait!.Frame && f.Frame <= stop.Frame).Any(f =>
+                    (step.FromState is { } srcState ? f.P1.State == srcState : f.P1.Ctrl == true) &&
+                    (step.Contact is null || Contacted(f.P1, step.Contact)) &&
+                    f.Frame >= frames[cursor].Frame + (step.EarliestTick ?? 0)))
+                    return StepFailure(VerifyReason.PreconditionNeverMet, $"The driver stopped waiting for this step without an input attempt ({stop.Detail}); never attempted.");
+                if (driver.Any(d => d.Kind == "inject_unavailable" && d.Frame >= frames[cursor].Frame))
+                    return StepFailure(VerifyReason.InputInjectionUnavailable, "Input injection failed before this attempt.", true);
+                if (step.FromState is { } src && frames[cursor].P1.State != src)
+                    return StepFailure(VerifyReason.PreconditionNeverMet, $"P1 never reached the required source occurrence {src}.");
+                if (step.Contact is not null && !frames.Skip(cursor).TakeWhile(f => f.P1.State == step.FromState).Any(f => Contacted(f.P1, step.Contact)))
+                    return StepFailure(VerifyReason.NoContact, "The source move whiffed; the required contact was not observed.");
+                return StepFailure(VerifyReason.InputInjectionUnavailable, "No input attempt was recorded for this step.", true);
             }
-
-            // Find the transition: the first frame at/after the cursor where P1 is in ToState and the previous sampled P1 state was the source.
-            int? fromState = step.FromState;
-            var found = -1;
-            int? seenInstead = null;
-            var transitionSearchFrom = Math.Max(cursor, 1);
-            for (var i = transitionSearchFrom; i < frames.Count; i++)
+            if (inputFrame is { } attemptFrame)
             {
-                var prev = Of(frames[i - 1], subject).State;
-                var cur = Of(frames[i], subject).State;
-                if (cur is null || prev is null || cur == prev) continue;
-                if (inputFrame is { } inf && frames[i].Frame < inf) continue;
-                if (cur == step.ToState && (fromState is null || prev == fromState)) { found = i; break; }
-                if (fromState is { } fsn && prev == fsn) seenInstead = cur;
+                var active = driver.LastOrDefault(d => d.Kind == "step_wait" && d.Frame <= attemptFrame);
+                if (active is not null && (active.Step != step.Index || active.Detail != step.EdgeId))
+                    return StepFailure(VerifyReason.TraceIntegrity, "Input is attributed to a different active driver step.", true);
             }
-
+            if (inputFrame is { } inf && (inf < frames[cursor].Frame || inf >= frames[^1].Frame))
+                return StepFailure(VerifyReason.TelemetryMissing, "The input attempt has no subsequent sampled response.", true);
+            var limit = inputFrame is { } start ? start + step.Input.Count + step.TimeoutFrames : frames[cursor].Frame + 180 + step.TimeoutFrames;
+            var found = -1;
+            var sourceStart = cursor;
+            // Lock later steps to the state occurrence reached by the preceding step. Never search past its first exit.
+            for (var i = Math.Max(cursor + 1, 1); i < frames.Count && frames[i].Frame <= limit; i++)
+            {
+                var prev = frames[i - 1].P1;
+                var cur = frames[i].P1;
+                if (cur.State == prev.State) continue;
+                if (step.FromState is null)
+                {
+                    if (inputFrame is { } first && frames[i].Frame <= first) continue;
+                    if (cur.State == step.ToState && (prev.Ctrl == true || (prev.Ctrl is null && prev.State == 0)))
+                    { found = i; sourceStart = i - 1; break; }
+                    // Walking/crouching transitions can precede the button in a motion command; only an attack exit is decisive.
+                    if (cur.MoveType is "A" or "Attack" || (prev.Ctrl == true && cur.Ctrl == false))
+                        return StepFailure(VerifyReason.WrongState, $"P1 entered {cur.State}, not {step.ToState}, after the start input.");
+                    continue;
+                }
+                if (prev.State != step.FromState || cur.State != step.ToState)
+                    return StepFailure(VerifyReason.WrongState, $"P1 left the required source occurrence {step.FromState} for {cur.State}, not {step.ToState}.");
+                if (inputFrame is { } attempt && frames[i].Frame <= attempt)
+                    return StepFailure(VerifyReason.WrongState, "The source occurrence ended before this step's input could take effect.");
+                found = i; break;
+            }
             if (found < 0)
             {
-                failed = step.Index;
-                var (why, detail) = Prefer(step.Index, Diagnose(frames, step, cursor, subject));
-                var reason = why ?? (seenInstead is { } other ? VerifyReason.WrongState : VerifyReason.TransitionNotObserved);
-                if (why is null)
-                    detail = seenInstead is { } o2
-                        ? $"P1 left state {fromState} for {o2}, not {step.ToState}."
-                        : $"P1 never entered state {step.ToState}" + (fromState is null ? "." : $" from {fromState}.");
-                failReason = reason;
-                verdicts.Add(pending[step.Index - 1] with { Outcome = StepOutcome.NotObserved, Reason = reason, Detail = detail, InputFrame = inputFrame });
-                continue;
+                if (driver.Any(d => d.Kind == "inject_unavailable" && d.Frame >= frames[cursor].Frame))
+                    return StepFailure(VerifyReason.InputInjectionUnavailable, "The adapter failed during this attempt.", true);
+                if (frames[^1].Frame < limit && !log.Events.OfType<EndEvent>().Any())
+                    return StepFailure(VerifyReason.TelemetryMissing, "The trace ended before the attempt could be judged.", true);
+                return StepFailure(VerifyReason.TransitionNotObserved, $"P1 did not enter {step.ToState} during this attempt.");
             }
-
-            // Contact: a hit must have been seen on the source move before the transition (P2 life fell, or moveHit/moveContact was set).
+            if (inputFrame is { } press)
+            {
+                var finalPress = Enumerable.Range(0, step.Input.Count).Where(i => step.Input[i].Keys.Count > 0).DefaultIfEmpty(-1).Last();
+                if (finalPress < 0) return StepFailure(VerifyReason.PlanMismatch, "An input step contains no command keys.", true);
+                var finalKeys = step.Input[finalPress].Keys;
+                while (finalPress > 0 && step.Input[finalPress - 1].Keys.SequenceEqual(finalKeys)) finalPress--;
+                if (step.FromState is not null && step.EarliestTick is { } minimum && press < frames[sourceStart].Frame + minimum)
+                    return StepFailure(VerifyReason.PreconditionNeverMet, "Input preceded the observed source-state minimum tick.");
+                if (frames[found].Frame <= press + finalPress)
+                    return StepFailure(VerifyReason.TraceIntegrity, "The target appeared before the final command keys were fed.", true);
+                // Inputs are logged after sampling and take effect on subsequent engine updates. Validate the fed prefix,
+                // reconstructing held sets because unchanged keys are intentionally not emitted again.
+                var changes = log.Events.OfType<InputEvent>().Where(e => e.Player == subject && e.Step == step.Index && e.Frame >= press && e.Frame < frames[found].Frame).ToList();
+                for (var tick = press; tick < frames[found].Frame && tick - press < step.Input.Count; tick++)
+                {
+                    var actual = changes.LastOrDefault(e => e.Frame <= tick)?.Keys ?? [];
+                    var expected = step.Input[(int)(tick - press)].Keys;
+                    if (!actual.OrderBy(k => k).SequenceEqual(expected.OrderBy(k => k)))
+                        return StepFailure(VerifyReason.TraceIntegrity, "Reported inputs disagree with the plan prefix.", true);
+                }
+            }
+            // Driver bookkeeping is supporting evidence, never a substitute for sampled transitions.
+            if (driver.Any(d => d.Step == step.Index && (d.Kind is "step_timeout" or "timeout") && d.Frame < frames[found].Frame && d.Frame >= frames[cursor].Frame))
+                return StepFailure(VerifyReason.DriverTimeout, "The driver stopped this attempt before the purported transition.");
+            var done = driver.FirstOrDefault(d => d.Step == step.Index && d.Kind == "step_done" && d.Frame >= frames[cursor].Frame);
+            if (done is not null && (done.Frame < frames[found].Frame || frames.FirstOrDefault(f => f.Frame == done.Frame)?.P1.State != step.ToState || done.Detail != step.ToState.ToString(System.Globalization.CultureInfo.InvariantCulture)))
+                return StepFailure(VerifyReason.TraceIntegrity, "Driver and probe disagree about this step.", true);
             long? contactFrame = null;
             if (step.Contact is not null)
             {
-                // Walk back through the frames P1 spent in the source state; the flag may also still read on the first frame of the target.
-                for (var i = found; i >= 0; i--)
+                var source = frames.Skip(sourceStart).Take(found - sourceStart).ToList();
+                if (source.Any(f => step.Contact == "hit" ? f.P1.MoveHit is null : f.P1.MoveContact is null || (step.Contact == "guarded" && f.P1.MoveHit is null)))
+                    return StepFailure(VerifyReason.TelemetryMissing, "Contact telemetry is missing in this source occurrence.", true);
+                var resetSeen = false;
+                for (var i = sourceStart; i < found; i++)
                 {
-                    var sample = Of(frames[i], subject);
-                    if (i < found && sample.State != fromState) break;
-                    if (Contacted(sample, step.Contact)) contactFrame = frames[i].Frame;
+                    var sample = frames[i].P1;
+                    if (!Contacted(sample, step.Contact)) resetSeen = true;
+                    var freshDamage = i > 0 && frames[i].P2.Life < frames[i - 1].P2.Life;
+                    if (Contacted(sample, step.Contact) && (resetSeen || freshDamage)) { contactFrame = frames[i].Frame; break; }
                 }
-
                 if (contactFrame is null)
-                {
-                    // The driver gave up on this step before it ever pressed: say that, not "whiff".
-                    var stoppedEarly = driverStop is not null && driverStop.Step == step.Index;
-                    var why = stoppedEarly ? VerifyReason.PreconditionNeverMet : VerifyReason.NoContact;
-                    var whyText = stoppedEarly
-                        ? $"The driver stopped feeding this step ({driverStop!.Detail ?? "precondition never met"}), so the move was never attempted and contact could not occur."
-                        : $"P1 entered state {step.ToState}, but the required contact ({step.Contact}) was not observed before it.";
-                    failed = step.Index; failReason = why;
-                    verdicts.Add(pending[step.Index - 1] with
-                    {
-                        Outcome = StepOutcome.NotObserved, Reason = why, InputFrame = inputFrame, TransitionFrame = frames[found].Frame,
-                        Detail = whyText
-                    });
-                    continue;
-                }
-
-                rules.Add("runtime.contact-observed");
+                    return StepFailure(VerifyReason.NoContact, "No fresh required contact was supported on this source occurrence; carried flags and target-state contact do not count.");
             }
-
-            rules.Insert(0, "runtime.transition-observed");
-            firstHit ??= contactFrame ?? FirstHitFrame(frames, victim, playStart);
             cursor = found;
             lastStepFrame = frames[found].Frame;
-            verdicts.Add(new StepVerdict(step.Index, step.EdgeId, step.FromId, step.ToId, StepOutcome.Observed, null, null, inputFrame, contactFrame,
-                frames[found].Frame, null, rules));
+            var rules = new List<string> { "runtime.transition-observed" };
+            if (contactFrame is not null) rules.Add("runtime.contact-observed");
+            verdicts.Add(new StepVerdict(step.Index, step.EdgeId, step.FromId, step.ToId, StepOutcome.Observed, null, null,
+                inputFrame, contactFrame, lastStepFrame, null, rules));
         }
-
-        // Continuity: from P2's first hit to the last step's transition (+ tail), P2 must never leave a hit state.
-        ContinuityVerdict continuity = none;
-        if (failed is null)
+        var endFrame = lastStepFrame + Math.Max(0, Math.Min(plan.TailFrames, 3));
+        if (frames[^1].Frame < endFrame)
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, verdicts, none, "The continuity tail is incomplete.");
+        if (frames.Any(f => f.Frame < verdicts[0].TransitionFrame && InHitState(f.P2)))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, verdicts, none, "P2 was hit before the tested first move entered.");
+        var firstHit = frames.FirstOrDefault(f => f.Frame <= lastStepFrame && InHitState(f.P2))?.Frame;
+        if (firstHit is null)
+            return Result(VerifyStatus.Failed, VerifyReason.ComboDropped, plan.Steps.Count, verdicts,
+                new ContinuityVerdict(true, false, null, endFrame, null, null, "P2 was never hit before the final transition."));
+        var interval = frames.Where(f => f.Frame >= firstHit && f.Frame <= endFrame).ToList();
+        var usesMoveType = frames.Any(f => f.P2.MoveType is not null);
+        if (usesMoveType && interval.Any(f => f.P2.MoveType is null))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, verdicts, none, "Victim moveType is missing inside the continuity interval.");
+        var drop = interval.FirstOrDefault(f => !InHitState(f.P2) || f.P2.Ctrl == true);
+        if (drop is not null)
         {
-            var endFrame = lastStepFrame + Math.Max(0, Math.Min(plan.TailFrames, 3));
-            continuity = Continuity(frames, victim, firstHit, lastStepFrame, endFrame);
-            if (!continuity.Continuous)
-            {
-                failed = plan.Steps.Count;
-                failReason = VerifyReason.ComboDropped;
-            }
-            else
-            {
-                for (var i = 0; i < verdicts.Count; i++)
-                    verdicts[i] = verdicts[i] with { RuntimeRules = verdicts[i].RuntimeRules.Append("runtime.opponent-continuous").ToList() };
-            }
+            var gap = interval.SkipWhile(f => f.Frame < drop.Frame).TakeWhile(f => !InHitState(f.P2) || f.P2.Ctrl == true).Count();
+            return Result(VerifyStatus.Failed, VerifyReason.ComboDropped, plan.Steps.Count, verdicts,
+                new ContinuityVerdict(true, false, firstHit, endFrame, drop.Frame, gap, "P2 left hitstun or regained control; zero gap frames are tolerated."));
         }
-
-        var status = failed is null ? VerifyStatus.Verified : inconclusive ? VerifyStatus.Inconclusive : VerifyStatus.Failed;
-        return new VerificationReport(plan.Character, plan.RouteKey, status, failReason, failed, verdicts, continuity, frames.Count, engine, notes);
+        if (driver.Any(d => d.Kind is "inject_unavailable" or "driver_error" or "driver_load_failed"))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.InputInjectionUnavailable, null, verdicts, none, "The driver did not finish with valid input injection.");
+        if (!driver.Any(d => d.Kind == "plan_complete" && d.Frame >= endFrame) ||
+            !log.Events.OfType<EndEvent>().Any(e => e.Reason == "planComplete" && e.Frame >= endFrame))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, verdicts, none, "No completed driver run was recorded.");
+        for (var i = 0; i < verdicts.Count; i++) verdicts[i] = verdicts[i] with
+            { RuntimeRules = verdicts[i].RuntimeRules.Append("runtime.opponent-continuous").ToList() };
+        return Result(VerifyStatus.Verified, null, null, verdicts, new ContinuityVerdict(true, true, firstHit, endFrame, null, null, null));
     }
-
-    /// <summary>Why a step's transition cannot have happened, from the facts: its source state never entered, or its contact never seen. Null reason = neither explains it.</summary>
-    private static (string? Reason, string? Detail) Diagnose(List<FrameEvent> frames, PlanStep step, int cursor, int subject)
-    {
-        if (step.FromState is { } src && !frames.Skip(cursor).Any(f => Of(f, subject).State == src))
-            return (VerifyReason.PreconditionNeverMet, $"P1 never reached state {src}, the source of this step.");
-        if (step.Contact is not null && !frames.Skip(cursor).Any(f => Contacted(Of(f, subject), step.Contact)))
-            return (VerifyReason.NoContact, $"The source state was entered but the required contact ({step.Contact}) was never observed.");
-        return (null, null);
-    }
-
-    private static PlayerSample Of(FrameEvent f, int player) => player == 1 ? f.P1 : f.P2;
 
     private static bool Contacted(PlayerSample p, string need) => need switch
     {
         "hit" => p.MoveHit is > 0,
         "contact" => p.MoveHit is > 0 || p.MoveContact is > 0,
-        "guarded" => p.MoveContact is > 0,
+        "guarded" => p.MoveContact is > 0 && p.MoveHit is 0,
         _ => false
     };
 
-    /// <summary>P2 is in a hit state when moveType is H; if the engine does not expose moveType, the 5000–5999 hit-state range stands in.</summary>
+    /// <summary>Conservative victim-state rule. Custom TargetState relationships are not expanded by M3.</summary>
     public static bool InHitState(PlayerSample p) =>
         p.MoveType is { } mt ? mt.Equals("H", StringComparison.OrdinalIgnoreCase) || mt.Equals("Hit", StringComparison.OrdinalIgnoreCase)
             : p.State is >= 5000 and < 6000;
-
-    private static long? FirstHitFrame(List<FrameEvent> frames, int victim, long from)
-    {
-        foreach (var f in frames)
-            if (f.Frame >= from && InHitState(Of(f, victim))) return f.Frame;
-        return null;
-    }
-
-    private static ContinuityVerdict Continuity(List<FrameEvent> frames, int victim, long? firstHit, long lastStep, long endFrame)
-    {
-        var start = FirstHitFrame(frames, victim, firstHit ?? 0);
-        if (start is null)
-            return new ContinuityVerdict(true, false, null, null, null, null, "P2 was never observed in a hit state.");
-
-        long? drop = null;
-        var gap = 0;
-        foreach (var f in frames.Where(f => f.Frame >= start && f.Frame <= endFrame))
-        {
-            if (!InHitState(Of(f, victim)))
-            {
-                drop ??= f.Frame;
-                gap++;
-            }
-            else if (drop is not null) break;
-        }
-
-        if (drop is not null && gap > DropToleranceFrames)
-            return new ContinuityVerdict(true, false, start, endFrame, drop, gap,
-                $"P2 left its hit state at frame {drop} for {gap} frame(s) before the route finished (frame {lastStep}).");
-        return new ContinuityVerdict(true, true, start, endFrame, null, null, null);
-    }
 
     // ------------------------------------------------------------------ JSON
 
@@ -285,6 +291,7 @@ public static class RouteVerifier
             w.WriteString("schema", VerificationReport.SchemaVersion);
             w.WriteString("character", r.Character);
             w.WriteString("route", r.RouteKey);
+            w.WriteString("planFingerprint", r.PlanFingerprint);
             w.WriteString("status", r.Status.ToString());
             w.WriteString("routeConfidence", r.RouteConfidence.ToString());
             if (r.Reason is null) w.WriteNull("reason"); else w.WriteString("reason", r.Reason);

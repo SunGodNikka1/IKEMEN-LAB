@@ -23,6 +23,7 @@ public static class TraceReader
         var issues = new List<TraceIssue>();
         TraceMeta? meta = null;
         long lastFrame = -1;
+        long lastSample = -1;
         var lineNo = 0;
 
         // Lines end at '\n'. Text after the last '\n' is a line still being written (or stale bytes) and is only used if it parses.
@@ -83,12 +84,18 @@ public static class TraceReader
                     continue;
                 }
 
+                if (type == "frame" && lastSample == frame)
+                {
+                    issues.Add(new TraceIssue(lineNo, $"Duplicate frame sample {frame}; event dropped."));
+                    continue;
+                }
+                if (type == "frame") lastSample = frame.Value;
                 lastFrame = frame.Value;
                 var engineTick = Long(root, "engineTick");
                 events.Add(type switch
                 {
                     "frame" => new FrameEvent(frame.Value, engineTick, Int(root, "round"), Player(root, "p1"), Player(root, "p2"),
-                        Dbl(root, "distance"), Int(root, "p1TargetCount"), Int(root, "p1TargetId"), Int(root, "combo")),
+                        Dbl(root, "distance"), Int(root, "p1TargetCount"), Int(root, "p1TargetId"), Int(root, "combo"), Str(root, "distanceSource")),
                     "state_change" => new StateChangeEvent(frame.Value, engineTick, Int(root, "player") ?? 0, Int(root, "from"), Int(root, "to")),
                     "life_change" => new LifeChangeEvent(frame.Value, engineTick, Int(root, "player") ?? 0, Dbl(root, "from"), Dbl(root, "to")),
                     "hit" => new HitEvent(frame.Value, engineTick, Int(root, "attacker"), Int(root, "defender"), Dbl(root, "lifeBefore"), Dbl(root, "lifeAfter")),
@@ -117,7 +124,7 @@ public static class TraceReader
                 if (e.ValueKind == JsonValueKind.String) hooks.Add(e.GetString()!);
 
         return new TraceMeta(Str(root, "schema"), Str(root, "engineVersion"), Str(root, "probeVersion"), Str(root, "character"),
-            Str(root, "platform"), caps, hooks);
+            Str(root, "platform"), caps, hooks, Str(root, "planFingerprint"));
     }
 
     private static PlayerSample Player(JsonElement root, string name)

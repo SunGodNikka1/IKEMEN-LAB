@@ -24,7 +24,7 @@ public sealed record SandboxRequest(
     ProbeInjection Injection = ProbeInjection.ModsAndMainLua,
     /// <summary>Milestone 3: play this input plan (verify mode). Null = observe only, both sides on the engine's own AI.</summary>
     Verify.InputPlan? Plan = null,
-    /// <summary>Verify mode: an engine adapter (Lua) that defines __ikemenlab_xray_inject. Null installs the template, which injects nothing.</summary>
+    /// <summary>Verify mode: an engine adapter (Lua) that defines __ikemenlab_xray_inject. Null installs the bundled adapter for __xraySetVirtualInput.</summary>
     string? AdapterPath = null,
     /// <summary>Use this engine binary in the sandbox instead of the one in the install (X-Ray sandbox build).</summary>
     string? EngineExePath = null,
@@ -37,7 +37,7 @@ public static class RuntimeProbe
     public static string Source => Resource("xray_probe.lua");
     /// <summary>The plan executor (milestone 3).</summary>
     public static string Driver => Resource("xray_driver.lua");
-    /// <summary>The input-injection adapter template: injects nothing until replaced for the engine build in use.</summary>
+    /// <summary>The bundled adapter: injects when the sandbox engine exposes __xraySetVirtualInput.</summary>
     public static string AdapterTemplate => Resource("xray_inject.lua");
 
     private static string Resource(string name)
@@ -75,6 +75,10 @@ public sealed class RuntimeSandbox : IDisposable
         if (IsInside(source, root))
             throw new InvalidOperationException("The runtime sandbox must not be created inside the IKEMEN install it copies.");
 
+        if (request.EngineExePath is { } requestedEngine && !File.Exists(requestedEngine))
+            throw new FileNotFoundException("The explicitly requested sandbox engine does not exist; refusing to substitute the install engine.", requestedEngine);
+        if (request.EngineRuntimeDlls is { } requestedDlls && !Directory.Exists(requestedDlls))
+            throw new DirectoryNotFoundException(requestedDlls);
         var notes = new List<string>();
         var sandbox = new RuntimeSandbox(root);
         try
@@ -114,10 +118,15 @@ public sealed class RuntimeSandbox : IDisposable
                     notes.Add($"Copied {dlls} engine runtime DLL(s) from {dllDir} into the sandbox.");
                 }
 
-                notes.Add($"Engine binary overridden for this sandbox: {Path.GetFileName(engine)} " +
+                notes.Add($"Engine binary overridden for this sandbox: {Path.GetFullPath(engine)} " +
                           $"(sha256 {Sha256(engine)}) replacing the install's copy of {Path.GetFileName(sandboxExe)}. " +
                           "The production install is untouched and is NOT the binary that ran.");
             }
+
+            if (!File.Exists(sandbox.ExePath)) throw new FileNotFoundException("The sandbox engine executable is missing.", sandbox.ExePath);
+            notes.Add($"Actual sandbox executable: {sandbox.ExePath} (sha256 {Sha256(sandbox.ExePath)}); source: {Path.GetFullPath(request.EngineExePath ?? Path.Combine(source, Services.IkemenInstallationValidator.ExeFileName))}.");
+            // Do not append to a trace copied from a previous run in the install root.
+            if (File.Exists(sandbox.TracePath)) File.Delete(sandbox.TracePath);
 
             foreach (var dir in CopiedDirectories)
                 CopyDirectory(Path.Combine(source, dir), Path.Combine(root, dir));

@@ -60,6 +60,8 @@ public static class VerifyRunner
             var report = RouteVerifier.Verify(planned.Plan, log);
             var notes = report.Notes.ToList();
             notes.AddRange(sandbox.Notes);
+            if (File.Exists(sandbox.TracePath)) notes.Add("Trace sha256: " + Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sandbox.TracePath))));
             if (engine.Error is not null) notes.Add("Engine: " + engine.Error);
             if (engine.TimedOut) notes.Add("The engine was stopped after the timeout.");
             report = report with { Notes = notes };

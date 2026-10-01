@@ -133,13 +133,18 @@ public class XRayVerifyTests : IDisposable
             return this;
         }
 
-        public TraceLog Build() => new() { Meta = (TraceMeta)_events[0], Events = _events, Issues = [], LineCount = _events.Count };
+        public TraceLog Build(InputPlan plan)
+        {
+            var meta = (TraceMeta)_events[0] with { PlanFingerprint = InputPlanner.Fingerprint(plan) };
+            return new TraceLog { Meta = meta, Events = new TraceEvent[] { meta }.Concat(_events.Skip(1))
+                .Append(new DriverEvent(_f, null, "plan_complete", null, null)).Append(new EndEvent(_f, null, "planComplete")).ToList(), Issues = [], LineCount = _events.Count + 2 };
+        }
     }
 
     private static TraceBuilder GoodRun(InputPlan plan)
     {
         var b = new TraceBuilder().Driver("plan_start").Frames(3, 0);
-        b.Input(1, "x").Frames(2, 0).Frames(2, 200).Frames(2, 200, 5000, "H", hit: 1);          // route step 1: 0 -> 200, it connects
+        b.Input(1, "x").Frames(2, 0).Input(1).Frames(2, 200).Frames(2, 200, 5000, "H", hit: 1);          // route step 1: 0 -> 200, it connects
         b.Input(2, "y").Frames(2, 210, 5000, "H", hit: 0);                                      // step 2: 200 -> 210 after the hit
         return b;
     }
@@ -149,7 +154,7 @@ public class XRayVerifyTests : IDisposable
     {
         var plan = PlanFor("200", "210");
         var b = GoodRun(plan);
-        var report = RouteVerifier.Verify(plan, b.Frames(3, 210, 5000, "H").Build());
+        var report = RouteVerifier.Verify(plan, b.Frames(3, 210, 5000, "H").Build(plan));
         Assert.Equal(VerifyStatus.Verified, report.Status);
         Assert.Null(report.Reason);
         Assert.All(report.Steps, s => Assert.Equal(StepOutcome.Observed, s.Outcome));
@@ -168,7 +173,7 @@ public class XRayVerifyTests : IDisposable
         b.Input(1, "x").Frames(2, 200).Frames(2, 200, 5000, "H", hit: 1);
         b.Frames(2, 200, 0, "I", hit: 1);                                                    // P2 recovers while P1 is still in 200
         b.Input(2, "y").Frames(3, 210, 0, "I");
-        var report = RouteVerifier.Verify(plan, b.Build());
+        var report = RouteVerifier.Verify(plan, b.Build(plan));
         Assert.Equal(VerifyStatus.Failed, report.Status);
         Assert.Equal(VerifyReason.ComboDropped, report.Reason);
         Assert.False(report.Continuity.Continuous);
@@ -184,27 +189,28 @@ public class XRayVerifyTests : IDisposable
 
         var whiff = new TraceBuilder().Driver("plan_start").Frames(2, 0);
         whiff.Input(1, "x").Frames(3, 200).Frames(3, 0);
-        var r1 = RouteVerifier.Verify(plan, whiff.Build());
+        var r1 = RouteVerifier.Verify(plan, whiff.Build(plan));
         Assert.Equal((VerifyStatus.Failed, 2, VerifyReason.NoContact), (r1.Status, r1.FailedStep, r1.Reason));
 
         // Same trace, but the driver says it stopped feeding step 2 because the precondition never held.
         // That happened before the move was ever attempted, so it must outrank NoContact.
         var stopped = new TraceBuilder().Driver("plan_start").Frames(2, 0);
         stopped.Input(1, "x").Frames(3, 200).Frames(3, 0);
-        stopped.DriverStep("timeout", 2, "precondition never met for cand:state:200>state:210");
-        var r1b = RouteVerifier.Verify(plan, stopped.Build());
+        stopped.DriverStep("step_wait", 2, plan.Steps[1].EdgeId).Frames(181, 0);
+        stopped.DriverStep("timeout", 2, "precondition never met for " + plan.Steps[1].EdgeId);
+        var r1b = RouteVerifier.Verify(plan, stopped.Build(plan));
         Assert.Equal((VerifyStatus.Failed, 2, VerifyReason.PreconditionNeverMet), (r1b.Status, r1b.FailedStep, r1b.Reason));
         Assert.Contains("never attempted", r1b.Steps[1].Detail);
 
         var wrong = new TraceBuilder().Driver("plan_start").Frames(2, 0);
         wrong.Input(1, "x").Frames(2, 200, 5000, "H", 1).Input(2, "y").Frames(3, 9999, 5000, "H");
-        var r2 = RouteVerifier.Verify(plan, wrong.Build());
+        var r2 = RouteVerifier.Verify(plan, wrong.Build(plan));
         Assert.Equal((VerifyStatus.Failed, VerifyReason.WrongState), (r2.Status, r2.Reason));
         Assert.Contains("9999", r2.Steps[1].Detail);
 
         var never = new TraceBuilder().Driver("plan_start").Frames(10, 0);
         never.Input(1, "x");
-        var r3 = RouteVerifier.Verify(plan, never.Build());
+        var r3 = RouteVerifier.Verify(plan, never.Build(plan));
         Assert.Equal(VerifyReason.TransitionNotObserved, r3.Reason);
         Assert.Equal(1, r3.FailedStep);
         Assert.Equal(StepOutcome.NotReached, r3.Steps[1].Outcome);
@@ -214,16 +220,16 @@ public class XRayVerifyTests : IDisposable
     public void WithoutRealInputOrTelemetryTheVerdictIsInconclusiveNeverVerified()
     {
         var plan = PlanFor("200", "210");
-        var noInject = new TraceBuilder().Driver("inject_unavailable", "no injector is installed").Frames(5, 0).Build();
+        var noInject = new TraceBuilder().Driver("inject_unavailable", "no injector is installed").Frames(5, 0).Build(plan);
         var r1 = RouteVerifier.Verify(plan, noInject);
         Assert.Equal((VerifyStatus.Inconclusive, VerifyReason.InputInjectionUnavailable), (r1.Status, r1.Reason));
         Assert.NotEqual(Confidence.RuntimeVerified, r1.RouteConfidence);
 
-        var empty = RouteVerifier.Verify(plan, new TraceBuilder().Build());
+        var empty = RouteVerifier.Verify(plan, new TraceBuilder().Build(plan));
         Assert.Equal((VerifyStatus.Inconclusive, VerifyReason.NoMatchFrames), (empty.Status, empty.Reason));
 
         // A run whose states were reached but which never reports feeding input is not credited to the driver.
-        var noInputEvents = new TraceBuilder().Driver("plan_start").Frames(3, 0).Frames(2, 200, 5000, "H", 1).Frames(2, 210, 5000, "H").Build();
+        var noInputEvents = new TraceBuilder().Driver("plan_start").Frames(3, 0).Frames(2, 200, 5000, "H", 1).Frames(2, 210, 5000, "H").Build(plan);
         Assert.Equal(VerifyStatus.Inconclusive, RouteVerifier.Verify(plan, noInputEvents).Status);
     }
 
@@ -231,7 +237,7 @@ public class XRayVerifyTests : IDisposable
     public void ReportJsonIsVersionedAndDeterministic()
     {
         var plan = PlanFor("200", "210");
-        var report = RouteVerifier.Verify(plan, GoodRun(plan).Frames(3, 210, 5000, "H").Build());
+        var report = RouteVerifier.Verify(plan, GoodRun(plan).Frames(3, 210, 5000, "H").Build(plan));
         var json = RouteVerifier.ToJson(report);
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("ikemenlab.xray.verify/1", doc.RootElement.GetProperty("schema").GetString());
@@ -241,6 +247,12 @@ public class XRayVerifyTests : IDisposable
     }
 
     // ------------------------------------------------------------------ traces produced by the real driver against a mock engine (scripts/xray_driver_mock.py)
+
+    private static TraceLog BindLegacyFixture(TraceLog log, InputPlan plan) => new()
+    {
+        Meta = log.Meta! with { PlanFingerprint = InputPlanner.Fingerprint(plan) }, Events = log.Events,
+        Issues = log.Issues, LineCount = log.LineCount
+    };
 
     private InputPlan MockPlan => PlanFor("200", "210", "1000");
 
@@ -255,7 +267,7 @@ public class XRayVerifyTests : IDisposable
     {
         var log = TraceReader.ReadFile(Path.Combine(FixtureDir, $"xray_driver_mock_{scenario}.jsonl"));
         Assert.Empty(log.Issues);
-        var report = RouteVerifier.Verify(MockPlan, log);
+        var report = RouteVerifier.Verify(MockPlan, BindLegacyFixture(log, MockPlan));
         Assert.Equal((status, reason), (report.Status, report.Reason));
         if (scenario == "verified") Assert.Contains(log.Events.OfType<InputEvent>(), e => e.Keys.SequenceEqual(["x"]));
         if (scenario == "noinject") Assert.DoesNotContain(log.Events.OfType<InputEvent>(), e => e.Keys.Count > 0);
@@ -301,6 +313,7 @@ public class XRayVerifyTests : IDisposable
         var baseDir = Path.Combine(Path.GetTempPath(), "xray-vb-" + Guid.NewGuid().ToString("N"));
         _cleanup.Add(baseDir);
         var trace = File.ReadAllText(Path.Combine(FixtureDir, "xray_driver_mock_verified.jsonl"));
+        trace = trace.Replace("\"type\":\"meta\"", "\"type\":\"meta\",\"planFingerprint\":\"" + InputPlanner.Fingerprint(MockPlan) + "\"");
         var runner = new FakeRunner(trace);
         var sandboxRequest = new SandboxRequest(source, "ComboGuy", "ComboGuy/ComboGuy.def", "kfm", "kfm/kfm.def", "stages/ring.def", 1500, baseDir);
         var result = VerifyRunner.Run(_g, Route("200", "210", "1000"), new VerifyRunRequest(sandboxRequest, TimeSpan.FromSeconds(5), KeepSandbox: true), runner);
@@ -355,7 +368,7 @@ public class XRayVerifyTests : IDisposable
         Assert.All(runtime, r => Assert.StartsWith("runtime.", r.Id));
         Assert.DoesNotContain(EvidenceRules.Rules, r => r.Confidence != Confidence.RuntimeVerified && r.Id.StartsWith("runtime.", StringComparison.Ordinal));
         // Every rule a verdict can cite is registered.
-        var report = RouteVerifier.Verify(PlanFor("200", "210"), GoodRun(PlanFor("200", "210")).Frames(3, 210, 5000, "H").Build());
+        var report = RouteVerifier.Verify(PlanFor("200", "210"), GoodRun(PlanFor("200", "210")).Frames(3, 210, 5000, "H").Build(plan));
         foreach (var id in report.Steps.SelectMany(s => s.RuntimeRules)) Assert.Contains(EvidenceRules.Rules, r => r.Id == id);
     }
 

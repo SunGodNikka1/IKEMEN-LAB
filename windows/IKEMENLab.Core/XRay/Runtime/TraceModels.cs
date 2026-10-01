@@ -17,11 +17,11 @@ public abstract record TraceEvent(long Frame, long? EngineTick);
 
 public sealed record TraceMeta(
     string? Schema, string? EngineVersion, string? ProbeVersion, string? Character, string? Platform,
-    IReadOnlyDictionary<string, bool> Capabilities, IReadOnlyList<string> HooksRegistered) : TraceEvent(0, null);
+    IReadOnlyDictionary<string, bool> Capabilities, IReadOnlyList<string> HooksRegistered, string? PlanFingerprint = null) : TraceEvent(0, null);
 
 public sealed record FrameEvent(
     long Frame, long? EngineTick, int? Round, PlayerSample P1, PlayerSample P2,
-    double? Distance, int? P1TargetCount, int? P1TargetId, int? ComboCount) : TraceEvent(Frame, EngineTick);
+    double? Distance, int? P1TargetCount, int? P1TargetId, int? ComboCount, string? DistanceSource = null) : TraceEvent(Frame, EngineTick);
 
 public sealed record StateChangeEvent(long Frame, long? EngineTick, int Player, int? From, int? To) : TraceEvent(Frame, EngineTick);
 

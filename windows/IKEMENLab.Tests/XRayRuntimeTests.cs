@@ -259,6 +259,32 @@ public class XRayRuntimeTests : IDisposable
     }
 
     [Fact]
+    public void MissingExplicitEngineIsNeverReplacedWithTheProductionExecutable()
+    {
+        var source = MakeFakeInstall();
+        var before = Snapshot(source);
+        Assert.Throws<FileNotFoundException>(() => RuntimeSandbox.Create(new SandboxRequest(source, "hero", "hero/hero.def",
+            "kfm", "kfm/kfm.def", "stages/ring.def", 10, TempDir(), EngineExePath: Path.Combine(source, "missing-sandbox.exe"))));
+        Assert.Equal(before, Snapshot(source));
+    }
+
+    [Fact]
+    public void DifferentlyNamedSandboxEngineIsTheActualLaunchedCopyAndOldTraceIsNotReused()
+    {
+        var source = MakeFakeInstall();
+        File.WriteAllText(Path.Combine(source, "xray_trace.jsonl"), "stale trace");
+        var custom = Path.Combine(TempDir(), "sandbox-with-a-different-name.exe");
+        File.WriteAllText(custom, "patched engine");
+        using var sb = RuntimeSandbox.Create(new SandboxRequest(source, "hero", "hero/hero.def", "kfm", "kfm/kfm.def",
+            "stages/ring.def", 10, TempDir(), EngineExePath: custom));
+        Assert.Equal("patched engine", File.ReadAllText(sb.ExePath));
+        Assert.Equal("exe", File.ReadAllText(Path.Combine(source, "Ikemen_GO.exe")));
+        Assert.False(File.Exists(sb.TracePath));
+        Assert.Contains(sb.Notes, n => n.Contains(sb.ExePath) && n.Contains("sha256"));
+        Assert.Contains(sb.Notes, n => n.Contains(custom));
+    }
+
+    [Fact]
     public void MissingStageIsReportedNotFatal()
     {
         var source = MakeFakeInstall();

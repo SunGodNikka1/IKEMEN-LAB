@@ -22,27 +22,38 @@ local hasHook = type(_G.__xraySetVirtualInput) == "function"
 local BIT = { U = 1, D = 2, L = 3, R = 4, a = 5, b = 6, c = 7, x = 8, y = 9, z = 10, s = 11 }
 local BUTTONS = { a = true, b = true, c = true, x = true, y = true, z = true, s = true }
 
-local function facing()
+local function facing(playerNo)
+	if type(_G.player) ~= "function" then return nil end
+	local ok, selected = pcall(_G.player, playerNo)
+	if not ok or not selected then return nil end
 	if type(_G.facing) == "function" then
 		local ok, f = pcall(_G.facing)
-		if ok and type(f) == "number" then return f end
+		if ok and type(f) == "number" and (f == -1 or f == 1) then return f end
 	end
-	return 1
+	return nil
 end
 
 --- Apply `keys` (array of logical names) to `player` for this tick.
 --- Returns true when the engine accepted them.
 function _G.__ikemenlab_xray_inject(player, keys)
 	if not hasHook then return false end
-	if type(player) ~= "number" then return false end
+	if player ~= 1 and player ~= 2 then return false end
 
 	local bits = { false, false, false, false, false, false, false, false, false, false, false, false, false, false }
 	if type(keys) == "table" then
 		local fwd, back = BIT.R, BIT.L
-		if facing() < 0 then fwd, back = BIT.L, BIT.R end
+		local needsFacing = false
+		for _, k in ipairs(keys) do if k == "F" or k == "B" then needsFacing = true end end
+		if needsFacing then
+			local f = facing(player)
+			if type(_G.player) == "function" then pcall(_G.player, 1) end
+			if f == nil then return false end
+			if f < 0 then fwd, back = BIT.L, BIT.R end
+		end
 
 		for i = 1, #keys do
 			local k = keys[i]
+			if type(k) ~= "string" then return false end
 			if type(k) == "string" then
 				if k == "F" then
 					bits[fwd] = true
@@ -69,7 +80,7 @@ end
 
 --- Hand the slot back to real hardware input. Called after a plan finishes.
 function _G.__ikemenlab_xray_release(player)
-	if not hasHook then return false end
+	if not hasHook or (player ~= 1 and player ~= 2) then return false end
 	_G.__xraySetVirtualInput(player, false)
 	return true
 end

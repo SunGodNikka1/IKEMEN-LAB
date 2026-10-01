@@ -2,7 +2,7 @@
 
 Main Agent side is complete and unit-tested without an engine. What only a Windows machine with the real engine can do:
 
-1. **Write the input adapter** (`xray_inject.lua`). Read the engine's Lua input path in `src/script.go` (and how `player(n)` /
+1. **Inspect the bundled input adapter; write a custom one only for a different binding** (`xray_inject.lua`). Read the engine's Lua input path in `src/script.go` (and how `player(n)` /
    command buffers / `inputs` are fed) of the build in use. Contract: `_G.__ikemenlab_xray_inject(player, keys)`, `keys` = the complete
    held set of logical keys `U D F B a b c x y z s` (F/B relative to facing), called every tick from the probe's `loop` hook after
    sampling. Return `true` only if the keys were applied. Do not guess API names; record which engine function you used and why.
@@ -15,3 +15,8 @@ Main Agent side is complete and unit-tested without an engine. What only a Windo
 5. **Cross-check the verdict** by hand: does the trace show each transition and P2 in hitstun throughout? Try a route you expect to fail
    (e.g. a cancel into a move that needs more meter) and confirm it is `Failed` with the right reason, not `Verified`.
 6. Report anything the trace fields cannot express (e.g. moveHit latency, P2 hit-state detection on your build).
+
+Current follow-up after adversarial hardening: use the patched sandbox executable with the bundled adapter (no --adapter needed).
+Use an unpatched engine to reproduce InputInjectionUnavailable. Retain the new plan-bound trace and actual executable SHA-256,
+then rerun bangirasu routes and independently inspect transitions, fresh contact and uninterrupted victim control/hitstun.
+The pinned engine patch itself must be made available for source review; cloud Lua stubs do not audit InputReader.LocalInput.

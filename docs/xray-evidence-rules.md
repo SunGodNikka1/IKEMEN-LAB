@@ -145,3 +145,5 @@ A route is reported `RuntimeVerified` only when every step has its transition (a
 | Ability membership through StaticProven edges only | StaticProven; through any inferred edge: Inferred |
 | Ability category (Normal, Special, Super, Throw, Projectile, Counter, Defensive, Summon, Mobility, Mode) | **Always Inferred** |
 | Variable names / traits, helper roles, author-comment names | **Always Inferred** |
+
+Current verifier scope: plan fingerprint + exact trace/run. No RuntimeVerified confidence propagates into the static graph. See the adversarial audit and tightened proof contract in xray-runtime-verifier.md.

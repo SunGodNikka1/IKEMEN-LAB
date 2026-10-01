@@ -30,17 +30,14 @@ function M.new(plan, io)
 	local held = {}
 	local inputPos = 0
 	local neutralRun = 0
-	local injectChecked = false
+
 
 	local function setKeys(frame, keys, tag)
 		local ok, res = pcall(io.inject, 1, keys)
-		if not injectChecked then
-			injectChecked = true
-			if not ok or not res then
-				io.emit("driver", frame, "event", "inject_unavailable", "detail",
-					ok and "the adapter returned false" or ("the adapter raised: " .. tostring(res)))
-				return false
-			end
+		if not ok or res ~= true then
+			io.emit("driver", frame, "event", "inject_unavailable", "step", stepIdx > 0 and stepIdx or nil,
+				"detail", ok and "the adapter returned false" or ("the adapter raised: " .. tostring(res)))
+			return false
 		end
 		if not same(keys, held) then
 			held = keys
@@ -72,6 +69,13 @@ function M.new(plan, io)
 	end
 
 	function d.tick(frame, obs)
+		if type(io.inject) == "function" then
+			local ok, result = pcall(io.inject, 2, {})
+			if not ok or result ~= true then
+				io.emit("driver", frame, "event", "inject_unavailable", "detail", "could not isolate P2 input")
+				return "noInject"
+			end
+		end
 		local p1 = obs.p1 or {}
 		local state = p1.state
 		if state ~= lastState then lastState = state; stateTicks = 0 else stateTicks = stateTicks + 1 end
@@ -129,7 +133,7 @@ function M.new(plan, io)
 		if phase == "input" then
 			if state == step.toState and stateTicks > 0 then
 				-- reached early, while the tail of the input is still being fed: stop pressing
-				setKeys(frame, {}, "input_end")
+				if not setKeys(frame, {}, "input_end") then return "noInject" end
 				note(frame, "step_done", tostring(state))
 				beginStep(frame)
 				return nil
@@ -138,7 +142,7 @@ function M.new(plan, io)
 			local keys = step.input[inputPos]
 			if keys == nil then
 				phase = "watch"; counter = 0
-				setKeys(frame, {}, "input_end")
+				if not setKeys(frame, {}, "input_end") then return "noInject" end
 				return nil
 			end
 			if not setKeys(frame, keys, "input") then return "noInject" end
@@ -160,7 +164,7 @@ function M.new(plan, io)
 		end
 
 		if phase == "tail" then
-			setKeys(frame, {}, "tail")
+			if not setKeys(frame, {}, "tail") then return "noInject" end
 			if counter >= (plan.tailFrames or 20) then note(frame, "plan_complete"); return "planComplete" end
 			return nil
 		end

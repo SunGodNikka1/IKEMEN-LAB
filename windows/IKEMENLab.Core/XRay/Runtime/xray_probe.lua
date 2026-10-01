@@ -1,6 +1,6 @@
 -- IKEMEN Lab X-Ray runtime probe (compatibility spike, schema ikemenlab.xray.trace/0).
 --
--- Reports raw engine facts as append-only JSON lines. It never decides what a fact *means* (no "combo", no "anti-air");
+-- Reports raw engine facts and explicitly tagged derived distance as append-only JSON lines. It never decides what a fact *means* (no "combo", no "anti-air");
 -- IKEMEN Lab interprets the trace afterwards. Only ever loaded into a disposable sandbox copy of an IKEMEN install.
 --
 -- STATUS: written against what IKEMEN GO's Lua API is believed to expose, NOT yet verified on a real engine build. Every engine
@@ -78,10 +78,12 @@ end
 
 local driver = nil
 local driverError = nil
+local planFingerprint = nil
 local function loadDriver(emitFn, OFn)
 	if not cfg.plan then return end
 	local ok, plan = pcall(dofile, cfg.plan)
 	if not ok or type(plan) ~= "table" then driverError = "plan: " .. tostring(plan); return end
+	planFingerprint = plan.fingerprint
 	local okD, mod = pcall(dofile, cfg.driver or "external/mods/xray_driver.lua")
 	if not okD or type(mod) ~= "table" then driverError = "driver: " .. tostring(mod); return end
 	pcall(dofile, cfg.adapter or "external/mods/xray_inject.lua")
@@ -151,9 +153,9 @@ local FIELDS = {
 }
 
 local MATCH_FIELDS = {
-	{ "round", num, { function() return call("roundno") end } },
+	{ "round", num, { function() return call("roundNo") end, function() return call("roundno") end } },
 	{ "engineTick", num, { function() return call("tickcount") end, function() return call("gametick") end, function() return call("gametime") end } },
-	{ "distance", num, { function() return call("p2distx") end, function() return call("p2dist", "x") end, function() return call("p2bodydistx") end } },
+	{ "distance", num, { function() return call("p2distx") end, function() return call("p2dist", "x") end } },
 	{ "p1TargetCount", num, { function() return call("numtarget") end } },
 	{ "p1TargetId", num, { function() return call("targetid") end } },
 }
@@ -242,11 +244,13 @@ local function writeMeta()
 	emit(O("type", "meta", "frame", 0, "schema", "ikemenlab.xray.trace/0", "probeVersion", PROBE_VERSION,
 		"engineVersion", engineVersion() or NULL, "luaVersion", _VERSION or NULL, "character", cfg.character,
 		"platform", (package and package.config and package.config:sub(1, 1) == "\\") and "windows" or "other",
-		"capabilities", caps, "hooks", hooks))
+		"capabilities", caps, "hooks", hooks, "planFingerprint", planFingerprint or NULL))
 end
 
 local function finish(reason)
 	if finished then return end
+	local release = rawget(_G, "__ikemenlab_xray_release")
+	if type(release) == "function" then pcall(release, 1); pcall(release, 2) end
 	finished = true
 	emit(O("type", "end", "frame", tick, "reason", reason))
 	local esc_fn = G("esc")
@@ -280,16 +284,18 @@ local function sample()
 	frame[#frame + 1] = { "round", extra.round == nil and NULL or extra.round }
 	frame[#frame + 1] = { "p1", p1 }
 	frame[#frame + 1] = { "p2", p2 }
-	-- P2DistX has no Lua binding on this build, so distance came through as null and the driver gave up on
--- approaching. Both positions are recorded raw every frame, so derive it from them: still engine facts,
--- just arithmetic on two facts rather than a trigger. p1.x/p2.x are body positions, which is what
--- P2DistX measures.
-if extra.distance == nil and p1 ~= nil and p2 ~= nil then
-	local ax, bx = value(p1, "x"), value(p2, "x")
-	if type(ax) == "number" and type(bx) == "number" then extra.distance = bx - ax end
-end
-
-frame[#frame + 1] = { "distance", extra.distance == nil and NULL or extra.distance }
+	-- World-axis delta, derived from raw positions. It is not facing-relative P2DistX,
+	-- nor P2BodyDistX. The driver uses only its magnitude for the approach threshold.
+	local distanceSource = extra.distance ~= nil and "engine-trigger" or nil
+	if extra.distance == nil then
+		local ax, bx = value(p1, "x"), value(p2, "x")
+		if type(ax) == "number" and type(bx) == "number" then
+			extra.distance = bx - ax
+			distanceSource = "derived:p2.x-p1.x"
+		end
+	end
+	frame[#frame + 1] = { "distance", extra.distance == nil and NULL or extra.distance }
+	frame[#frame + 1] = { "distanceSource", distanceSource or NULL }
 	frame[#frame + 1] = { "p1TargetCount", extra.p1TargetCount == nil and NULL or extra.p1TargetCount }
 	frame[#frame + 1] = { "p1TargetId", extra.p1TargetId == nil and NULL or extra.p1TargetId }
 	frame[#frame + 1] = { "combo", extra.combo == nil and NULL or extra.combo }

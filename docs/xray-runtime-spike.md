@@ -41,7 +41,7 @@ runtime StateNo with its static semantic State object. Then stop. The full runti
 ## Trace format `ikemenlab.xray.trace/0`
 
 One JSON object per line. `frame` is the probe's own strictly increasing counter and orders every event; `engineTick` is the engine's tick if the build exposes one.
-The probe reports **raw engine facts only**; deciding that something was a hit, a combo or an anti-air is C#'s job, later.
+The probe reports raw engine fields plus explicitly tagged **derived distance telemetry**; deciding that something was a hit, a combo or an anti-air is C#'s job, later.
 
 ```
 {"type":"probe_loaded","frame":0,"probeVersion":"0.1-spike","hookPresent":false,"loopPresent":false}
@@ -55,7 +55,7 @@ The probe reports **raw engine facts only**; deciding that something was a hit, 
 Deviation from the sketch in the request: the probe emits `life_change` (a raw fact) rather than `hit` (an interpretation). `TraceReader` still parses `hit` events so a later probe may add them.
 
 Fields captured per player: state, prevState, ctrl, stateType, moveType, anim, animElem, life, power, x, y, velX, velY, facing, moveHit, moveContact, hitPause.
-Match-level: round, engineTick, distance, target count/id, combo count. Any field the engine build does not expose is `null`, and `meta.capabilities` records `true`/`false` for each — **nothing is faked**.
+Match-level: round, engineTick, distance with distanceSource, target count/id, combo count. Any field the engine build does not expose is `null`, and `meta.capabilities` records `true`/`false` for each — **nothing is faked**.
 
 ## Static ↔ runtime association
 
@@ -113,3 +113,5 @@ the direct proof that the reads are genuinely per-player and not one shared cont
 Fields still honestly `null` on this build: `animElem` (needs an argument the probe does not pass) and `hitPause`
 (`hitpausetime` is not bound at all), plus the match-level fields. `RuntimeVerified` remains unused and no runtime evidence
 was allowed to raise a static confidence.
+
+Distance may be derived from raw positions; `distanceSource` preserves provenance even when the direct distance capability is false.

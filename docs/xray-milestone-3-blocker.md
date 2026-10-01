@@ -1,9 +1,11 @@
-# Character X-Ray — Milestone 3 runtime verifier: BLOCKED on the input adapter
+# Historical M3 blocker — superseded by the sandbox injection hook
 
 Status after independent Windows acceptance of `5b756b2`. **Milestone 3 is not accepted.** The architecture is in place and
 one of the three required behaviours is proven; the other two are blocked by the engine build, not by the code.
 
-## The blocker: there is no way to inject input into this engine from the adapter
+> Historical evidence below concerns an **unpatched engine**. No custom adapter argument is not itself a blocker: the bundled adapter works with __xraySetVirtualInput. These earlier runs remain historical evidence, not acceptance of current code.
+
+## The earlier blocker: there is no way to inject input into this engine from the adapter
 
 Claude deliberately left `_G.__ikemenlab_xray_inject(player, keys)` as a template. Implementing it requires a mechanism to
 write live per-player held-key state. Traced from the actual source of `v1.0.0-jg-policy-5 - ffa-build`
@@ -39,7 +41,7 @@ own `-h` output lists no `-playdemo`/`-record` flag.
 
 ## What was proven
 
-**Inconclusive without an adapter (required, passes).** `runtime-verify` on the real install, no adapter supplied:
+**Inconclusive on the unpatched engine (historical, passes).** `runtime-verify` on the real install, no adapter supplied:
 
 ```json
 {"status":"Inconclusive","reason":"InputInjectionUnavailable",

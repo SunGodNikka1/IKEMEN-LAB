@@ -225,6 +225,10 @@ public static class InputPlanner
         return Encoding.UTF8.GetString(ms.ToArray());
     }
 
+    /// <summary>Identity of the exact inputs, timing and route being tested; not a signature of authenticity.</summary>
+    public static string Fingerprint(InputPlan plan) => Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(ToJson(plan))));
+
     /// <summary>The plan as a Lua chunk (<c>return {…}</c>) the driver loads with dofile. Only literals, so nothing in a plan can execute.</summary>
     public static string ToLua(InputPlan plan)
     {
@@ -232,7 +236,7 @@ public static class InputPlanner
         static string N(int? v) => v is { } n ? n.ToString(CultureInfo.InvariantCulture) : "nil";
         var sb = new StringBuilder();
         sb.Append("return {\n");
-        sb.Append($"  character = {Q(plan.Character)}, route = {Q(plan.RouteKey)},\n");
+        sb.Append($"  character = {Q(plan.Character)}, route = {Q(plan.RouteKey)}, fingerprint = {Q(Fingerprint(plan))},\n");
         sb.Append($"  approachDistance = {plan.ApproachDistance}, neutralFrames = {plan.NeutralFrames}, tailFrames = {plan.TailFrames}, maxFrames = {plan.MaxFrames},\n");
         sb.Append("  steps = {\n");
         foreach (var s in plan.Steps)
