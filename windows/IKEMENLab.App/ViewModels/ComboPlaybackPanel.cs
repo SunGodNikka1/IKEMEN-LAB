@@ -31,6 +31,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private bool _showFailure;
     private FailureInspection? _failure;
     private string _dlls = string.Empty;
+    private string _approach = string.Empty;
 
     public ComboPlaybackPanel(XRayViewModel owner, ComboLens lens)
     {
@@ -46,6 +47,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
         _dummy = saved.XRayDummy ?? string.Empty;
         _stage = saved.XRayStage ?? string.Empty;
         _dlls = saved.XRayEngineDlls ?? string.Empty;
+        _approach = saved.XRayApproachDistance ?? string.Empty;
 
         PlayCommand = new AsyncRelayCommand(PlayAsync, () => CanPlay);
         ReplayCommand = new AsyncRelayCommand(() => ReplayAsync(), () => _session.CanReplayFor(SelectedKey));
@@ -54,6 +56,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
         ViewTraceCommand = new RelayCommand(ViewTrace, () => _session.HasResultFor(SelectedKey));
         BrowseEngineCommand = new RelayCommand(BrowseEngine);
         BrowseDllsCommand = new RelayCommand(BrowseDlls);
+        CopyDiagnosticCommand = new RelayCommand(CopyDiagnostic, () => _session.DiagnosticFor(SelectedKey) is not null);
         ToggleSetupCommand = new RelayCommand(() => ShowSetup = !ShowSetup);
         OpenFolderCommand = new RelayCommand(OpenFolder, () => _session.HasResultFor(SelectedKey));
         RefreshSetup(showIssuesAsSetup: false);
@@ -70,6 +73,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
     public ICommand ViewTraceCommand { get; }
     public ICommand BrowseEngineCommand { get; }
     public ICommand BrowseDllsCommand { get; }
+    public ICommand CopyDiagnosticCommand { get; }
     public ICommand ToggleSetupCommand { get; }
     public ICommand OpenFolderCommand { get; }
 
@@ -130,6 +134,10 @@ public sealed class ComboPlaybackPanel : ObservableObject
     public string EnginePath { get => _enginePath; set { if (SetProperty(ref _enginePath, value)) SetupEdited(); } }
     /// <summary>Folder with the SDL/FFmpeg DLLs a self-built engine needs. Blank = use the DLLs beside the engine, if any.</summary>
     public string EngineDlls { get => _dlls; set { if (SetProperty(ref _dlls, value)) SetupEdited(); } }
+    /// <summary>How close P1 walks to the dummy before the route starts. Blank = 60. A configured threshold; it is not the attack's range and is reported separately from the separation actually measured.</summary>
+    public string ApproachDistance { get => _approach; set { if (SetProperty(ref _approach, value)) { OnPropertyChanged(nameof(ApproachDistanceError)); SetupEdited(); } } }
+    public string ApproachDistanceError => PlaybackPreflight.TryParseApproach(_approach, out _, out var problem) ? string.Empty : problem ?? string.Empty;
+    public bool HasApproachDistanceError => ApproachDistanceError.Length > 0;
     public string Dummy { get => _dummy; set { if (SetProperty(ref _dummy, value)) SetupEdited(); } }
     public string Stage { get => _stage; set { if (SetProperty(ref _stage, value)) SetupEdited(); } }
     public string SetupSummary { get => _setupSummary; private set => SetProperty(ref _setupSummary, value); }
@@ -172,7 +180,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
         if (setup is null || !setup.Ready)
         {
             // A refused press is still an attempt: it gets its own identity and never inherits an earlier run's verdict.
-            _session.RefuseAttempt(current.Route.Key, setup is null ? SetupSummary : string.Join(" ", setup.Issues));
+            _session.RefuseAttempt(current.Route.Key, setup is null ? SetupSummary : string.Join(" ", setup.Issues), setup);
             return;
         }
 
@@ -189,7 +197,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
         if (!_session.CanReplayFor(SelectedKey) || _session.Last is not { } last) return;
         if (setup is null || !setup.Ready)
         {
-            _session.RefuseAttempt(last.Route.Key, setup is null ? SetupSummary : string.Join(" ", setup.Issues));
+            _session.RefuseAttempt(last.Route.Key, setup is null ? SetupSummary : string.Join(" ", setup.Issues), setup);
             return;
         }
 
@@ -228,6 +236,21 @@ public sealed class ComboPlaybackPanel : ObservableObject
         if (picked is not null) EnginePath = picked;
     }
 
+    /// <summary>The latest attempt's diagnostic for the selected route (text, then the JSON), or empty when the selected route is not the one the attempt was for.</summary>
+    public string DiagnosticText()
+    {
+        var d = _session.DiagnosticFor(SelectedKey);
+        return d is null ? string.Empty : d.ToText() + "\n--- JSON (" + PlaybackDiagnostic.SchemaVersion + ") ---\n" + d.ToJson() + "\n";
+    }
+
+    private void CopyDiagnostic()
+    {
+        var text = DiagnosticText();
+        if (text.Length == 0) return;
+        try { Clipboard.SetText(text); }
+        catch (System.Runtime.InteropServices.ExternalException) { /* the clipboard is busy; nothing was copied */ }
+    }
+
     private void BrowseDlls()
     {
         var picked = new FolderPicker().PickFolder(string.IsNullOrWhiteSpace(EngineDlls) ? null : EngineDlls, "Choose the folder with the engine's runtime DLLs (SDL, FFmpeg…)");
@@ -264,6 +287,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
         var s = SafeLoad();
         s.XRayEnginePath = EnginePath.Trim();
         s.XRayEngineDlls = EngineDlls.Trim();
+        s.XRayApproachDistance = ApproachDistance.Trim();
         s.XRayDummy = Dummy.Trim();
         s.XRayStage = Stage.Trim();
         return s;

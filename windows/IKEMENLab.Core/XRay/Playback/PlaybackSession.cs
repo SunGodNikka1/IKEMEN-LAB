@@ -65,6 +65,8 @@ public sealed class PlaybackSession
     private readonly List<string> _leftovers = [];
     private Task<ShutdownResult>? _shutdown;
     private int _delivered, _dropped;
+    private PlaybackRequest? _attemptRequest;
+    private PlaybackSetup? _attemptSetup;
 
     /// <summary>Notifications that reached <see cref="Changed"/> listeners / that were queued but dropped because the session had closed by the time they ran. Direct signals for tests: unlike the state getters, these cannot change legitimately after a close.</summary>
     public int DeliveredNotifications => Volatile.Read(ref _delivered);
@@ -166,6 +168,8 @@ public sealed class PlaybackSession
     /// <summary>Plays the request. Never throws: failures become <see cref="PlaybackState.Error"/>, Cancel becomes <see cref="PlaybackState.Cancelled"/>.</summary>
     public async Task PlayAsync(PlaybackRequest request)
     {
+        // The static evidence is captured once, now, from the graph this attempt was given; the diagnostic reads this copy, never the live files.
+        if (request.Snapshot is null) request = request with { Snapshot = StaticSnapshot.Capture(request.Graph, request.Route) };
         PlaybackCancellation gate;
         lock (_gate)
         {
@@ -174,6 +178,8 @@ public sealed class PlaybackSession
             _cancel = new PlaybackCancellation();
             gate = _cancel;
             Last = request;
+            _attemptRequest = request;
+            _attemptSetup = request.Setup;
             Outcome = null;
             ResultAttemptId = null;
             Error = null;
@@ -193,6 +199,7 @@ public sealed class PlaybackSession
             var outcome = await run.ConfigureAwait(false);
             // The service has already committed this result (it is on disk); a Cancel that arrived after that point does not undo it.
             lock (_gate) { Outcome = outcome; ResultAttemptId = AttemptId; Attempt = AttemptState.VerdictProduced; State = PlaybackState.Finished; Phase = string.Empty; }
+            SaveDiagnostic();
         }
         catch (OperationCanceledException)
         {
@@ -216,11 +223,13 @@ public sealed class PlaybackSession
     /// Records a Play press that was refused before any run (the caller's preflight found the setup unusable). It gets its own attempt id, leaves any earlier
     /// result untouched but no longer current, and never produces a verdict. Ignored while a run is active.
     /// </summary>
-    public void RefuseAttempt(string? routeKey, string issue)
+    public void RefuseAttempt(string? routeKey, string issue, PlaybackSetup? setup = null)
     {
         lock (_gate)
         {
             if (IsBusy || _closed) return;
+            _attemptRequest = null;
+            _attemptSetup = setup;
             AttemptId++;
             Attempt = AttemptState.PreflightRefused;
             AttemptIssue = issue;
@@ -228,6 +237,35 @@ public sealed class PlaybackSession
         }
 
         Raise();
+    }
+
+    /// <summary>
+    /// The diagnostic for the LATEST attempt, as a snapshot: a run's evidence, or — when the latest attempt was refused before launch, cancelled or failed — a diagnostic of
+    /// that attempt alone. An earlier attempt's result is never attached to it. Null before any attempt.
+    /// </summary>
+    public PlaybackDiagnostic? DiagnosticForLatestAttempt()
+    {
+        PlaybackDiagnostic.Source src;
+        lock (_gate)
+        {
+            if (AttemptId == 0) return null;
+            src = new PlaybackDiagnostic.Source(AttemptId, Attempt, AttemptIssue, AttemptRouteKey, _attemptSetup, _attemptRequest, _attemptRequest?.Snapshot, Outcome, ResultAttemptId);
+        }
+
+        return PlaybackDiagnostic.Build(src);
+    }
+
+    /// <summary>The latest attempt's diagnostic, only when it belongs to <paramref name="routeKey"/> (the selected route); otherwise null.</summary>
+    public PlaybackDiagnostic? DiagnosticFor(string? routeKey) => routeKey is not null && AttemptRouteKey == routeKey ? DiagnosticForLatestAttempt() : null;
+
+    private void SaveDiagnostic()
+    {
+        try
+        {
+            if (Outcome is { } o && DiagnosticForLatestAttempt() is { } d && Directory.Exists(o.Record.Directory))
+                File.WriteAllText(o.Record.DiagnosticPath, d.ToJson(), new System.Text.UTF8Encoding(false));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the diagnostic can still be built on demand */ }
     }
 
     public Task ReplayAsync() => Last is { } r ? PlayAsync(r) : Task.CompletedTask;

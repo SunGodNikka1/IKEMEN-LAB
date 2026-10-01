@@ -1,0 +1,52 @@
+{
+  "schema": "ikemenlab.xray.plan/1",
+  "character": "char:Goku",
+  "route": "cand:neutral>state:17200@state:-1/ctrl:114#0>cand:state:17200>state:17210@state:17200/ctrl:3#0",
+  "approachDistance": 60,
+  "neutralFrames": 20,
+  "tailFrames": 20,
+  "maxFrames": 1800,
+  "steps": [
+    {
+      "index": 1,
+      "edge": "cand:neutral>state:17200@state:-1/ctrl:114#0",
+      "kind": "Start",
+      "from": "neutral",
+      "to": "state:17200",
+      "fromState": null,
+      "toState": 17200,
+      "command": "a",
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "a"
+        ],
+        []
+      ],
+      "notes": []
+    },
+    {
+      "index": 2,
+      "edge": "cand:state:17200>state:17210@state:17200/ctrl:3#0",
+      "kind": "Cancel",
+      "from": "state:17200",
+      "to": "state:17210",
+      "fromState": 17200,
+      "toState": 17210,
+      "command": "a",
+      "contact": "contact",
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "a"
+        ],
+        []
+      ],
+      "notes": []
+    }
+  ],
+  "warnings": []
+}

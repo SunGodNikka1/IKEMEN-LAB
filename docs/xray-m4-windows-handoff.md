@@ -27,3 +27,7 @@ Core logic (planner, session scoping, cancel boundary, shutdown, linger trace, p
 - Select routes with `xray-combo-route-index N` or `xray-combo-route-key <exact key>` and keep the logged `selected route #N … key=…` line as proof of which candidate ran.
 - Preflight vs runtime: an engine refused before launch shows `attemptState=PreflightRefused` and `playback-wait verdict` fails with `no runtime verdict: attempt N refused during preflight`; an engine that launched and could not inject shows `attemptState=VerdictProduced`, `verdict=Inconclusive`, `reason=InputInjectionUnavailable`, a `runId` and an engine hash. Report these as different results.
 - Check `status.resultIsCurrent=True` before trusting any verdict/hash fields.
+
+## Diagnostics / spacing pass (see `xray-m4-diagnostics.md`)
+Please also check on Windows: (1) Approach distance field in Playback setup (blank = 60, invalid refused, remembered across restarts, visible in the plan JSON/fingerprint of a run); (2) **Copy Full Diagnostic** — paste after a Failed run, a preflight-refused press, and with another route selected (disabled); `playback-diagnostic` logs the same text;
+(3) re-run Funny Valentine with a smaller Approach distance (manual retry only) and report the derived separation and whether contact occurs; (4) re-run Goku and replace `m4_goku_*` fixtures with the real trace if it differs from the reconstruction; (5) the new WPF tests `ApproachDistanceIsInPlaybackSetupValidatedAndRemembered` and `CopyFullDiagnosticFollowsTheAttemptAndTheSelectedRoute` (compile-checked only here).

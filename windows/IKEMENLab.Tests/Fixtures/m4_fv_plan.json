@@ -1,0 +1,96 @@
+{
+  "schema": "ikemenlab.xray.plan/1",
+  "character": "char:Funny_Valentine",
+  "route": "cand:neutral>state:200@state:-1/ctrl:15#0>cand:state:200>state:210@state:200/ctrl:6#0>cand:state:210>state:215@state:210/ctrl:6#0>cand:state:215>state:220@state:215/ctrl:5#0",
+  "approachDistance": 60,
+  "neutralFrames": 20,
+  "tailFrames": 20,
+  "maxFrames": 1800,
+  "steps": [
+    {
+      "index": 1,
+      "edge": "cand:neutral>state:200@state:-1/ctrl:15#0",
+      "kind": "Start",
+      "from": "neutral",
+      "to": "state:200",
+      "fromState": null,
+      "toState": 200,
+      "command": "a",
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "a"
+        ],
+        []
+      ],
+      "notes": []
+    },
+    {
+      "index": 2,
+      "edge": "cand:state:200>state:210@state:200/ctrl:6#0",
+      "kind": "Cancel",
+      "from": "state:200",
+      "to": "state:210",
+      "fromState": 200,
+      "toState": 210,
+      "command": "a",
+      "contact": "contact",
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "a"
+        ],
+        []
+      ],
+      "notes": []
+    },
+    {
+      "index": 3,
+      "edge": "cand:state:210>state:215@state:210/ctrl:6#0",
+      "kind": "Cancel",
+      "from": "state:210",
+      "to": "state:215",
+      "fromState": 210,
+      "toState": 215,
+      "command": "a",
+      "contact": "contact",
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "a"
+        ],
+        []
+      ],
+      "notes": []
+    },
+    {
+      "index": 4,
+      "edge": "cand:state:215>state:220@state:215/ctrl:5#0",
+      "kind": "Cancel",
+      "from": "state:215",
+      "to": "state:220",
+      "fromState": 215,
+      "toState": 220,
+      "command": "a",
+      "contact": "contact",
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "a"
+        ],
+        []
+      ],
+      "notes": []
+    }
+  ],
+  "warnings": [
+    "Step 1 (cand:neutral>state:200@state:-1/ctrl:15#0) has 2 unmodelled condition(s); the script may not satisfy them.",
+    "Step 3 (cand:state:210>state:215@state:210/ctrl:6#0) has 1 unmodelled condition(s); the script may not satisfy them.",
+    "Step 4 (cand:state:215>state:220@state:215/ctrl:5#0) has 1 unmodelled condition(s); the script may not satisfy them."
+  ]
+}

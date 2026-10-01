@@ -9,7 +9,11 @@ using IKEMENLab.Core.XRay.Verify;
 namespace IKEMENLab.Core.XRay.Playback;
 
 public sealed record PlaybackRequest(
-    string Root, string SubjectFolder, string SubjectDef, CandidateGraph Graph, ComboRoute Route, PlaybackSetup Setup, string RouteSummary);
+    string Root, string SubjectFolder, string SubjectDef, CandidateGraph Graph, ComboRoute Route, PlaybackSetup Setup, string RouteSummary)
+{
+    /// <summary>The route's static evidence as it was when the attempt started. Captured once per attempt; later edits or re-indexing never change it.</summary>
+    public StaticSnapshot? Snapshot { get; init; }
+}
 
 /// <summary>The saved result of one playback. Everything else (plan, report, trace) lives beside it in <see cref="Directory"/>.</summary>
 public sealed record PlaybackRecord(
@@ -19,10 +23,16 @@ public sealed record PlaybackRecord(
     public string TracePath => Path.Combine(Directory, "trace.jsonl");
     public string ReportPath => Path.Combine(Directory, "report.json");
     public string PlanPath => Path.Combine(Directory, "plan.json");
+    public string DiagnosticPath => Path.Combine(Directory, "diagnostic.json");
+    /// <summary>The approach-distance threshold the plan used (a configured value, not a measured range).</summary>
+    public int ApproachDistance { get; init; } = PlaybackPreflight.DefaultApproachDistance;
 }
 
 public sealed record PlaybackOutcome(PlaybackRecord Record, VerificationReport Report, TraceLog Log)
 {
+    /// <summary>The exact plan that was played.</summary>
+    public InputPlan? Plan { get; init; }
+    public StaticSnapshot? Snapshot { get; init; }
     public FailureInspection? Failure => PlaybackInspector.Inspect(Report, Log);
 }
 
@@ -79,7 +89,8 @@ public sealed class ComboPlaybackService
         var id = started.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..6];
         var dir = Path.Combine(_storeRoot, id);
         Directory.CreateDirectory(dir);
-        var planOptions = new PlanOptions();
+        var planOptions = new PlanOptions { ApproachDistance = setup.ApproachDistance };
+        var snapshot = request.Snapshot ?? StaticSnapshot.Capture(request.Graph, request.Route);
 
         var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, planOptions.MaxFrames, _sandboxBase,
             AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames, Deleter = SandboxDeleter };
@@ -107,7 +118,7 @@ public sealed class ComboPlaybackService
             var report0 = result.Report;
             File.WriteAllText(Path.Combine(dir, "report.json"), RouteVerifier.ToJson(report0), new UTF8Encoding(false));
             record = new PlaybackRecord(id, started, report0.Character, report0.RouteKey, request.RouteSummary, report0.Status.ToString(), report0.Reason, report0.FailedStep,
-                setup.Dummy, setup.Stage, report0.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir);
+                setup.Dummy, setup.Stage, report0.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir) { ApproachDistance = planOptions.ApproachDistance };
             File.WriteAllText(tmp, MetaJson(record), new UTF8Encoding(false));
             CommitSeam?.Invoke("before-commit");
             if (!gate.TryCommit(() => File.Move(tmp, Path.Combine(dir, "meta.json"))))
@@ -124,7 +135,7 @@ public sealed class ComboPlaybackService
         Prune();
 
         var log = File.Exists(record.TracePath) ? TraceReader.ReadFile(record.TracePath) : result.Log ?? new TraceLog { Events = [], Issues = [] };
-        return new PlaybackOutcome(record, report, log);
+        return new PlaybackOutcome(record, report, log) { Plan = result.Plan, Snapshot = snapshot };
     }
 
     /// <summary>Saved records, newest first. Unreadable folders are skipped.</summary>
@@ -144,7 +155,10 @@ public sealed class ComboPlaybackService
                 list.Add(new PlaybackRecord(S("id") ?? Path.GetFileName(dir), DateTime.TryParse(S("createdUtc"), null, System.Globalization.DateTimeStyles.RoundtripKind, out var t) ? t : default,
                     S("character") ?? "", S("route") ?? "", S("summary") ?? "", S("status") ?? "", S("reason"),
                     r.TryGetProperty("failedStep", out var fs) && fs.ValueKind == JsonValueKind.Number ? fs.GetInt32() : null,
-                    S("dummy"), S("stage"), S("engineSha256"), r.TryGetProperty("seconds", out var sec) && sec.ValueKind == JsonValueKind.Number ? sec.GetDouble() : 0, dir));
+                    S("dummy"), S("stage"), S("engineSha256"), r.TryGetProperty("seconds", out var sec) && sec.ValueKind == JsonValueKind.Number ? sec.GetDouble() : 0, dir)
+                {
+                    ApproachDistance = r.TryGetProperty("approachDistance", out var ad) && ad.ValueKind == JsonValueKind.Number ? ad.GetInt32() : PlaybackPreflight.DefaultApproachDistance
+                });
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { /* skip */ }
         }
@@ -182,6 +196,7 @@ public sealed class ComboPlaybackService
             if (r.Stage is null) w.WriteNull("stage"); else w.WriteString("stage", r.Stage);
             if (r.EngineSha256 is null) w.WriteNull("engineSha256"); else w.WriteString("engineSha256", r.EngineSha256);
             w.WriteNumber("seconds", r.Seconds);
+            w.WriteNumber("approachDistance", r.ApproachDistance);
             w.WriteEndObject();
         }
 

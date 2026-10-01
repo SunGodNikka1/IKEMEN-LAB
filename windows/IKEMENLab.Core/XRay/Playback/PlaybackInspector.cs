@@ -76,18 +76,31 @@ public static class PlaybackInspector
             : all.Take(radius * 2).ToList();
 
         var why = step?.Detail ?? report.Continuity.Detail ?? report.Notes.FirstOrDefault() ?? "The run could not be judged.";
-        var headline = report.Status == VerifyStatus.Inconclusive
-            ? "Could not be tested: " + Describe(report.Reason)
-            : step is not null && report.Reason != VerifyReason.ComboDropped
-                ? $"Failed at step {step.Index}: {Describe(report.Reason)}"
-                : "Failed: " + Describe(report.Reason);
+        var ev = step?.Evidence;
+        string headline;
+        if (report.Status == VerifyStatus.Inconclusive) headline = "Could not be tested: " + Describe(report.Reason);
+        else if (ev is { Failure: PrerequisiteFailure.RequiredContactNotObserved or PrerequisiteFailure.SourceStateNeverObserved or PrerequisiteFailure.InputNotAttempted } && !ev.InputAttempted)
+            headline = $"Step {step!.Index} was not attempted: " + (ev.Failure == PrerequisiteFailure.RequiredContactNotObserved
+                ? (step.Index == 2 ? "the opening attack did not connect." : "the previous attack did not connect.")
+                : ev.Failure == PrerequisiteFailure.SourceStateNeverObserved ? $"State {ev.SourceState} never occurred." : "its input was never sent.");
+        else if (step is not null && report.Reason == VerifyReason.WrongState) headline = $"Step {step.Index} failed: different move.";
+        else if (step is not null && report.Reason != VerifyReason.ComboDropped) headline = $"Failed at step {step.Index}: {Describe(report.Reason)}";
+        else headline = "Failed: " + Describe(report.Reason);
 
-        return new FailureInspection(headline, why, Hints(report.Reason), step?.Index, step?.EdgeId, step?.FromId, step?.ToId, focus, window);
+        return new FailureInspection(headline, why, Hints(report.Reason, ev), step?.Index, step?.EdgeId, step?.FromId, step?.ToId, focus, window);
     }
 
     private static long? FocusFrame(VerificationReport report, StepVerdict? step, TraceLog log)
     {
         if (report.Reason == VerifyReason.ComboDropped && report.Continuity.DropFrame is { } drop) return drop;
+        // Decisive evidence outranks bookkeeping: the first wrong move (never replaced by a later return to neutral or a driver timeout), or the end of the
+        // source move whose required contact never came.
+        if (step?.Evidence is { } ev)
+        {
+            if (ev.FirstMismatchFrame is { } mismatch) return mismatch;
+            if (ev.Failure is PrerequisiteFailure.RequiredContactNotObserved && ev.SourceStateLastFrame is { } last) return last;
+        }
+
         if (step is { } s)
         {
             if (s.TransitionFrame is { } t) return t;
@@ -119,8 +132,14 @@ public static class PlaybackInspector
         var other => other
     };
 
-    private static IReadOnlyList<string> Hints(string? reason) => reason switch
+    private static string SeparationText(StepEvidence e) =>
+        e.SeparationMin is { } lo && e.SeparationMax is { } hi ? (lo == hi ? $"{lo:0.##}" : $"{lo:0.##}–{hi:0.##}") + " (derived)" : "not available";
+
+    private static IReadOnlyList<string> Hints(string? reason, StepEvidence? ev) => reason switch
     {
+        VerifyReason.PreconditionNeverMet when ev?.Failure == PrerequisiteFailure.RequiredContactNotObserved =>
+            [$"The configured approach distance is {ev.ConfiguredApproachDistance}; the derived separation around the attack was {SeparationText(ev)}. That is a threshold and a measurement, not the attack's range.",
+             "You can retry manually with a different Approach distance in Playback setup (smaller = closer). Nothing is retried automatically."],
         VerifyReason.PreconditionNeverMet =>
             ["The previous step probably did not lead here. Look at that transition's gate for conditions the plan could not satisfy.",
              "Open the failing step in the Triggers lens: unmodelled conditions are listed on the edge."],
@@ -131,7 +150,8 @@ public static class PlaybackInspector
             ["The inputs were fed but the engine never entered the next state. A trigger the static graph could not model may be blocking it.",
              "Open the edge's controller in the Triggers lens and check its unmodelled conditions."],
         VerifyReason.WrongState =>
-            ["Another controller took priority and sent the character elsewhere. Compare the other states reachable from the source in the State Graph."],
+            ["The trace shows which state was entered, not which controller ran it. A possible static explanation (not established by this run): another controller reading the same command may have fired instead; Copy Full Diagnostic lists the statically related controllers.",
+             "Compare the other states reachable from the source in the State Graph."],
         VerifyReason.ComboDropped =>
             ["The opponent left hitstun before the last move. Prefer a route with faster cancels or an on-hit link; check the move's hit pause and ground type."],
         VerifyReason.InputInjectionUnavailable =>

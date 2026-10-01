@@ -227,7 +227,43 @@ public static class InputPlanner
 
     /// <summary>Identity of the exact inputs, timing and route being tested; not a signature of authenticity.</summary>
     public static string Fingerprint(InputPlan plan) => Convert.ToHexString(
-        System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(ToJson(plan))));
+        System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(Canonical(ToJson(plan)))));
+
+    /// <summary>
+    /// Newlines are normalised to CRLF before hashing. Utf8JsonWriter uses the platform newline, and every fingerprint recorded so far came from Windows (CRLF);
+    /// normalising keeps those valid and makes the same plan hash identically on any platform.
+    /// </summary>
+    private static string Canonical(string json) => json.Replace("\r\n", "\n").Replace("\n", "\r\n");
+
+    /// <summary>Reads a plan written by <see cref="ToJson"/>. Throws <see cref="FormatException"/> when it is not a plan.</summary>
+    public static InputPlan FromJson(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            if (r.GetProperty("schema").GetString() != InputPlan.SchemaVersion) throw new FormatException("Not an ikemenlab.xray.plan/1 document.");
+            int? OptInt(JsonElement e, string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.Number ? v.GetInt32() : null;
+            string? OptStr(JsonElement e, string n) => e.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+            var steps = new List<PlanStep>();
+            foreach (var s in r.GetProperty("steps").EnumerateArray())
+            {
+                var input = s.GetProperty("input").EnumerateArray().Select(f => new InputFrame(f.EnumerateArray().Select(k => k.GetString()!).ToList())).ToList();
+                steps.Add(new PlanStep(s.GetProperty("index").GetInt32(), s.GetProperty("edge").GetString()!, s.GetProperty("kind").GetString()!,
+                    s.GetProperty("from").GetString()!, s.GetProperty("to").GetString()!, OptInt(s, "fromState"), s.GetProperty("toState").GetInt32(),
+                    OptStr(s, "command"), input, OptStr(s, "contact"), OptInt(s, "earliestTick"), s.GetProperty("timeoutFrames").GetInt32(),
+                    s.GetProperty("notes").EnumerateArray().Select(n => n.GetString()!).ToList()));
+            }
+
+            return new InputPlan(r.GetProperty("character").GetString()!, r.GetProperty("route").GetString()!, steps, r.GetProperty("approachDistance").GetInt32(),
+                r.GetProperty("neutralFrames").GetInt32(), r.GetProperty("tailFrames").GetInt32(), r.GetProperty("maxFrames").GetInt32(),
+                r.GetProperty("warnings").EnumerateArray().Select(n => n.GetString()!).ToList());
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            throw new FormatException("The plan JSON could not be read: " + ex.Message, ex);
+        }
+    }
 
     /// <summary>The plan as a Lua chunk (<c>return {…}</c>) the driver loads with dofile. Only literals, so nothing in a plan can execute.</summary>
     public static string ToLua(InputPlan plan)

@@ -9,6 +9,8 @@ public sealed record PlaybackSetup(
     string Root, string? Dummy, string? DummyDef, string? Stage, string? EnginePath, string? EngineDlls, bool? EngineHasVirtualInput,
     IReadOnlyList<string> Issues, IReadOnlyList<string> Notes)
 {
+    /// <summary>The validated approach-distance threshold the plan will use.</summary>
+    public int ApproachDistance { get; init; } = PlaybackPreflight.DefaultApproachDistance;
     public bool Ready => Issues.Count == 0 && Dummy is not null && DummyDef is not null && Stage is not null && EnginePath is not null;
 }
 
@@ -19,6 +21,26 @@ public sealed record PlaybackSetup(
 public static class PlaybackPreflight
 {
     /// <summary>The string the sandbox engine's hook is registered under; a build without it ends Inconclusive (InputInjectionUnavailable).</summary>
+    public const int DefaultApproachDistance = 60;
+    public const int MinApproachDistance = 1;
+    public const int MaxApproachDistance = 1000;
+
+    /// <summary>Blank = the default. Otherwise a whole number in [1, 1000]; anything else is reported, never silently replaced.</summary>
+    public static bool TryParseApproach(string? text, out int value, out string? problem)
+    {
+        value = DefaultApproachDistance;
+        problem = null;
+        if (string.IsNullOrWhiteSpace(text)) return true;
+        if (int.TryParse(text.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var n) && n >= MinApproachDistance && n <= MaxApproachDistance)
+        {
+            value = n;
+            return true;
+        }
+
+        problem = $"Approach distance must be a whole number from {MinApproachDistance} to {MaxApproachDistance} (it is {DefaultApproachDistance} by default).";
+        return false;
+    }
+
     public const string HookName = "__xraySetVirtualInput";
 
     public static PlaybackSetup Check(string root, string subjectFolder, AppSettings settings)
@@ -104,7 +126,10 @@ public static class PlaybackPreflight
             else notes.Add($"Stage defaults to '{stage}'.");
         }
 
-        return new PlaybackSetup(root, dummy, dummyDef, stage, engine, dlls, hasHook, issues, notes);
+        var approach = DefaultApproachDistance;
+        if (!TryParseApproach(settings.XRayApproachDistance, out approach, out var approachProblem)) issues.Add(approachProblem!);
+
+        return new PlaybackSetup(root, dummy, dummyDef, stage, engine, dlls, hasHook, issues, notes) { ApproachDistance = approach };
     }
 
     private static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

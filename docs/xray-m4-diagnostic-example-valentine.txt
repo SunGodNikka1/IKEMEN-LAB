@@ -1,0 +1,68 @@
+IKEMEN Lab combo playback diagnostic (ikemenlab.xray.diagnostic/1)
+kind: run
+attempt 1: VerdictProduced
+route key: cand:neutral>state:200@state:-1/ctrl:15#0>cand:state:200>state:210@state:200/ctrl:6#0>cand:state:210>state:215@state:210/ctrl:6#0>cand:state:215>state:220@state:215/ctrl:5#0
+run: run-example (produced by attempt 1)
+verdict: Failed / PreconditionNeverMet at step 2
+summary: Step 2 was not attempted: the opening attack did not connect.
+
+planned input (· = release):
+  step 1 [a]: a ·
+  step 2 [a]: a ·
+  step 3 [a]: a ·
+  step 4 [a]: a ·
+
+runtime evidence:
+  Step 2 was not attempted: the opening attack did not connect. State 200 occurred (frames 274–287), but the required contact (contact) was never observed.
+  failure: RequiredContactNotObserved
+  expected state: 210  expected state ever observed: no
+  first mismatch: state n/a at frame n/a
+  source state observed: yes (frames 274-287)
+  required contact: contact  observed: no
+  timing requirement (earliest tick n/a) satisfied: n/a
+  planned input attempted: no
+  driver reported: precondition never met for cand:state:200>state:210@state:200/ctrl:6#0 (frame 456); this is the driver's claim, not a measurement
+  executed controller: unknown (the trace does not record it)
+  driver-reported inputs: f231 step n/a F, f271 step n/a release, f273 step 1 a, f274 step 1 release
+  telemetry at frame 287 (anchor 287): state 200 ctrl no statetype S movetype A power 30 facing 1 pos (11, 0) derived distance 59 [derived:p2.x-p1.x]
+  configured approach distance: 60 — The distance P1 walks to before the route starts. It is a threshold, not the attack's range.
+  derived separation around the input/source move: at input 60, min 59, max 60 [derived:p2.x-p1.x]
+  decisive frame: 287; window ±12:
+    f275  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 10,70 dist 60 | step_done (step 1): 200 · step_wait (step 2): cand:state:200>state:210@state:200/ctrl:6#0
+    f276  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 10,70 dist 60 | 
+    f277  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 10,70 dist 60 | 
+    f278  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f279  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f280  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f281  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f282  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f283  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f284  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f285  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f286  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f287* P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f288  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f289  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f290  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f291  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f292  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f293  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f294  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f295  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f296  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f297  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f298  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+    f299  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x 11,70 dist 59 | 
+  missing telemetry: p1.animElem, p1.hitPause, p2.animElem, p2.hitPause, unsupported:match.distance, unsupported:match.p1TargetCount, unsupported:match.p1TargetId, unsupported:p1.animElem, unsupported:p1.hitPause, unsupported:p2.animElem, unsupported:p2.hitPause
+  trace integrity issues: none
+
+engine: C:/Users/noobk/AppData/Local/IKEMEN Lab/runtime-sandboxes/2dd028ef3de74302bbd81e383514d016/Ikemen_GO.exe
+  sha256 EC1F2F7BDE28CF3CE7E68E0EABF0BFA8776302E1412173D00C3B0CF652EE2791  version xray-sandbox-1-00418e8-inputpatch -   source D:/Games 3/Mugen AI Research/Ikemen-GO-ffa/xray_sandbox_engine.exe
+
+setup: dummy kfm  stage stages/kfm.def  approach distance 60  plan fingerprint 0329F48414032FC88A34563C3682E80AED3292F2800049A2F0964011B68C8100
+
+limits of this diagnostic:
+  - Competing controllers are the ones whose gate names a shared command and that start from the same source in the candidate graph. Controllers outside the graph (dynamic targets, helpers, files the index does not read such as ZSS, engine common code) are not covered.
+  - Listing order is file order inside the Statedef. It is not shown to be engine execution priority, and the trace does not record which controller executed (executedController = unknown).
+  - Conditions the index could not model are listed as written. A requirement missing from the modelled list means the index did not model one; it does not mean the engine has none.
+  - Observing a destination state does not establish which controller produced it.

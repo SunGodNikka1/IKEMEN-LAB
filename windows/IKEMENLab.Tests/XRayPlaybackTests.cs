@@ -186,7 +186,7 @@ public class XRayPlaybackTests : IDisposable
         Assert.Equal(2, f.StepIndex);
         Assert.Equal("state:200", f.FromStateId);
         Assert.Equal("state:210", f.ToStateId);
-        Assert.Contains("hit never connected", f.Headline);
+        Assert.Contains("did not connect", f.Headline);                                  // the unmet prerequisite, named from the evidence
     }
 
     [Fact]
@@ -998,5 +998,103 @@ public class XRayPlaybackSessionTests : IDisposable
         Assert.Contains("#2", ambiguous.Message);
         Assert.Throws<InvalidOperationException>(() => RouteSelection.BySubstring(keys, "nothing"));
         Assert.Throws<InvalidOperationException>(() => RouteSelection.ByKey([keys[0], keys[0]], keys[0]));            // duplicate keys are not selectable by key
+    }
+
+    // ------------------------------------------------------------------ approach distance and diagnostic scoping
+
+    [Fact]
+    public async Task TheConfiguredApproachDistanceReachesThePlanTheFingerprintTheRecordAndTheDiagnostic()
+    {
+        var (_, request, _) = Arrange();
+        var sbx = Temp2();
+        var store = Temp2();
+        var plan60 = InputPlanner.Plan(request.Graph, request.Route, new PlanOptions { ApproachDistance = 60 }).Plan!;
+        var plan45 = InputPlanner.Plan(request.Graph, request.Route, new PlanOptions { ApproachDistance = 45 }).Plan!;
+        Assert.NotEqual(InputPlanner.Fingerprint(plan60), InputPlanner.Fingerprint(plan45));   // the threshold is part of the plan's identity
+
+        var runner = new GateRunner();
+        runner.Release.Set();
+        var session = new PlaybackSession(new ComboPlaybackService(runner, store, sbx));
+        await session.PlayAsync(request with { Setup = request.Setup with { ApproachDistance = 45 } });
+
+        var o = session.Outcome!;
+        Assert.Equal(45, o.Plan!.ApproachDistance);                                   // the plan that actually ran
+        Assert.Contains("\"approachDistance\": 45", File.ReadAllText(o.Record.PlanPath));
+        Assert.Equal(45, o.Record.ApproachDistance);
+        Assert.Equal(InputPlanner.Fingerprint(plan45), o.Report.PlanFingerprint);
+        Assert.Equal(45, new ComboPlaybackService(runner, store, sbx).List().Single().ApproachDistance);   // remembered in the saved record
+        var d = session.DiagnosticForLatestAttempt()!;
+        Assert.Equal(45, d.Setup.ApproachDistance);
+        Assert.Equal(45, d.Runtime is null ? 45 : d.Runtime.Spacing.ConfiguredApproachDistance);
+    }
+
+    [Fact]
+    public async Task ADiagnosticBelongsToExactlyTheAttemptThatProducedIt()
+    {
+        var (session, request, runner) = Arrange();
+        runner.Release.Set();
+        await session.PlayAsync(request);                                             // attempt 1: a real run
+        var first = session.DiagnosticForLatestAttempt()!;
+        Assert.Equal(("run", 1, session.ResultRunId), (first.Kind, first.Attempt.Id, first.Result!.RunId));
+        Assert.Equal(first.ToJson(), session.DiagnosticForLatestAttempt()!.ToJson());  // a snapshot: asking again changes nothing
+        Assert.NotNull(first.Character);
+        Assert.NotEmpty(first.Character!.Files);
+        Assert.Equal(first.ToJson(), File.ReadAllText(session.Outcome!.Record.DiagnosticPath).Replace("\r\n", "\n"));   // persisted beside the record
+
+        // A press refused before launch is its own attempt: it must not inherit attempt 1's run, verdict, engine hash or telemetry.
+        var unpatched = Path.Combine(Temp2(), "stock.exe");
+        File.WriteAllText(unpatched, "no hook");
+        var refused = PlaybackPreflight.Check(request.Root, "ComboGuy", new AppSettings { XRayEnginePath = unpatched });
+        session.RefuseAttempt(request.Route.Key, string.Join(" ", refused.Issues), refused);
+        var second = session.DiagnosticForLatestAttempt()!;
+        Assert.Equal(("refused", 2, null), (second.Kind, second.Attempt.Id, second.Result?.RunId));
+        Assert.Null(second.Runtime);
+        Assert.Null(second.Engine);
+        Assert.DoesNotContain(first.Result.RunId!, second.ToJson());
+        Assert.Contains("no runtime verdict belongs to this attempt", second.ToText());
+        Assert.Contains("virtual-input hook", second.Attempt.Issue);
+
+        // Another selected route never exposes this attempt's diagnostic.
+        Assert.Null(session.DiagnosticFor("some-other-route"));
+        Assert.Null(session.DiagnosticFor(null));
+        Assert.NotNull(session.DiagnosticFor(request.Route.Key));
+
+        // Replay is a new attempt with a new run; the first run's evidence is not reused.
+        await session.ReplayAsync();
+        var third = session.DiagnosticForLatestAttempt()!;
+        Assert.Equal(("run", 3), (third.Kind, third.Attempt.Id));
+        Assert.NotEqual(first.Result.RunId, third.Result!.RunId);
+        Assert.Equal(3, third.Result.AttemptId);
+    }
+
+    [Fact]
+    public async Task ACancelledAttemptHasADiagnosticWithNoRuntimeEvidence()
+    {
+        var (_, request, _) = Arrange();
+        var waiting = new WaitingRunner();
+        var session = new PlaybackSession(new ComboPlaybackService(waiting, Temp2(), Temp2()));
+        var run = session.PlayAsync(request);
+        Assert.True(waiting.Entered.Wait(TimeSpan.FromSeconds(10)));
+        session.Cancel();
+        await run;
+        var d = session.DiagnosticForLatestAttempt()!;
+        Assert.Equal(("ended", "Cancelled"), (d.Kind, d.Attempt.State));
+        Assert.Null(d.Result);
+        Assert.Null(d.Runtime);
+        Assert.NotNull(d.Character);                                                  // the static snapshot taken at attempt start is still there
+    }
+
+    [Fact]
+    public async Task AFailedRunDiagnosticCarriesTheExpectedStepFromTheAttemptStartSnapshot()
+    {
+        var (session, request, runner) = Arrange("dropped");
+        runner.Release.Set();
+        await session.PlayAsync(request);
+        var d = session.DiagnosticForLatestAttempt()!;
+        Assert.Equal("Failed", d.Result!.Verdict);
+        Assert.NotNull(d.ExpectedStep);
+        Assert.Equal(d.FailedStep, d.ExpectedStep!.Index);
+        Assert.Equal(d.Route.Single(r => r.Index == d.FailedStep).Edge, d.ExpectedStep.EdgeId);
+        Assert.Contains("executed controller: unknown", d.ToText());
     }
 }

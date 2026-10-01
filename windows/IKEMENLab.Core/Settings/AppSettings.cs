@@ -16,4 +16,6 @@ public sealed class AppSettings
     public string? XRayDummy { get; set; }
     /// <summary>Stage DEF (e.g. stages/kfm.def) the playback happens on.</summary>
     public string? XRayStage { get; set; }
+    /// <summary>How close P1 walks to the dummy before a route starts (engine distance units, whole number 1-1000). Blank = default 60. A threshold, not an attack range.</summary>
+    public string? XRayApproachDistance { get; set; }
 }

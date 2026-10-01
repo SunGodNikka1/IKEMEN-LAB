@@ -1,0 +1,66 @@
+IKEMEN Lab combo playback diagnostic (ikemenlab.xray.diagnostic/1)
+kind: run
+attempt 1: VerdictProduced
+route key: cand:neutral>state:17200@state:-1/ctrl:114#0>cand:state:17200>state:17210@state:17200/ctrl:3#0
+run: run-example (produced by attempt 1)
+verdict: Failed / WrongState at step 1
+summary: Step 1 failed: different move.
+
+planned input (· = release):
+  step 1 [a]: a ·
+  step 2 [a]: a ·
+
+runtime evidence:
+  Step 1 failed: different move. Expected State 17200. Observed State 200 at frame 291 after the reported a input. State 17200 was never observed.
+  failure: DifferentMoveEntered
+  expected state: 17200  expected state ever observed: no
+  first mismatch: state 200 at frame 291
+  source state observed: n/a
+  required contact: n/a  observed: n/a
+  timing requirement (earliest tick n/a) satisfied: n/a
+  planned input attempted: yes (a at frame 290)
+  driver reported: expected state 17200, saw 0 (frame 338); this is the driver's claim, not a measurement
+  executed controller: unknown (the trace does not record it)
+  driver-reported inputs: f290 step 1 a, f291 step 1 release
+  telemetry at frame 290 (anchor 290): state 0 ctrl yes statetype S movetype I power 0 facing 1 pos (-5, 0) derived distance 55 [derived:p2.x-p1.x]
+  configured approach distance: 60 — The distance P1 walks to before the route starts. It is a threshold, not the attack's range.
+  derived separation around the input/source move: at input 55, min 55, max 55 [derived:p2.x-p1.x]
+  decisive frame: 291; window ±12:
+    f279  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f280  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f281  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f282  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f283  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f284  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f285  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f286  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f287  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f288  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | step_wait (step 1): cand:neutral>state:17200@state:-1/ctrl:114#0
+    f289  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | step_ready (step 1): cand:neutral>state:17200@state:-1/ctrl:114#0
+    f290  P1 0/I ctrl yes hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | input a (step 1)
+    f291* P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | input release (step 1)
+    f292  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f293  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f294  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f295  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f296  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f297  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f298  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f299  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f300  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f301  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f302  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+    f303  P1 200/A ctrl no hit 0 contact 0 | P2 0/I life 3000 | x -5,50 dist 55 | 
+  missing telemetry: p1.animElem, p1.hitPause, p2.animElem, p2.hitPause
+  trace integrity issues: none
+
+engine: n/a
+  sha256 n/a  version reconstructed-fixture  source n/a
+
+setup: dummy kfm  stage stages/kfm.def  approach distance 60  plan fingerprint D5780BF5D0B271494DDC225C039006C2DF83C69E736AFE7FCAEAA3F6D0401777
+
+limits of this diagnostic:
+  - Competing controllers are the ones whose gate names a shared command and that start from the same source in the candidate graph. Controllers outside the graph (dynamic targets, helpers, files the index does not read such as ZSS, engine common code) are not covered.
+  - Listing order is file order inside the Statedef. It is not shown to be engine execution priority, and the trace does not record which controller executed (executedController = unknown).
+  - Conditions the index could not model are listed as written. A requirement missing from the modelled list means the index did not model one; it does not mean the engine has none.
+  - Observing a destination state does not establish which controller produced it.

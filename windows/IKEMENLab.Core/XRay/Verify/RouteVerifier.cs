@@ -30,7 +30,11 @@ public static class VerifyReason
 
 public sealed record StepVerdict(
     int Index, string EdgeId, string FromId, string ToId, StepOutcome Outcome, string? Reason, string? Detail,
-    long? InputFrame, long? ContactFrame, long? TransitionFrame, int? ObservedAfter, IReadOnlyList<string> RuntimeRules);
+    long? InputFrame, long? ContactFrame, long? TransitionFrame, int? ObservedAfter, IReadOnlyList<string> RuntimeRules)
+{
+    /// <summary>Structured trace-derived facts about why this step failed. Null for observed steps and for runs that never reached this step.</summary>
+    public StepEvidence? Evidence { get; init; }
+}
 
 public sealed record ContinuityVerdict(bool Checked, bool Continuous, long? FirstHitFrame, long? LastFrame, long? DropFrame, int? DropGapFrames, string? Detail);
 
@@ -138,8 +142,15 @@ public static class RouteVerifier
                 d.Frame > wait.Frame + 180 && d.Frame <= frames[^1].Frame &&
                 d.Detail == "precondition never met for " + step.EdgeId &&
                 !driver.Any(ready => ready.Kind == "step_ready" && ready.Step == step.Index && ready.Frame >= wait.Frame && ready.Frame <= d.Frame));
-            StepVerdict Fail(string reason, string detail) => pending[step.Index - 1] with
-                { Outcome = StepOutcome.NotObserved, Reason = reason, Detail = detail, InputFrame = inputFrame };
+            StepVerdict Fail(string reason, string detail)
+            {
+                // Evidence comes from the frames themselves. When it supports a sharper statement than the generic detail it replaces the text,
+                // but the reason code is never changed here.
+                var evidence = StepEvidenceBuilder.Build(step, frames, cursor, stepInputs, driver, plan.ApproachDistance);
+                var sharper = FailureNarrative.Describe(step, evidence, reason);
+                return pending[step.Index - 1] with
+                    { Outcome = StepOutcome.NotObserved, Reason = reason, Detail = sharper ?? detail, InputFrame = inputFrame, Evidence = evidence };
+            }
             VerificationReport StepFailure(string reason, string detail, bool inconclusive = false)
             {
                 verdicts.Add(Fail(reason, detail));
@@ -338,6 +349,7 @@ public static class RouteVerifier
                 Long(w, "inputFrame", s.InputFrame);
                 Long(w, "contactFrame", s.ContactFrame);
                 Long(w, "transitionFrame", s.TransitionFrame);
+                if (s.Evidence is { } ev) WriteEvidence(w, ev);
                 w.WritePropertyName("runtimeRules");
                 w.WriteStartArray();
                 foreach (var rule in s.RuntimeRules) w.WriteStringValue(rule);
@@ -364,6 +376,49 @@ public static class RouteVerifier
         }
 
         return Encoding.UTF8.GetString(ms.ToArray());
+    }
+
+    internal static void WriteEvidence(Utf8JsonWriter w, StepEvidence e)
+    {
+        void I(string n, int? v) { if (v is { } x) w.WriteNumber(n, x); else w.WriteNull(n); }
+        void L(string n, long? v) { if (v is { } x) w.WriteNumber(n, x); else w.WriteNull(n); }
+        void D(string n, double? v) { if (v is { } x) w.WriteNumber(n, x); else w.WriteNull(n); }
+        void B(string n, bool? v) { if (v is { } x) w.WriteBoolean(n, x); else w.WriteNull(n); }
+        void S(string n, string? v) { if (v is null) w.WriteNull(n); else w.WriteString(n, v); }
+        w.WritePropertyName("evidence");
+        w.WriteStartObject();
+        S("failure", e.Failure);
+        I("expectedState", e.ExpectedState);
+        I("sourceState", e.SourceState);
+        B("sourceStateObserved", e.SourceStateObserved);
+        L("sourceStateFirstFrame", e.SourceStateFirstFrame);
+        L("sourceStateLastFrame", e.SourceStateLastFrame);
+        S("requiredContact", e.RequiredContact);
+        B("requiredContactObserved", e.RequiredContactObserved);
+        I("earliestTick", e.EarliestTick);
+        B("timingSatisfied", e.TimingSatisfied);
+        w.WriteBoolean("inputAttempted", e.InputAttempted);
+        L("firstInputFrame", e.FirstInputFrame);
+        w.WritePropertyName("attemptedKeys");
+        w.WriteStartArray();
+        foreach (var k in e.AttemptedKeys) w.WriteStringValue(k);
+        w.WriteEndArray();
+        I("firstMismatchState", e.FirstMismatchState);
+        L("firstMismatchFrame", e.FirstMismatchFrame);
+        w.WriteBoolean("expectedStateEverObserved", e.ExpectedStateEverObserved);
+        L("expectedStateFirstFrame", e.ExpectedStateFirstFrame);
+        S("driverClaim", e.DriverClaim);
+        L("driverClaimFrame", e.DriverClaimFrame);
+        w.WriteNumber("configuredApproachDistance", e.ConfiguredApproachDistance);
+        D("derivedSeparationAtInput", e.SeparationAtInput);
+        D("derivedSeparationMin", e.SeparationMin);
+        D("derivedSeparationMax", e.SeparationMax);
+        w.WritePropertyName("derivedSeparationSources");
+        w.WriteStartArray();
+        foreach (var x in e.SeparationSources) w.WriteStringValue(x);
+        w.WriteEndArray();
+        w.WriteString("executedController", e.ExecutedController);
+        w.WriteEndObject();
     }
 
     private static void Long(Utf8JsonWriter w, string name, long? v)

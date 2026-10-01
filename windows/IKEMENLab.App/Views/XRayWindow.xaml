@@ -485,6 +485,8 @@
                                             Visibility="{Binding Combos.Playback.CanInspect, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Inspect why the combo failed"/>
                                     <Button Content="View Trace" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.ViewTraceCommand}"
                                             Visibility="{Binding Combos.Playback.HasResult, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="View the recorded trace"/>
+                                    <Button Content="Copy Full Diagnostic" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.CopyDiagnosticCommand}"
+                                            AutomationProperties.Name="Copy the full diagnostic for the last attempt" ToolTip="Copies a snapshot of the last attempt: route, expected controller, what the trace showed, engine and setup."/>
                                     <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Combos.Playback.ToggleSetupCommand}"
                                             AutomationProperties.Name="Playback setup"/>
                                 </WrapPanel>
@@ -515,6 +517,11 @@
                                                 AutomationProperties.Name="Browse for the engine runtime DLL folder"/>
                                         <TextBox Style="{StaticResource FieldBox}" Text="{Binding Combos.Playback.EngineDlls, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Engine runtime DLL folder"/>
                                     </DockPanel>
+                                    <TextBlock Text="Approach distance (blank = 60; how close P1 walks before the route starts — a threshold, not the attack's range)" Style="{StaticResource SectionLabel}"/>
+                                    <TextBox Style="{StaticResource FieldBox}" Width="120" HorizontalAlignment="Left" Margin="0,2,0,2" Text="{Binding Combos.Playback.ApproachDistance, UpdateSourceTrigger=LostFocus}"
+                                             AutomationProperties.Name="Approach distance"/>
+                                    <TextBlock Text="{Binding Combos.Playback.ApproachDistanceError}" FontSize="11" Foreground="{DynamicResource NegativeBrush}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                               Visibility="{Binding Combos.Playback.HasApproachDistanceError, Converter={StaticResource BoolToVis}}"/>
                                     <WrapPanel>
                                         <StackPanel Margin="0,0,12,0">
                                             <TextBlock Text="Dummy character (chars/ folder, blank = automatic)" Style="{StaticResource SectionLabel}"/>

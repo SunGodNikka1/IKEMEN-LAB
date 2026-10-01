@@ -606,4 +606,71 @@ public class ComboPlaybackUiTests : IDisposable
             window.Close();
         });
     }
+
+    [Fact]
+    public void ApproachDistanceIsInPlaybackSetupValidatedAndRemembered()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, engine) = Install();
+            var settings = new MemorySettings();
+            var vm = ViewModel(settings, root);
+            var window = ShowWindow(vm);
+            vm.Combos.Playback.ToggleSetupCommand.Execute(null);
+            WpfHost.Layout(window, window.ActualWidth);
+            var field = Named<TextBox>(window, "Approach distance");
+            Assert.True(field.IsVisible && field.ActualWidth > 0, "The Approach distance field is not shown in Playback setup.");
+            Assert.Equal(string.Empty, vm.Combos.Playback.ApproachDistance);          // blank = the default 60
+
+            vm.Combos.Playback.EnginePath = engine;
+            vm.Combos.Playback.ApproachDistance = "45";
+            Assert.Equal("45", settings.Current.XRayApproachDistance);                // remembered like the other setup values
+            Assert.Equal(string.Empty, vm.Combos.Playback.ApproachDistanceError);
+
+            vm.Combos.Playback.ApproachDistance = "abc";
+            Assert.True(vm.Combos.Playback.HasApproachDistanceError);
+            Assert.Contains("Approach distance", vm.Combos.Playback.SetupSummary);     // an invalid value is a setup issue, never silently replaced
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public void CopyFullDiagnosticFollowsTheAttemptAndTheSelectedRoute()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, engine) = Install();
+            var vm = ViewModel(new MemorySettings(), root, Service(new GateRunner()));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var panel = vm.Combos.Playback;
+            Ready(panel, root, engine);
+            Assert.NotNull(Named<Button>(window, "Copy the full diagnostic for the last attempt"));
+            Assert.False(panel.CopyDiagnosticCommand.CanExecute(null), "There is nothing to copy before any attempt.");
+
+            vm.Combos.SelectedRoute = vm.Combos.Routes[0];
+            panel.PlayCommand.Execute(null);
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A never produced a result");
+            Assert.True(panel.CopyDiagnosticCommand.CanExecute(null));
+            var runDiagnostic = panel.DiagnosticText();
+            Assert.Contains("kind: run", runDiagnostic);
+            Assert.Contains("--- JSON (ikemenlab.xray.diagnostic/1) ---", runDiagnostic);
+            Assert.Contains("executed controller: unknown", runDiagnostic);
+
+            vm.Combos.SelectedRoute = vm.Combos.Routes[1];                            // another route never exposes this attempt's diagnostic
+            Assert.False(panel.CopyDiagnosticCommand.CanExecute(null));
+            Assert.Equal(string.Empty, panel.DiagnosticText());
+            vm.Combos.SelectedRoute = vm.Combos.Routes[0];
+
+            var unpatched = Path.Combine(Temp("xray-stock-"), "stock.exe");           // a refused press after a completed run
+            File.WriteAllText(unpatched, "stock engine");
+            panel.EnginePath = unpatched;
+            panel.PlayCommand.Execute(null);
+            var refused = panel.DiagnosticText();
+            Assert.Contains("kind: refused", refused);
+            Assert.Contains("no runtime verdict belongs to this attempt", refused);
+            Assert.DoesNotContain(panel.ResultRunId, refused);                         // the earlier run's identity is not attached
+            window.Close();
+        });
+    }
 }

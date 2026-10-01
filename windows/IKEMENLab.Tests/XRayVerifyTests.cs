@@ -200,7 +200,7 @@ public class XRayVerifyTests : IDisposable
         stopped.DriverStep("timeout", 2, "precondition never met for " + plan.Steps[1].EdgeId);
         var r1b = RouteVerifier.Verify(plan, stopped.Build(plan));
         Assert.Equal((VerifyStatus.Failed, 2, VerifyReason.PreconditionNeverMet), (r1b.Status, r1b.FailedStep, r1b.Reason));
-        Assert.Contains("never attempted", r1b.Steps[1].Detail);
+        Assert.Contains("was not attempted", r1b.Steps[1].Detail);                         // evidence-based wording; the reason code above is unchanged
 
         var wrong = new TraceBuilder().Driver("plan_start").Frames(2, 0);
         wrong.Input(1, "x").Frames(2, 200, 5000, "H", 1).Input(2, "y").Frames(3, 9999, 5000, "H");
