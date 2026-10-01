@@ -50,6 +50,13 @@ public static class PlaybackPreflight
             issues.Add($"The engine runtime DLL folder was not found: {dlls}.");
             dlls = null;
         }
+        else if (dlls is null && engine is not null && Path.GetDirectoryName(Path.GetFullPath(engine)) is { } engineDir
+                 && Directory.EnumerateFiles(engineDir, "*.dll").Any())
+        {
+            // Convention: a self-built engine keeps its SDL/FFmpeg DLLs beside it, so they are copied into the sandbox without any setting.
+            dlls = engineDir;
+            notes.Add($"Runtime DLLs are taken from the engine's own folder ({engineDir}).");
+        }
 
         // ---- dummy
         string? dummy = null, dummyDef = null;

@@ -1,15 +1,23 @@
-# Milestone 4 — Windows acceptance (Space Bunny Alpha / Cursor)
+# Milestone 4 — narrow Windows acceptance pass (Space Bunny Alpha)
 
-Core is unit-tested here (`XRayPlaybackTests`: 15 tests, incl. real-process cancel on Linux). The WPF part compiles against the
-desktop reference assemblies in a scratch check but **has not been executed**. Please:
+Main Agent repaired the confirmed defects (see `xray-m4-play-combo.md`, "Repairs after the first Windows audit") and the WPF test harness. This pass is
+**validation only** — please do not redesign or broadly repair M4; report what fails.
 
-1. `dotnet build` / `dotnet test` the Windows solution, including `IKEMENLab.App.Tests` — the new `ComboPlaybackUiTests`
-   (layout at 700/1000/1400 px, Play bound and disabled without a route, setup field + settings persistence) are drafted, unexecuted. Fix tests or XAML as needed and say which.
-2. Publish, launch, open **Characters → select bangirasu → X-Ray → Combos → Find routes**.
-3. **Playback setup**: set the X-Ray sandbox engine (+ `engine-dlls` is not in the UI yet: if the engine needs runtime DLLs, add a field or a documented path convention — report what you need).
-4. Select route 0 → **▶ Play Combo**: confirm the engine window is visible, the combo performs, the window lingers ~1.5 s, the banner shows **Verified** with frames, steps show ✓.
-5. Select route 2 (known `PreconditionNeverMet`): **Failed** at step 4, steps ✓✓✓✗, **Inspect Failure** selects step 4 and shows hints, **View Trace** opens at the decisive frame.
-6. Clear the engine path or point it at the production engine: Play refuses with the setup reason / ends **Inconclusive**.
-7. **Cancel** mid-run: engine process gone within ~1 s, sandbox folder removed, no record created. **Replay** after a result starts a new run.
-8. Check: production `Ikemen_GO.exe` hash unchanged; `%LOCALAPPDATA%\IKEMEN Lab\xray-playback\<id>\` holds plan/trace/report/meta; repeated open/close of the X-Ray window leaves no stale playback state or orphan engine process.
-9. Real-engine questions to answer: does the engine window take focus and stay on top of nothing important? Does `lingerFrames` work on the sandbox build? Is a replay's trace identical in states/frames (determinism)?
+Note: SBA's uncommitted three-file harness fix was never pushed, so its intent was re-created: `WpfUiCollection.cs` (non-parallel collection),
+`WpfHost.cs` (one STA thread + one `Application`, created under a lock), both WPF test classes in the collection.
+
+## Not executed by the Main Agent (no Windows / WPF / engine here)
+- `IKEMENLab.App.Tests` (13 tests incl. the new route-scope and close tests) — compiled against the desktop reference assemblies only.
+- The real engine, real focus/linger behaviour, the Go hook.
+Core logic (planner, session scoping, cancel boundary, shutdown, linger trace, provenance, DLL convention) has 40+ passing unit tests on Linux
+(suite: 634 passed, only the same 8 Windows-only baseline failures).
+
+## Checklist
+1. Full solution build, `dotnet test` (including `IKEMENLab.App.Tests`), Release build, win-x64 publish. Report any red WPF test with its message; if the cause is the test, say so.
+2. Real `bangirasu` playback: route 0 → **Verified**; route 2 → **Failed** (`PreconditionNeverMet`, step 4); production engine → **Inconclusive**.
+3. **Route-switch scoping:** play A, select B → A's banner/Inspect/Replay/View Trace/step marks vanish; reselect A → they return.
+4. **Close/cancel/replay:** close X-Ray during preparation and during live playback → engine process gone, sandbox folder gone, no record in `%LOCALAPPDATA%\IKEMEN Lab\xray-playback`, no crash or late UI. Cancel button the same. Replay starts a new run.
+5. **Runtime DLLs:** with no setting and DLLs beside the engine (auto convention), and with the folder set in Playback setup (Browse…): the sandbox engine starts without STATUS_DLL_NOT_FOUND.
+6. **Focus / linger:** is the engine window visible and the final pose on screen for ≈ 1.5 s after the combo? In the saved trace find `linger_start` / `linger_end`: report their frame difference (should be 90), engineTick and clock values, and your stopwatch/visual observation. If the pose is lost when `esc` is requested, say exactly when.
+7. **Saved evidence:** `xray-playback\<id>\` has plan/trace/report/meta; View Trace shows `P1 x`, `P2 x` and Distance labelled with its source.
+8. Production `Ikemen_GO.exe` hash unchanged; no orphan engine processes after any of the above.

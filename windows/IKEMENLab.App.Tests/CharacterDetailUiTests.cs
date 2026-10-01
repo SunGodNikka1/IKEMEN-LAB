@@ -16,6 +16,7 @@ namespace IKEMENLab.App.Tests;
 /// Presence of XRayWindow in the assembly is not evidence of a user-facing entry point: the command can be
 /// missing, unbound, clipped out of the panel, or permanently disabled and the type still resolves.
 /// </summary>
+[Collection(WpfUiCollection.Name)]
 public class CharacterDetailUiTests
 {
     /// <summary>Minimal stand-in for the inspector's data context. WPF bindings to absent members simply fail silently.</summary>
@@ -36,43 +37,9 @@ public class CharacterDetailUiTests
         public bool Executed { get; private set; }
     }
 
-    /// <summary>Runs a WPF interaction on a dedicated STA thread with its own dispatcher.</summary>
-    private static void OnSta(Action<Dispatcher> body)
-    {
-        Exception? failure = null;
-        var ready = new ManualResetEventSlim();
-        var thread = new Thread(() =>
-        {
-            var dispatcher = Dispatcher.CurrentDispatcher;
-            dispatcher.InvokeAsync(() =>
-            {
-                try { EnsureAppResources(); body(dispatcher); }
-                catch (Exception ex) { failure = ex; }
-                finally { ready.Set(); }
-            });
-            Dispatcher.Run();
-        });
-        thread.SetApartmentState(ApartmentState.STA);
-        thread.IsBackground = true;
-        thread.Start();
-        if (!ready.Wait(TimeSpan.FromSeconds(60))) throw new TimeoutException("WPF test body timed out.");
-        if (failure is not null) throw failure;
-    }
+    /// <summary>Runs a WPF interaction on the shared STA host thread (one Application for the whole run; see <see cref="WpfHost"/>).</summary>
+    private static void OnSta(Action<Dispatcher> body) => WpfHost.Run(() => body(Dispatcher.CurrentDispatcher));
 
-    /// <summary>Views resolve converters and styles from App.xaml; a bare test host has no Application, so load the same dictionaries.</summary>
-    private static void EnsureAppResources()
-    {
-        if (System.Windows.Application.Current is not null) return;
-        var app = new System.Windows.Application();
-        foreach (var uri in new[]
-        {
-            "pack://application:,,,/IKEMENLab;component/Themes/Colors.Dark.xaml",
-            "pack://application:,,,/IKEMENLab;component/Themes/Controls.xaml",
-        })
-        {
-            app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri(uri) });
-        }
-    }
     /// <summary>A detached UserControl has no visual tree until it is measured; force one before inspecting it.</summary>
     private static void EnsureLaidOut(FrameworkElement fe)
     {

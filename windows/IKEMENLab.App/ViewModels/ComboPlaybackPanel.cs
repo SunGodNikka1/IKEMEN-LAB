@@ -30,6 +30,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private bool _showSetup;
     private bool _showFailure;
     private FailureInspection? _failure;
+    private string _dlls = string.Empty;
 
     public ComboPlaybackPanel(XRayViewModel owner, ComboLens lens)
     {
@@ -42,15 +43,17 @@ public sealed class ComboPlaybackPanel : ObservableObject
         _enginePath = saved.XRayEnginePath ?? string.Empty;
         _dummy = saved.XRayDummy ?? string.Empty;
         _stage = saved.XRayStage ?? string.Empty;
+        _dlls = saved.XRayEngineDlls ?? string.Empty;
 
         PlayCommand = new AsyncRelayCommand(PlayAsync, () => CanPlay);
-        ReplayCommand = new AsyncRelayCommand(() => ReplayAsync(), () => _session.CanReplay);
+        ReplayCommand = new AsyncRelayCommand(() => ReplayAsync(), () => _session.CanReplayFor(SelectedKey));
         CancelCommand = new RelayCommand(() => _session.Cancel(), () => _session.IsBusy);
-        InspectFailureCommand = new RelayCommand(InspectFailure, () => _session.CanInspect);
-        ViewTraceCommand = new RelayCommand(ViewTrace, () => _session.Outcome is not null);
+        InspectFailureCommand = new RelayCommand(InspectFailure, () => _session.CanInspectFor(SelectedKey));
+        ViewTraceCommand = new RelayCommand(ViewTrace, () => _session.HasResultFor(SelectedKey));
         BrowseEngineCommand = new RelayCommand(BrowseEngine);
+        BrowseDllsCommand = new RelayCommand(BrowseDlls);
         ToggleSetupCommand = new RelayCommand(() => ShowSetup = !ShowSetup);
-        OpenFolderCommand = new RelayCommand(OpenFolder, () => _session.Outcome is not null);
+        OpenFolderCommand = new RelayCommand(OpenFolder, () => _session.HasResultFor(SelectedKey));
         RefreshSetup(showIssuesAsSetup: false);
     }
 
@@ -60,23 +63,27 @@ public sealed class ComboPlaybackPanel : ObservableObject
     public ICommand InspectFailureCommand { get; }
     public ICommand ViewTraceCommand { get; }
     public ICommand BrowseEngineCommand { get; }
+    public ICommand BrowseDllsCommand { get; }
     public ICommand ToggleSetupCommand { get; }
     public ICommand OpenFolderCommand { get; }
 
     // ------------------------------------------------------------------ status
 
-    public bool IsBusy => _session.IsBusy;
-    public bool HasResult => _session.HasResult;
-    public bool CanInspect => _session.CanInspect;
-    public bool HasStatus => _session.Headline.Length > 0;
-    public string Headline => _session.Headline;
+    /// <summary>The route the user has selected right now. Every result and result action below is scoped to the route the run belonged to.</summary>
+    private string? SelectedKey => _lens.CurrentRoute?.Route.Key;
 
-    /// <summary>Drives the banner colour and glyph: Verified, Failed, Inconclusive, Busy, Neutral.</summary>
+    public bool IsBusy => _session.IsBusy;
+    public bool HasResult => _session.HasResultFor(SelectedKey);
+    public bool CanInspect => _session.CanInspectFor(SelectedKey);
+    public bool HasStatus => Headline.Length > 0;
+    public string Headline => _session.HeadlineFor(SelectedKey);
+
+    /// <summary>Drives the banner colour and glyph: Verified, Failed, Inconclusive, Busy, Neutral. A result for another route is Neutral (and hidden).</summary>
     public string ResultKind => _session.State switch
     {
-        PlaybackState.Finished when _session.Outcome is { } o => o.Report.Status.ToString(),
+        PlaybackState.Finished when _session.Outcome is { } o && _session.IsFor(SelectedKey) => o.Report.Status.ToString(),
         PlaybackState.Preparing or PlaybackState.Running or PlaybackState.Judging => "Busy",
-        PlaybackState.Error => "Inconclusive",
+        PlaybackState.Error when _session.IsFor(SelectedKey) => "Inconclusive",
         _ => "Neutral"
     };
 
@@ -87,6 +94,8 @@ public sealed class ComboPlaybackPanel : ObservableObject
     // ------------------------------------------------------------------ setup (persisted)
 
     public string EnginePath { get => _enginePath; set { if (SetProperty(ref _enginePath, value)) SetupEdited(); } }
+    /// <summary>Folder with the SDL/FFmpeg DLLs a self-built engine needs. Blank = use the DLLs beside the engine, if any.</summary>
+    public string EngineDlls { get => _dlls; set { if (SetProperty(ref _dlls, value)) SetupEdited(); } }
     public string Dummy { get => _dummy; set { if (SetProperty(ref _dummy, value)) SetupEdited(); } }
     public string Stage { get => _stage; set { if (SetProperty(ref _stage, value)) SetupEdited(); } }
     public string SetupSummary { get => _setupSummary; private set => SetProperty(ref _setupSummary, value); }
@@ -94,17 +103,31 @@ public sealed class ComboPlaybackPanel : ObservableObject
 
     // ------------------------------------------------------------------ failure
 
-    public bool ShowFailure { get => _showFailure; private set => SetProperty(ref _showFailure, value); }
+    public bool ShowFailure { get => _showFailure && _session.CanInspectFor(SelectedKey); private set { if (SetProperty(ref _showFailure, value)) OnPropertyChanged(); } }
     public string FailureHeadline => _failure?.Headline ?? string.Empty;
     public string FailureWhy => _failure?.Why ?? string.Empty;
     public string FailureHints => _failure is null ? string.Empty : string.Join("\n", _failure.Hints.Select(h => "• " + h));
 
-    /// <summary>Called by the lens when the selected route changes so Play enables and a stale result is not shown against another route.</summary>
+    /// <summary>
+    /// Called by the lens when the selected route changes (or the route list is rebuilt). A result belongs to the route it was played
+    /// for: against any other route the banner, failure panel, Inspect, Replay and View Trace all disappear, so one route's verdict can
+    /// never be read as another's. Selecting the played route again brings them back.
+    /// </summary>
     public void OnRouteChanged()
     {
-        if (_session.Last is { } last && _lens.CurrentRoute is { } cur && last.Route.Key != cur.Route.Key) ShowFailure = false;
+        if (!_session.IsFor(SelectedKey)) ShowFailure = false;
+        RaiseScoped();
         CommandManager.InvalidateRequerySuggested();
     }
+
+    private void RaiseScoped()
+    {
+        foreach (var name in new[] { nameof(IsBusy), nameof(HasResult), nameof(CanInspect), nameof(HasStatus), nameof(Headline), nameof(ResultKind), nameof(ResultGlyph), nameof(ShowFailure) })
+            OnPropertyChanged(name);
+    }
+
+    /// <summary>The window is closing: cancel the run, kill its engine, let the sandbox clean up, and stop reacting to the session.</summary>
+    public void Shutdown() => _session.Shutdown(TimeSpan.FromSeconds(6));
 
     // ------------------------------------------------------------------ actions
 
@@ -124,14 +147,14 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private async Task ReplayAsync()
     {
         var setup = RefreshSetup(showIssuesAsSetup: true);
-        if (setup is null || !setup.Ready || _session.Last is not { } last) return;
+        if (setup is null || !setup.Ready || !_session.CanReplayFor(SelectedKey) || _session.Last is not { } last) return;
         ShowFailure = false;
         await _session.PlayAsync(last with { Setup = setup });
     }
 
     private void InspectFailure()
     {
-        if (_session.Outcome?.Failure is not { } failure) return;
+        if (!_session.CanInspectFor(SelectedKey) || _session.Outcome?.Failure is not { } failure) return;
         _failure = failure;
         ShowFailure = true;
         OnPropertyChanged(nameof(FailureHeadline));
@@ -142,14 +165,14 @@ public sealed class ComboPlaybackPanel : ObservableObject
 
     private void ViewTrace()
     {
-        if (_session.Outcome is not { } outcome) return;
+        if (!_session.HasResultFor(SelectedKey) || _session.Outcome is not { } outcome) return;
         var vm = new PlaybackTraceViewModel(outcome);
         new PlaybackTraceWindow(vm) { Owner = Application.Current?.MainWindow }.Show();
     }
 
     private void OpenFolder()
     {
-        if (_session.Outcome?.Record.Directory is not { } dir || !Directory.Exists(dir)) return;
+        if (!_session.HasResultFor(SelectedKey) || _session.Outcome?.Record.Directory is not { } dir || !Directory.Exists(dir)) return;
         try { Process.Start(new ProcessStartInfo("explorer.exe", $"\"{dir}\"") { UseShellExecute = true }); }
         catch (System.ComponentModel.Win32Exception) { /* no shell to open it with */ }
     }
@@ -158,6 +181,12 @@ public sealed class ComboPlaybackPanel : ObservableObject
     {
         var picked = new FilePicker().PickFile("Choose the X-Ray sandbox engine (Ikemen_GO.exe build with the input hook)", "Executable (*.exe)|*.exe", EnginePath);
         if (picked is not null) EnginePath = picked;
+    }
+
+    private void BrowseDlls()
+    {
+        var picked = new FolderPicker().PickFolder(string.IsNullOrWhiteSpace(EngineDlls) ? null : EngineDlls, "Choose the folder with the engine's runtime DLLs (SDL, FFmpeg…)");
+        if (picked is not null) EngineDlls = picked;
     }
 
     // ------------------------------------------------------------------ plumbing
@@ -189,6 +218,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
     {
         var s = SafeLoad();
         s.XRayEnginePath = EnginePath.Trim();
+        s.XRayEngineDlls = EngineDlls.Trim();
         s.XRayDummy = Dummy.Trim();
         s.XRayStage = Stage.Trim();
         return s;
@@ -209,8 +239,9 @@ public sealed class ComboPlaybackPanel : ObservableObject
 
     private void OnSessionChanged()
     {
-        foreach (var name in new[] { nameof(IsBusy), nameof(HasResult), nameof(CanInspect), nameof(HasStatus), nameof(Headline), nameof(ResultKind), nameof(ResultGlyph) })
-            OnPropertyChanged(name);
+        if (_session.IsClosed) return;   // the window is gone: never touch it
+        RaiseScoped();
+        OnPropertyChanged(nameof(CanInspect));
         _lens.ApplyVerdicts(_session.State == PlaybackState.Finished ? _session.Outcome?.Report : null);
         CommandManager.InvalidateRequerySuggested();
     }

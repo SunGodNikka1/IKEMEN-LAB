@@ -76,6 +76,9 @@ public sealed class XRayViewModel : ObservableObject
     public string Root => _root;
     public CharacterEntry Entry => _entry;
     public ISettingsStore Settings { get; }
+
+    /// <summary>Called when the window closes: cancels any playback, kills its engine and removes the sandbox.</summary>
+    public void Close() => Combos.Playback.Shutdown();
     public ComboPlaybackService PlaybackService { get; }
     public XRayLensKind ActiveLens { get => _activeLens; set => SetProperty(ref _activeLens, value); }
     public string Legend => ConfidenceStyle.Legend;

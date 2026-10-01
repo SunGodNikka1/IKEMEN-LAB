@@ -14,6 +14,8 @@ public partial class XRayWindow : Window
         _viewModel = viewModel;
         DataContext = viewModel;
         Loaded += async (_, _) => await viewModel.LoadAsync();
+        // The window owns any playback it started: closing it stops the engine and cleans the sandbox.
+        Closed += (_, _) => viewModel.Close();
     }
 
     /// <summary>Selecting a trigger line or outcome shows where it is written.</summary>

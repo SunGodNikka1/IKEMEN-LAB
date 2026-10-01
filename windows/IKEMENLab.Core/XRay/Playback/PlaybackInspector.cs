@@ -5,7 +5,19 @@ namespace IKEMENLab.Core.XRay.Playback;
 
 /// <summary>One tick of a trace laid out for reading: both fighters' raw facts plus what the driver did that tick.</summary>
 public sealed record TraceRow(
-    long Frame, int? P1State, string? P1MoveType, bool? P1Ctrl, int? P1MoveHit, int? P2State, string? P2MoveType, double? P2Life, double? Distance, string Notes);
+    long Frame, int? P1State, string? P1MoveType, bool? P1Ctrl, int? P1MoveHit, int? P2State, string? P2MoveType, double? P2Life,
+    double? P1X, double? P2X, double? Distance, string? DistanceSource, string Notes)
+{
+    /// <summary>P1.x and P2.x are raw engine facts. Distance is not: it is either an engine trigger value or derived (see <see cref="DistanceSource"/>), and is shown with that label.</summary>
+    public string DistanceText => Distance is not { } d ? string.Empty : $"{d:0.##}" + (DistanceSource is { Length: > 0 } ? $" ({Provenance(DistanceSource)})" : " (source not recorded)");
+
+    public static string Provenance(string source) => source switch
+    {
+        "derived:p2.x-p1.x" => "derived: p2.x − p1.x",
+        "engine-trigger" => "engine trigger",
+        var other => other
+    };
+}
 
 /// <summary>Everything the app needs to show "why did this fail" for one run, derived only from the verdict and the trace.</summary>
 public sealed record FailureInspection(
@@ -44,7 +56,7 @@ public static class PlaybackInspector
         foreach (var f in log.Frames.Take(cap))
         {
             notesByFrame.TryGetValue(f.Frame, out var notes);
-            rows.Add(new TraceRow(f.Frame, f.P1.State, f.P1.MoveType, f.P1.Ctrl, f.P1.MoveHit, f.P2.State, f.P2.MoveType, f.P2.Life, f.Distance,
+            rows.Add(new TraceRow(f.Frame, f.P1.State, f.P1.MoveType, f.P1.Ctrl, f.P1.MoveHit, f.P2.State, f.P2.MoveType, f.P2.Life, f.P1.PosX, f.P2.PosX, f.Distance, f.DistanceSource,
                 notes is null ? string.Empty : string.Join(" · ", notes)));
         }
 

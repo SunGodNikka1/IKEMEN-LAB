@@ -249,20 +249,52 @@ local function writeMeta()
         "engineSha256", cfg.engineSha256 or NULL, "engineExecutable", cfg.engineExecutable or NULL, "engineSource", cfg.engineSource or NULL))
 end
 
+-- Linger (watched playback). With cfg.lingerFrames unset the old behaviour stands: ask the engine to leave the match at once.
+-- With it set, the match is HELD running for that many ticks after the plan ends (no input is fed: the held keys were released),
+-- and only then is esc requested, so the final position stays on screen. Both ends are recorded as driver events with the engine tick
+-- (when readable) and os.clock(), so an acceptance run can check from the trace how long the match really kept running.
+local lingerLeft = nil
+local lingerTotal = 0
+
+local function lingerStamp()
+	local t = call("tickcount") or call("gametick") or call("gametime")
+	return string.format("engineTick=%s clock=%.2f", t ~= nil and tostring(t) or "nil", os and os.clock and os.clock() or 0)
+end
+
+local function leaveMatch()
+	local esc_fn = G("esc")
+	if esc_fn then pcall(esc_fn, true) end
+end
+
 local function finish(reason)
 	if finished then return end
 	local release = rawget(_G, "__ikemenlab_xray_release")
 	if type(release) == "function" then pcall(release, 1); pcall(release, 2) end
 	finished = true
 	emit(O("type", "end", "frame", tick, "reason", reason))
-	local esc_fn = G("esc")
-	if esc_fn then pcall(esc_fn, true) end
-	exitCountdown = tonumber(cfg.lingerFrames) or 60
+	local hold = tonumber(cfg.lingerFrames)
+	if hold and hold > 0 then
+		lingerLeft, lingerTotal = hold, hold
+		emit(O("type", "driver", "frame", tick, "event", "linger_start", "detail", "holding the match " .. hold .. " ticks; " .. lingerStamp()))
+	else
+		leaveMatch()
+		exitCountdown = 60
+	end
 end
 
 local function sample()
 	tick = tick + 1
 	if finished then
+		if lingerLeft then
+			lingerLeft = lingerLeft - 1
+			if lingerLeft <= 0 then
+				lingerLeft = nil
+				emit(O("type", "driver", "frame", tick, "event", "linger_end", "detail", "held " .. lingerTotal .. " ticks; " .. lingerStamp()))
+				leaveMatch()
+				exitCountdown = 30
+			end
+			return
+		end
 		if exitCountdown then
 			exitCountdown = exitCountdown - 1
 			if exitCountdown <= 0 and os and os.exit then pcall(os.exit, 0) end

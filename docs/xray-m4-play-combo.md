@@ -32,7 +32,22 @@ uses. The engine window is simply left on screen, and the run is kept.
 | `VerifyRunner` (M3) | extended with progress, cancellation and a `Collect` hook; unchanged verdict logic |
 | `ProcessEngineRunner` | now cancellable: polls, kills the process tree, throws `OperationCanceledException` |
 
-The sandbox engine lingers `lingerFrames = 90` ticks (≈ 1.5 s) on the final position before exiting so the result can be seen.
+## Repairs after the first Windows audit (still not accepted)
+
+| Area | Behaviour now |
+|---|---|
+| Result scope | A result belongs to the route it was played for (`PlaybackSession.RunRouteKey`). Against any other selected route the banner, failure panel, Inspect Failure, Replay, View Trace and step marks disappear; selecting the played route brings them back. A live run stays visible whatever is selected. |
+| Closing X-Ray | `XRayWindow.Closed → XRayViewModel.Close → PlaybackSession.Shutdown`: cancels preparation or the engine run, kills the engine tree, deletes the sandbox, saves no record, raises no further UI events, waits (≤ 6 s) for the run to unwind. |
+| Cancel boundary | A cancel requested **before the result is committed** (engine exit, judging, writing `report.json`/`meta.json`) produces no result and no record. Writing `meta.json` is the commit; a cancel after it does not take the result back. Preparation honours cancel between file copies and deletes the half-built sandbox. |
+| Distance | `P1 x` / `P2 x` are raw engine facts. `Distance` is shown with its recorded source (`derived: p2.x − p1.x`, `engine trigger`, or `source not recorded`) and the trace window says so; it is never presented as an engine observation. |
+| Runtime DLLs | Playback setup has an *Engine runtime DLLs* folder (Browse…). Blank = DLLs beside the engine are used automatically (convention). |
+| Linger | With `lingerFrames` set (playback sets 90) the probe **holds the match running** with no input for that many ticks, *then* asks the engine to leave (`esc`). Both ends are recorded as `linger_start` / `linger_end` driver events with the engine tick (when readable) and `os.clock()`. Without it the old immediate-exit behaviour stands. Whether the final pose is really visible for ≈ 1.5 s is a Windows observation: compare the two events' clock/tick to what is on screen. |
+
+## Test harness (WPF)
+
+All WPF test classes share one STA host thread, one `Application` and a non-parallel xUnit collection (`WpfHost`, `WpfUiCollection`) — this replaces
+two classes racing to create the Application. Window tests now construct → `Show()` → pump Loaded/Render/Idle → measure → assert → close in a finally;
+a detached window never realises its content tree. Window width is clamped by the window's `MinWidth` (1040).
 
 ## Honesty rules kept
 

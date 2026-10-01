@@ -8,6 +8,7 @@
         <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
             <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
             <TextBlock Text="{Binding Subtitle}" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondary}"/>
+            <TextBlock Text="{Binding Provenance}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource TextTertiary}"/>
             <WrapPanel Margin="0,8,0,0">
                 <Button Content="Open record folder" Style="{StaticResource SecondaryButton}" Command="{Binding OpenFolderCommand}"
                         AutomationProperties.Name="Open the folder holding the trace, plan and report"/>
@@ -29,7 +30,9 @@
                 <DataGridTextColumn Header="P2 state" Binding="{Binding P2State}" Width="70"/>
                 <DataGridTextColumn Header="P2 move" Binding="{Binding P2MoveType}" Width="68"/>
                 <DataGridTextColumn Header="P2 life" Binding="{Binding P2Life}" Width="64"/>
-                <DataGridTextColumn Header="Dist" Binding="{Binding Distance}" Width="56"/>
+                <DataGridTextColumn Header="P1 x" Binding="{Binding P1X}" Width="60"/>
+                <DataGridTextColumn Header="P2 x" Binding="{Binding P2X}" Width="60"/>
+                <DataGridTextColumn Header="Distance (derived, not an engine reading unless labelled)" Binding="{Binding DistanceText}" Width="210"/>
                 <DataGridTextColumn Header="Driver / input" Binding="{Binding Notes}" Width="*"/>
             </DataGrid.Columns>
         </DataGrid>

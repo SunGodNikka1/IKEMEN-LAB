@@ -509,6 +509,12 @@
                                                 AutomationProperties.Name="Browse for the X-Ray engine"/>
                                         <TextBox Style="{StaticResource FieldBox}" Text="{Binding Combos.Playback.EnginePath, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="X-Ray engine path"/>
                                     </DockPanel>
+                                    <TextBlock Text="Engine runtime DLLs (folder; blank = the DLLs beside the engine)" Style="{StaticResource SectionLabel}"/>
+                                    <DockPanel Margin="0,2,0,6">
+                                        <Button DockPanel.Dock="Right" Content="Browse…" Style="{StaticResource SecondaryButton}" Margin="6,0,0,0" Command="{Binding Combos.Playback.BrowseDllsCommand}"
+                                                AutomationProperties.Name="Browse for the engine runtime DLL folder"/>
+                                        <TextBox Style="{StaticResource FieldBox}" Text="{Binding Combos.Playback.EngineDlls, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Engine runtime DLL folder"/>
+                                    </DockPanel>
                                     <WrapPanel>
                                         <StackPanel Margin="0,0,12,0">
                                             <TextBlock Text="Dummy character (chars/ folder, blank = automatic)" Style="{StaticResource SectionLabel}"/>

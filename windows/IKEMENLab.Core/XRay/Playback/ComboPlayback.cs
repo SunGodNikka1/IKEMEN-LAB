@@ -74,10 +74,20 @@ public sealed class ComboPlaybackService
             }
         };
 
+        // Everything up to and including meta.json is the uncommitted part: a cancel (or any failure) until then deletes the folder and
+        // yields no result. Writing meta.json is the commit; a cancel after it no longer takes the result back.
         VerifyRunResult result;
+        PlaybackRecord record;
         try
         {
             result = VerifyRunner.Run(request.Graph, request.Route, run, _runner, planOptions);
+            cancel.ThrowIfCancellationRequested();
+            var report0 = result.Report;
+            File.WriteAllText(Path.Combine(dir, "report.json"), RouteVerifier.ToJson(report0), new UTF8Encoding(false));
+            record = new PlaybackRecord(id, started, report0.Character, report0.RouteKey, request.RouteSummary, report0.Status.ToString(), report0.Reason, report0.FailedStep,
+                setup.Dummy, setup.Stage, report0.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir);
+            cancel.ThrowIfCancellationRequested();
+            File.WriteAllText(Path.Combine(dir, "meta.json"), MetaJson(record), new UTF8Encoding(false));
         }
         catch
         {
@@ -86,10 +96,6 @@ public sealed class ComboPlaybackService
         }
 
         var report = result.Report;
-        File.WriteAllText(Path.Combine(dir, "report.json"), RouteVerifier.ToJson(report), new UTF8Encoding(false));
-        var record = new PlaybackRecord(id, started, report.Character, report.RouteKey, request.RouteSummary, report.Status.ToString(), report.Reason, report.FailedStep,
-            setup.Dummy, setup.Stage, report.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir);
-        File.WriteAllText(Path.Combine(dir, "meta.json"), MetaJson(record), new UTF8Encoding(false));
         Prune();
 
         var log = File.Exists(record.TracePath) ? TraceReader.ReadFile(record.TracePath) : result.Log ?? new TraceLog { Events = [], Issues = [] };

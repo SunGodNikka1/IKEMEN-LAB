@@ -5,12 +5,12 @@ namespace IKEMENLab.App.Services;
 
 public sealed class FolderPicker
 {
-    public string? PickFolder(string? initialPath = null)
+    public string? PickFolder(string? initialPath = null, string title = "Select IKEMEN GO installation folder")
     {
         // Prefer modern folder dialog via OpenFolderDialog when available (.NET 8+).
         var dialog = new OpenFolderDialog
         {
-            Title = "Select IKEMEN GO installation folder",
+            Title = title,
             Multiselect = false
         };
 

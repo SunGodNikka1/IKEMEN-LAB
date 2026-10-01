@@ -14,6 +14,7 @@ rt = os.path.join(here, "..", "IKEMENLab.Core", "XRay", "Runtime")
 plan_path = os.path.abspath(sys.argv[1])
 out_path = os.path.abspath(sys.argv[2])
 scenario = sys.argv[sys.argv.index("--scenario") + 1] if "--scenario" in sys.argv else "verified"
+linger = int(sys.argv[sys.argv.index("--linger") + 1]) if "--linger" in sys.argv else 0
 
 work = tempfile.mkdtemp(prefix="xray-drv-")
 mods = os.path.join(work, "external", "mods")
@@ -22,9 +23,9 @@ for name in ("xray_probe.lua", "xray_driver.lua"):
     shutil.copy(os.path.join(rt, name), os.path.join(mods, name))
 shutil.copy(plan_path, os.path.join(mods, "xray_plan.lua"))
 with open(os.path.join(mods, "xray_config.lua"), "w") as f:
-    f.write('return { trace = "%s", maxFrames = 1500, character = "MockChar", hooks = { "loop" }, '
+    f.write('return { trace = "%s", maxFrames = 1500, character = "MockChar", hooks = { "loop" }%s, '
             'plan = "external/mods/xray_plan.lua", driver = "external/mods/xray_driver.lua", adapter = "external/mods/xray_inject.lua" }\n'
-            % out_path.replace("\\", "/"))
+            % (out_path.replace("\\", "/"), (", lingerFrames = %d" % linger) if linger else ""))
 if scenario != "noinject":
     with open(os.path.join(mods, "xray_inject.lua"), "w") as f:
         f.write('_G.__ikemenlab_xray_inject = function(player, keys) _G.__mock_held = keys; return true end\n')
@@ -111,7 +112,7 @@ _G.moveHit = function() if current == 1 then return P[1].hit end return 0 end
 _G.moveContact = function() if current == 1 then return P[1].hit end return 0 end
 _G.roundno = function() return 1 end
 _G.p2distx = function() return math.abs(P[2].x - P[1].x) end
-_G.esc = function(v) esc_called = v end
+_G.esc = function(v) esc_called = v; ESC_TICK = tickCount end
 _G.__mock_esc = function() return esc_called end
 ''')
 lua.execute(open(os.path.join(mods, "xray_probe.lua"), encoding="utf-8").read())
@@ -129,6 +130,16 @@ for _ in range(1700):
 
 events = [json.loads(l) for l in open(out_path, encoding="utf-8").read().split("\n") if l]
 ends = [e for e in events if e["type"] == "end"]
+if linger:
+    start = next(e for e in events if e.get("event") == "linger_start")
+    end_ = next(e for e in events if e.get("event") == "linger_end")
+    esc_tick = lua.globals().ESC_TICK
+    problems = []
+    if end_["frame"] - start["frame"] != linger: problems.append("linger lasted %d ticks, wanted %d" % (end_["frame"] - start["frame"], linger))
+    if esc_tick is None or esc_tick < end_["frame"]: problems.append("esc was requested before the linger ended (tick %s)" % esc_tick)
+    if [e for e in events if e["type"] == "frame" and e["frame"] > start["frame"]]: problems.append("frames were sampled during the linger")
+    if problems:
+        print(json.dumps({"problems": problems})); sys.exit(1)
 print(json.dumps({"scenario": scenario, "events": len(events), "end": ends[0]["reason"] if ends else None,
                   "driver": [e["event"] for e in events if e["type"] == "driver"]}))
 shutil.rmtree(work, ignore_errors=True)

@@ -23,11 +23,16 @@ public sealed class PlaybackTraceViewModel : ObservableObject
         Subtitle = failure is null
             ? $"{outcome.Report.Status} · {Rows.Count} frames recorded"
             : $"{failure.Headline} · focus frame {FocusFrame}";
+        var sources = Rows.Select(r => r.DistanceSource).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => TraceRow.Provenance(x!)).ToList();
+        Provenance = "P1 x / P2 x are raw engine facts. Distance is " + (sources.Count == 0
+            ? "of unrecorded source in this trace."
+            : "not a separate observation: " + string.Join(", ", sources) + ".");
         OpenFolderCommand = new RelayCommand(OpenFolder, () => Directory.Exists(Folder));
     }
 
     public string Title { get; }
     public string Subtitle { get; }
+    public string Provenance { get; }
     public string Folder { get; }
     public string TracePath { get; }
     public long? FocusFrame { get; }

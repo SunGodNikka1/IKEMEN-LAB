@@ -86,16 +86,21 @@ public static class VerifyRunner
         if (planned.Plan is null) throw new InvalidOperationException(planned.RefusedReason);
 
         request.Progress?.Invoke("preparing");
-        var sandboxRequest = request.Sandbox with { Plan = planned.Plan };
+        var sandboxRequest = request.Sandbox with { Plan = planned.Plan, Cancel = request.Cancel };
         var sandbox = RuntimeSandbox.Create(sandboxRequest);
         var keep = request.KeepSandbox;
         try
         {
+            request.Cancel.ThrowIfCancellationRequested();
             request.Progress?.Invoke("running");
             var engine = runner is ICancellableEngineRunner cancellable
                 ? cancellable.Run(sandbox, request.Timeout, request.Cancel)
                 : runner.Run(sandbox, request.Timeout);
+            // Commit boundary: a cancel requested before the result exists means there is no result. Once the verdict is
+            // published (the caller persists it) a later cancel no longer takes it back.
+            request.Cancel.ThrowIfCancellationRequested();
             request.Progress?.Invoke("judging");
+            request.Cancel.ThrowIfCancellationRequested();
             var raw = File.Exists(sandbox.TracePath) ? File.ReadAllText(sandbox.TracePath) : null;
             request.Collect?.Invoke(new VerifyArtifacts(planned.Plan, sandbox.Root, sandbox.TracePath, raw));
             var log = raw is null ? new TraceLog { Events = [], Issues = [] } : TraceReader.ReadFile(sandbox.TracePath);
@@ -107,6 +112,7 @@ public static class VerifyRunner
             if (engine.Error is not null) notes.Add("Engine: " + engine.Error);
             if (engine.TimedOut) notes.Add("The engine was stopped after the timeout.");
             report = report with { Notes = notes };
+            request.Cancel.ThrowIfCancellationRequested();
             return new VerifyRunResult(report, keep ? sandbox.Root : null, keep ? sandbox.TracePath : null, engine) { Plan = planned.Plan, Log = log };
         }
         finally

@@ -33,6 +33,8 @@ public sealed record SandboxRequest(
 {
     /// <summary>Ticks the engine keeps running after the plan ends before it exits (60 ≈ 1 s). A watched playback lingers on the result.</summary>
     public int? LingerFrames { get; init; }
+    /// <summary>Checked between the copy steps so closing the app during preparation stops promptly; the half-built sandbox is deleted.</summary>
+    public CancellationToken Cancel { get; init; }
 }
 
 public static class RuntimeProbe
@@ -133,12 +135,14 @@ public sealed class RuntimeSandbox : IDisposable
             if (File.Exists(sandbox.TracePath)) File.Delete(sandbox.TracePath);
 
             foreach (var dir in CopiedDirectories)
-                CopyDirectory(Path.Combine(source, dir), Path.Combine(root, dir));
+                CopyDirectory(Path.Combine(source, dir), Path.Combine(root, dir), request.Cancel);
 
-            CopyDirectory(Path.Combine(source, "chars", request.SubjectFolder), Path.Combine(root, "chars", request.SubjectFolder));
+            CopyDirectory(Path.Combine(source, "chars", request.SubjectFolder), Path.Combine(root, "chars", request.SubjectFolder), request.Cancel);
             if (!request.DummyFolder.Equals(request.SubjectFolder, StringComparison.OrdinalIgnoreCase))
-                CopyDirectory(Path.Combine(source, "chars", request.DummyFolder), Path.Combine(root, "chars", request.DummyFolder));
+                CopyDirectory(Path.Combine(source, "chars", request.DummyFolder), Path.Combine(root, "chars", request.DummyFolder), request.Cancel);
+            request.Cancel.ThrowIfCancellationRequested();
             CopyStage(source, root, request.StageDef, notes);
+            request.Cancel.ThrowIfCancellationRequested();
 
             var saveSource = Path.Combine(source, "save");
             Directory.CreateDirectory(Path.Combine(root, "save"));
@@ -340,14 +344,17 @@ public sealed class RuntimeSandbox : IDisposable
         return string.Join("\n", lines);
     }
 
-    private static void CopyDirectory(string from, string to)
+    private static void CopyDirectory(string from, string to, CancellationToken cancel = default)
     {
         if (!Directory.Exists(from)) return;
         Directory.CreateDirectory(to);
         foreach (var dir in Directory.EnumerateDirectories(from, "*", SearchOption.AllDirectories))
             Directory.CreateDirectory(Path.Combine(to, Path.GetRelativePath(from, dir)));
         foreach (var file in Directory.EnumerateFiles(from, "*", SearchOption.AllDirectories))
+        {
+            cancel.ThrowIfCancellationRequested();
             File.Copy(file, Path.Combine(to, Path.GetRelativePath(from, file)), overwrite: true);
+        }
     }
 
     private static bool IsInside(string parent, string child)
