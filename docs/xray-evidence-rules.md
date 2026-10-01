@@ -121,7 +121,7 @@ Produced only by `RouteVerifier` from a trace of a disposable match (see [xray-r
 |---|---|---|
 | `runtime.contact-observed` | RuntimeVerified | In a real match, the contact the edge requires (moveHit/moveContact) was observed on the source move before the transition. |
 | `runtime.opponent-continuous` | RuntimeVerified | In a real match, P2 stayed in a hit state from the first hit to the route's last step: no frame of recovery in between. |
-| `runtime.transition-observed` | RuntimeVerified | In a real match, P1 entered this edge's target state immediately after its source state, following the scripted inputs. |
+| `runtime.transition-observed` | RuntimeVerified | In this tested route/run, the expected source-to-target state transition followed the planned inputs; this does not identify the controller that fired. |
 
 A route is reported `RuntimeVerified` only when every step has its transition (and required contact) observed **and** P2 stayed continuous. A run that could not inject input or read telemetry is `Inconclusive`, never verified.
 

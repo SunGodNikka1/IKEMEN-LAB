@@ -119,7 +119,7 @@ public class XRayVerifyTests : IDisposable
             new(state, null, state == 0, "S", moveType, null, null, 1000, 0, 0, 0, null, null, 1, hit, contact, null);
 
         public TraceBuilder Driver(string kind, string? detail = null) { _events.Add(new DriverEvent(_f, null, kind, null, detail)); return this; }
-    public TraceBuilder DriverStep(string kind, int step, string? detail = null) { _events.Add(new DriverEvent(_f, null, kind, step, detail)); return this; }
+        public TraceBuilder DriverStep(string kind, int step, string? detail = null) { _events.Add(new DriverEvent(_f, null, kind, step, detail)); return this; }
         public TraceBuilder Input(int step, params string[] keys) { _events.Add(new InputEvent(_f, null, 1, keys, step, "input")); return this; }
 
         public TraceBuilder Frames(int n, int? p1, int? p2State = 0, string? p2Move = "I", int hit = 0)
@@ -135,7 +135,7 @@ public class XRayVerifyTests : IDisposable
 
         public TraceLog Build(InputPlan plan)
         {
-            var meta = (TraceMeta)_events[0] with { PlanFingerprint = InputPlanner.Fingerprint(plan) };
+            var meta = ((TraceMeta)_events[0]) with { PlanFingerprint = InputPlanner.Fingerprint(plan) };
             return new TraceLog { Meta = meta, Events = new TraceEvent[] { meta }.Concat(_events.Skip(1))
                 .Append(new DriverEvent(_f, null, "plan_complete", null, null)).Append(new EndEvent(_f, null, "planComplete")).ToList(), Issues = [], LineCount = _events.Count + 2 };
         }
@@ -211,7 +211,8 @@ public class XRayVerifyTests : IDisposable
         var never = new TraceBuilder().Driver("plan_start").Frames(10, 0);
         never.Input(1, "x");
         var r3 = RouteVerifier.Verify(plan, never.Build(plan));
-        Assert.Equal(VerifyReason.TransitionNotObserved, r3.Reason);
+        Assert.Equal(VerifyReason.TelemetryMissing, r3.Reason);
+        Assert.Equal(VerifyStatus.Inconclusive, r3.Status);
         Assert.Equal(1, r3.FailedStep);
         Assert.Equal(StepOutcome.NotReached, r3.Steps[1].Outcome);
     }
@@ -368,7 +369,8 @@ public class XRayVerifyTests : IDisposable
         Assert.All(runtime, r => Assert.StartsWith("runtime.", r.Id));
         Assert.DoesNotContain(EvidenceRules.Rules, r => r.Confidence != Confidence.RuntimeVerified && r.Id.StartsWith("runtime.", StringComparison.Ordinal));
         // Every rule a verdict can cite is registered.
-        var report = RouteVerifier.Verify(PlanFor("200", "210"), GoodRun(PlanFor("200", "210")).Frames(3, 210, 5000, "H").Build(plan));
+        var plan = PlanFor("200", "210");
+        var report = RouteVerifier.Verify(plan, GoodRun(plan).Frames(3, 210, 5000, "H").Build(plan));
         foreach (var id in report.Steps.SelectMany(s => s.RuntimeRules)) Assert.Contains(EvidenceRules.Rules, r => r.Id == id);
     }
 

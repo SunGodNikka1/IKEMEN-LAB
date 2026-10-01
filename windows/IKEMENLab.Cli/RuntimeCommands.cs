@@ -111,6 +111,10 @@ internal static class RuntimeCommands
             {
                 w.WriteStartObject();
                 w.WriteString("engineVersion", log.Meta.EngineVersion);
+                w.WriteString("engineSha256", log.Meta.EngineSha256);
+                w.WriteString("engineExecutable", log.Meta.EngineExecutable);
+                w.WriteString("engineSource", log.Meta.EngineSource);
+                w.WriteString("planFingerprint", log.Meta.PlanFingerprint);
                 w.WriteString("probeVersion", log.Meta.ProbeVersion);
                 w.WriteString("platform", log.Meta.Platform);
                 w.WritePropertyName("hooksRegistered");

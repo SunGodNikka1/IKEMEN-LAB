@@ -89,7 +89,7 @@ public static class EvidenceRules
         new("combo.frames-estimate", Confidence.Inferred, "Earliest cancel tick derived from Time/AnimElem gates against the AIR timeline."),
         new("combo.route", Confidence.Inferred, "A route is a candidate: every step is an edge of the static graph. Hit-stun, pushback, juggle, meter gain and timing are not modelled, so it is not a verified combo."),
         // ---- Milestone 3: facts observed in a real, disposable match. Only the runtime verifier may cite these, and only with trace frames.
-        new("runtime.transition-observed", Confidence.RuntimeVerified, "In a real match, P1 entered this edge's target state immediately after its source state, following the scripted inputs."),
+        new("runtime.transition-observed", Confidence.RuntimeVerified, "In this tested route/run, the expected source-to-target state transition followed the planned inputs; this does not identify the controller that fired."),
         new("runtime.contact-observed", Confidence.RuntimeVerified, "In a real match, the contact the edge requires (moveHit/moveContact) was observed on the source move before the transition."),
         new("runtime.opponent-continuous", Confidence.RuntimeVerified, "In a real match, P2 stayed in a hit state from the first hit to the route's last step: no frame of recovery in between."),
 

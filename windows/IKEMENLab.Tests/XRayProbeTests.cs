@@ -54,9 +54,11 @@ public class XRayProbeTests
     }
 
     [Fact]
-    public void TheProbeKeepsRawEngineFactsOnlyAndNoInterpretation()
+    public void TheProbeKeepsRawPlayerFactsAndMarksDerivedDistance()
     {
         var text = ProbeText();
+        Assert.Contains("derived:p2.x-p1.x", text);
+        Assert.Contains("distanceSource", text);
         // Naming an outcome or a judgement is interpretation and belongs to a later milestone.
         foreach (var forbidden in new[] { "combocount", "hitcount", "antiair", "anti_air", "isHit", "wasHit" })
         {

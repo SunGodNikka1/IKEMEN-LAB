@@ -124,7 +124,7 @@ public static class TraceReader
                 if (e.ValueKind == JsonValueKind.String) hooks.Add(e.GetString()!);
 
         return new TraceMeta(Str(root, "schema"), Str(root, "engineVersion"), Str(root, "probeVersion"), Str(root, "character"),
-            Str(root, "platform"), caps, hooks, Str(root, "planFingerprint"));
+            Str(root, "platform"), caps, hooks, Str(root, "planFingerprint"), Str(root, "engineSha256"), Str(root, "engineExecutable"), Str(root, "engineSource"));
     }
 
     private static PlayerSample Player(JsonElement root, string name)

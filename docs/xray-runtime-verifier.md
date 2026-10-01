@@ -91,7 +91,7 @@ verifier agree; it proves nothing about a real engine — that is the Windows ac
 
 `Verified` now requires a nonempty, consecutively numbered plan and a matching fingerprint, one matching plan start,
 contiguous unique frames without reader issues, complete state/life/round/victim-control telemetry, unchanged round and no
-life reset/heal/death. Input records must use the input phase, agree with the planned held-key prefix and include the final
+life reset/heal/death within the played attempt (intro preparation is excluded). Input records must use the input phase, agree with the planned held-key prefix and include the final
 command keys before the target response. Later steps are locked to the exact source occurrence reached by the previous step;
 a wrong first exit, late return to the source, or response outside the attempt deadline cannot repair that attempt.
 Required contact is supported on that source occurrence, before its exit, after a readable flag reset or corroborating fresh
@@ -121,3 +121,5 @@ These identify evidence scope; state numbers alone do not prove which competing 
 New Inconclusive reasons include TraceIntegrity, PlanMismatch and RoundChanged. PlayerDefeated is a conservative M3 refusal.
 A route report never mutates sibling edges, controllers, abilities or other routes. Changes require new Windows runtime acceptance;
 old SBA runs do not validate these tightened proof conditions. See [the audit](xray-m3-adversarial-audit.md).
+
+Trace metadata includes host-supplied engine executable/source/hash for later verify-trace reports. gameTime is tried as the primary engine-tick binding; gaps are rejected when tick telemetry is available. Without it, the report states the per-tick sampling assumption requiring pinned-build acceptance. Same-state reentry remains Inconclusive.

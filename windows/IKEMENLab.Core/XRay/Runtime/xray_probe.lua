@@ -15,7 +15,7 @@
 if rawget(_G, "__ikemenlab_xray") then return end
 _G.__ikemenlab_xray = true
 
-local PROBE_VERSION = "0.1-spike"
+local PROBE_VERSION = "0.2-m3-audit"
 local cfg = { trace = "xray_trace.jsonl", maxFrames = 900, hooks = { "loop" }, character = "" }
 do
 	local ok, c = pcall(dofile, "external/mods/xray_config.lua")
@@ -154,7 +154,7 @@ local FIELDS = {
 
 local MATCH_FIELDS = {
 	{ "round", num, { function() return call("roundNo") end, function() return call("roundno") end } },
-	{ "engineTick", num, { function() return call("tickcount") end, function() return call("gametick") end, function() return call("gametime") end } },
+	{ "engineTick", num, { function() return call("gameTime") end, function() return call("tickcount") end, function() return call("gametick") end, function() return call("gametime") end } },
 	{ "distance", num, { function() return call("p2distx") end, function() return call("p2dist", "x") end } },
 	{ "p1TargetCount", num, { function() return call("numtarget") end } },
 	{ "p1TargetId", num, { function() return call("targetid") end } },
@@ -244,7 +244,9 @@ local function writeMeta()
 	emit(O("type", "meta", "frame", 0, "schema", "ikemenlab.xray.trace/0", "probeVersion", PROBE_VERSION,
 		"engineVersion", engineVersion() or NULL, "luaVersion", _VERSION or NULL, "character", cfg.character,
 		"platform", (package and package.config and package.config:sub(1, 1) == "\\") and "windows" or "other",
-		"capabilities", caps, "hooks", hooks, "planFingerprint", planFingerprint or NULL))
+		"capabilities", caps, "hooks", hooks, "planFingerprint", planFingerprint or NULL,
+        -- Host-supplied launch provenance, not engine trigger fields.
+        "engineSha256", cfg.engineSha256 or NULL, "engineExecutable", cfg.engineExecutable or NULL, "engineSource", cfg.engineSource or NULL))
 end
 
 local function finish(reason)
@@ -284,7 +286,7 @@ local function sample()
 	frame[#frame + 1] = { "round", extra.round == nil and NULL or extra.round }
 	frame[#frame + 1] = { "p1", p1 }
 	frame[#frame + 1] = { "p2", p2 }
-	-- World-axis delta, derived from raw positions. It is not facing-relative P2DistX,
+	-- Common-axis delta, derived from raw positions. It is not facing-relative P2DistX,
 	-- nor P2BodyDistX. The driver uses only its magnitude for the approach threshold.
 	local distanceSource = extra.distance ~= nil and "engine-trigger" or nil
 	if extra.distance == nil then

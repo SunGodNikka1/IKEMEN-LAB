@@ -32,6 +32,23 @@ public class XRayAdversarialTests
     private static VerificationReport Judge(List<TraceEvent> e) => RouteVerifier.Verify(Plan, Log(e));
 
     [Fact]
+    public void IntroControlAndLifeInitialisationAreOutsideThePlayedRoute()
+    {
+        var e = Good(); e.RemoveAt(0);
+        e.Insert(0, new DriverEvent(0, null, "plan_start", null, "route"));
+        e.Insert(1, F(0, 190) with { P2 = Player(190, false, "I", life: 1), Round = 0 });
+        Assert.Equal(VerifyStatus.Verified, Judge(e).Status);
+    }
+
+    [Fact]
+    public void AHiddenSimulationTickGapIsInconclusiveEvenWithConsecutiveProbeCounters()
+    {
+        var e = Good();
+        for (var i = 0; i < e.Count; i++) if (e[i] is FrameEvent f) e[i] = f with { EngineTick = f.Frame < 5 ? f.Frame : f.Frame + 1 };
+        Assert.Equal(VerifyReason.TraceIntegrity, Judge(e).Reason);
+    }
+
+    [Fact]
     public void GenuineDrivenSequenceVerifies() => Assert.Equal(VerifyStatus.Verified, Judge(Good()).Status);
 
     [Fact]

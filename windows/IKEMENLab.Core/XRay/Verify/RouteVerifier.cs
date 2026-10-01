@@ -42,6 +42,9 @@ public sealed record VerificationReport(
 
     /// <summary>The only place in the product where <see cref="Confidence.RuntimeVerified"/> is produced, and only for a fully verified route.</summary>
     public string? PlanFingerprint { get; init; }
+    public string? EngineSha256 { get; init; }
+    public string? EngineExecutable { get; init; }
+    public string? EngineSource { get; init; }
 
     public Confidence RouteConfidence => Status == VerifyStatus.Verified ? Confidence.RuntimeVerified : Confidence.Inferred;
 }
@@ -61,6 +64,7 @@ public static class RouteVerifier
         if (subject != 1 || victim != 2) throw new ArgumentOutOfRangeException(nameof(subject), "M3 plans drive P1 against P2 only.");
         var notes = new List<string>();
         var frames = log.Frames.ToList();
+        var observedCount = frames.Count;
         var none = new ContinuityVerdict(false, false, null, null, null, null, null);
         var pending = plan.Steps.Select(s => new StepVerdict(s.Index, s.EdgeId, s.FromId, s.ToId,
             StepOutcome.NotReached, null, null, null, null, null, null, [])).ToList();
@@ -69,7 +73,8 @@ public static class RouteVerifier
         {
             if (note is not null) notes.Add(note);
             return new VerificationReport(plan.Character, plan.RouteKey, status, reason, failed, steps, continuity,
-                frames.Count, log.Meta?.EngineVersion, notes) { PlanFingerprint = InputPlanner.Fingerprint(plan) };
+                observedCount, log.Meta?.EngineVersion, notes) { PlanFingerprint = InputPlanner.Fingerprint(plan), EngineSha256 = log.Meta?.EngineSha256,
+                EngineExecutable = log.Meta?.EngineExecutable, EngineSource = log.Meta?.EngineSource };
         }
         if (plan.Steps.Count == 0 || !plan.Steps.Select(s => s.Index).SequenceEqual(Enumerable.Range(1, plan.Steps.Count)))
             return Result(VerifyStatus.Inconclusive, VerifyReason.PlanMismatch, null, pending, none, "Invalid or empty plan.");
@@ -77,9 +82,12 @@ public static class RouteVerifier
             .Any(pair => pair.Second.Frame < pair.First.Frame))
             return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none,
                 "The trace contains dropped, malformed, duplicated or out-of-order evidence: " + string.Join("; ", log.Issues.Select(i => i.Message)));
+        if (plan.Steps.Any(s => s.FromState == s.ToState))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, pending, none, "State numbers alone cannot prove same-state reentry.");
         var driver = log.Events.OfType<DriverEvent>().ToList();
         // A missing binding stops the shipped driver before it can attempt anything. This is independent of --adapter.
-        if (driver.Any(d => d.Kind == "inject_unavailable") && !log.Events.OfType<InputEvent>().Any(e => e.Phase == "input" && e.Keys.Count > 0))
+        if (driver.Any(d => d.Kind == "inject_unavailable" &&
+            (!driver.Any(s => s.Kind == "plan_start") || d.Frame >= driver.First(s => s.Kind == "plan_start").Frame)) && !log.Events.OfType<InputEvent>().Any(e => e.Phase == "input" && e.Keys.Count > 0))
             return Result(VerifyStatus.Inconclusive, VerifyReason.InputInjectionUnavailable, null, pending, none,
                 driver.First(d => d.Kind == "inject_unavailable").Detail);
         if (frames.Count == 0) return Result(VerifyStatus.Inconclusive, VerifyReason.NoMatchFrames, null, pending, none);
@@ -90,20 +98,30 @@ public static class RouteVerifier
         if (starts.Count != 1 || (starts[0].Detail is { } route && route != plan.RouteKey))
             return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none, "Expected one matching plan_start.");
         var playStart = starts[0].Frame;
-        frames = frames.Where(f => f.Frame >= playStart).ToList();
+        // Intro/neutral preparation may legitimately lack control or initialise life. The proof interval starts with
+        // the first route input sample (which precedes applying that input), not with the engine's intro.
+        var attemptStart = log.Events.OfType<InputEvent>().FirstOrDefault(e => e.Player == subject && e.Step == 1 &&
+            e.Phase == "input" && e.Keys.Count > 0 && e.Frame >= playStart)?.Frame;
+        frames = frames.Where(f => f.Frame >= (attemptStart ?? playStart)).ToList();
         if (frames.Count == 0) return Result(VerifyStatus.Inconclusive, VerifyReason.NoMatchFrames, null, pending, none);
         if (frames.Zip(frames.Skip(1)).Any(pair => pair.Second.Frame != pair.First.Frame + 1))
             return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none, "Match samples must be contiguous and unique.");
+        if (frames.Any(f => f.EngineTick is not null) && (frames.Any(f => f.EngineTick is null) ||
+            frames.Zip(frames.Skip(1)).Any(p => p.Second.EngineTick < p.First.EngineTick || p.Second.EngineTick > p.First.EngineTick + 1)))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none, "Engine tick coverage is incomplete or skips simulation ticks.");
+        if (frames.All(f => f.EngineTick is null)) notes.Add("Engine tick telemetry is unavailable; continuity assumes the loop hook samples every simulation tick. This assumption requires acceptance on the pinned build.");
         if (frames.Any(f => f.P1.State is null || f.P2.State is null || f.P2.Ctrl is null || f.P1.Life is null || f.P2.Life is null || f.Round is null))
             return Result(VerifyStatus.Inconclusive, VerifyReason.TelemetryMissing, null, pending, none, "State, victim control, life and round telemetry must cover the run.");
         if (frames.Select(f => f.Round).Distinct().Count() != 1 || frames.Zip(frames.Skip(1)).Any(p => p.Second.P1.Life > p.First.P1.Life || p.Second.P2.Life > p.First.P2.Life))
             return Result(VerifyStatus.Inconclusive, VerifyReason.RoundChanged, null, pending, none, "Round changed or life reset/healed during the run.");
         if (frames.Any(f => f.P1.Life <= 0 || f.P2.Life <= 0))
             return Result(VerifyStatus.Failed, VerifyReason.PlayerDefeated, null, pending, none, "M3 does not certify routes across death/reset.");
-        if (InHitState(frames[0].P2) || frames[0].P2.Ctrl != true)
+        if (attemptStart is not null && (InHitState(frames[0].P2) || frames[0].P2.Ctrl != true))
             return Result(VerifyStatus.Inconclusive, VerifyReason.TraceIntegrity, null, pending, none, "The victim was not free before the tested route.");
         var setupStop = driver.FirstOrDefault(d => d.Kind == "timeout" && d.Step is null && d.Frame >= playStart && d.Frame <= frames[^1].Frame);
-        if (setupStop is not null && !log.Events.OfType<InputEvent>().Any(e => e.Phase == "input" && e.Keys.Count > 0))
+        if (setupStop is not null && !driver.Any(d => d.Kind == "step_wait") &&
+            log.Events.OfType<EndEvent>().Any(e => e.Frame == setupStop.Frame && (e.Reason is "neutralTimeout" or "approachTimeout")) &&
+            !log.Events.OfType<InputEvent>().Any(e => e.Phase == "input" && e.Keys.Count > 0))
             return Result(VerifyStatus.Failed, VerifyReason.DriverTimeout, null, pending, none, "The driver stopped before any route attempt: " + setupStop.Detail);
         var inputs = log.Events.OfType<InputEvent>().Where(e => e.Player == subject && e.Phase == "input" && e.Keys.Count > 0 && e.Frame >= playStart).ToList();
         var verdicts = new List<StepVerdict>();
@@ -255,7 +273,7 @@ public static class RouteVerifier
             return Result(VerifyStatus.Failed, VerifyReason.ComboDropped, plan.Steps.Count, verdicts,
                 new ContinuityVerdict(true, false, firstHit, endFrame, drop.Frame, gap, "P2 left hitstun or regained control; zero gap frames are tolerated."));
         }
-        if (driver.Any(d => d.Kind is "inject_unavailable" or "driver_error" or "driver_load_failed"))
+        if (driver.Any(d => d.Frame >= playStart && d.Frame <= frames[^1].Frame && (d.Kind is "inject_unavailable" or "driver_error" or "driver_load_failed")))
             return Result(VerifyStatus.Inconclusive, VerifyReason.InputInjectionUnavailable, null, verdicts, none, "The driver did not finish with valid input injection.");
         if (!driver.Any(d => d.Kind == "plan_complete" && d.Frame >= endFrame) ||
             !log.Events.OfType<EndEvent>().Any(e => e.Reason == "planComplete" && e.Frame >= endFrame))
@@ -292,6 +310,9 @@ public static class RouteVerifier
             w.WriteString("character", r.Character);
             w.WriteString("route", r.RouteKey);
             w.WriteString("planFingerprint", r.PlanFingerprint);
+            w.WriteString("engineSha256", r.EngineSha256);
+            w.WriteString("engineExecutable", r.EngineExecutable);
+            w.WriteString("engineSource", r.EngineSource);
             w.WriteString("status", r.Status.ToString());
             w.WriteString("routeConfidence", r.RouteConfidence.ToString());
             if (r.Reason is null) w.WriteNull("reason"); else w.WriteString("reason", r.Reason);

@@ -252,8 +252,12 @@ public sealed class RuntimeSandbox : IDisposable
             planConfig = ", plan = \"external/mods/xray_plan.lua\", driver = \"external/mods/xray_driver.lua\", adapter = \"external/mods/xray_inject.lua\"";
         }
 
+        static string LuaPath(string p) => p.Replace('\\', '/').Replace("\"", "\\\"");
+        var actualEngine = Path.Combine(root, Services.IkemenInstallationValidator.ExeFileName);
+        var engineSource = Path.GetFullPath(request.EngineExePath ?? Path.Combine(request.SourceRoot, Services.IkemenInstallationValidator.ExeFileName));
+        var provenance = $", engineSha256 = \"{Sha256(actualEngine)}\", engineExecutable = \"{LuaPath(actualEngine)}\", engineSource = \"{LuaPath(engineSource)}\"";
         File.WriteAllText(Path.Combine(mods, "xray_config.lua"),
-            $"return {{ trace = \"{trace}\", maxFrames = {request.MaxFrames}, character = \"{request.SubjectFolder.Replace("\"", "")}\", hooks = {{ \"loop\" }}{planConfig} }}\n",
+            $"return {{ trace = \"{trace}\", maxFrames = {request.MaxFrames}, character = \"{request.SubjectFolder.Replace("\"", "")}\", hooks = {{ \"loop\" }}{planConfig}{provenance} }}\n",
             new UTF8Encoding(false));
 
         if (request.Injection != ProbeInjection.ModsAndMainLua) return;
