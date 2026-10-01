@@ -17,6 +17,7 @@ namespace IKEMENLab.App.Tests;
 /// The Play Combo bar lives in the Combos lens. These tests measure the real XRayWindow view (not a stub) so a bar that exists but is
 /// clipped, unbound or never shown fails here — the same lesson as the character-detail X-Ray button.
 /// </summary>
+[Collection(WpfUiCollection.Name)]
 public class ComboPlaybackUiTests
 {
     private sealed class MemorySettings : ISettingsStore
@@ -48,8 +49,12 @@ public class ComboPlaybackUiTests
         if (failure is not null) throw failure;
     }
 
+    private static readonly object AppLock = new();
+
     private static void EnsureAppResources()
     {
+        lock (AppLock)
+        {
         if (Application.Current is not null) return;
         var app = new Application();
         foreach (var uri in new[]
@@ -58,6 +63,7 @@ public class ComboPlaybackUiTests
             "pack://application:,,,/IKEMENLab;component/Themes/Controls.xaml",
         })
             app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri(uri) });
+        }
     }
 
     private static string TempInstall()
@@ -68,7 +74,7 @@ public class ComboPlaybackUiTests
         File.WriteAllText(Path.Combine(root, "chars", "hero", "hero.cmd"), "[Command]\nname = \"x\"\ncommand = x\n");
         File.WriteAllText(Path.Combine(root, "chars", "hero", "hero.cns"), "[Statedef 200]\ntype = S\n");
         return root;
-    }
+        }
 
     private static XRayWindow Window(MemorySettings settings, string root)
     {
@@ -163,3 +169,4 @@ public class ComboPlaybackUiTests
         });
     }
 }
+

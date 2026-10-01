@@ -16,6 +16,7 @@ namespace IKEMENLab.App.Tests;
 /// Presence of XRayWindow in the assembly is not evidence of a user-facing entry point: the command can be
 /// missing, unbound, clipped out of the panel, or permanently disabled and the type still resolves.
 /// </summary>
+[Collection(WpfUiCollection.Name)]
 public class CharacterDetailUiTests
 {
     /// <summary>Minimal stand-in for the inspector's data context. WPF bindings to absent members simply fail silently.</summary>
@@ -60,8 +61,12 @@ public class CharacterDetailUiTests
     }
 
     /// <summary>Views resolve converters and styles from App.xaml; a bare test host has no Application, so load the same dictionaries.</summary>
+    private static readonly object AppLock = new();
+
     private static void EnsureAppResources()
     {
+        lock (AppLock)
+        {
         if (System.Windows.Application.Current is not null) return;
         var app = new System.Windows.Application();
         foreach (var uri in new[]
@@ -71,6 +76,7 @@ public class CharacterDetailUiTests
         })
         {
             app.Resources.MergedDictionaries.Add(new ResourceDictionary { Source = new Uri(uri) });
+        }
         }
     }
     /// <summary>A detached UserControl has no visual tree until it is measured; force one before inspecting it.</summary>
@@ -202,6 +208,7 @@ internal static class VisualTreeHelpers
         }
     }
 }
+
 
 
 
