@@ -135,7 +135,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
     /// <summary>Folder with the SDL/FFmpeg DLLs a self-built engine needs. Blank = use the DLLs beside the engine, if any.</summary>
     public string EngineDlls { get => _dlls; set { if (SetProperty(ref _dlls, value)) SetupEdited(); } }
     /// <summary>How close P1 walks to the dummy before the route starts. Blank = 60. A configured threshold; it is not the attack's range and is reported separately from the separation actually measured.</summary>
-    public string ApproachDistance { get => _approach; set { if (SetProperty(ref _approach, value)) { OnPropertyChanged(nameof(ApproachDistanceError)); SetupEdited(); } } }
+    public string ApproachDistance { get => _approach; set { if (SetProperty(ref _approach, value)) { OnPropertyChanged(nameof(ApproachDistanceError)); OnPropertyChanged(nameof(HasApproachDistanceError)); SetupEdited(); } } }
     public string ApproachDistanceError => PlaybackPreflight.TryParseApproach(_approach, out _, out var problem) ? string.Empty : problem ?? string.Empty;
     public bool HasApproachDistanceError => ApproachDistanceError.Length > 0;
     public string Dummy { get => _dummy; set { if (SetProperty(ref _dummy, value)) SetupEdited(); } }

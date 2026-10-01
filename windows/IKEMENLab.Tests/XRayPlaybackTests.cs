@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Diagnostics;
 using IKEMENLab.Core.Settings;
 using IKEMENLab.Core.XRay.Combo;
@@ -1092,9 +1093,93 @@ public class XRayPlaybackSessionTests : IDisposable
         await session.PlayAsync(request);
         var d = session.DiagnosticForLatestAttempt()!;
         Assert.Equal("Failed", d.Result!.Verdict);
-        Assert.NotNull(d.ExpectedStep);
-        Assert.Equal(d.FailedStep, d.ExpectedStep!.Index);
-        Assert.Equal(d.Route.Single(r => r.Index == d.FailedStep).Edge, d.ExpectedStep.EdgeId);
+        var failed = Assert.Single(d.StaticSteps, x => x.Index == d.FailedStep);
+        Assert.Equal(d.Route.Single(r => r.Index == d.FailedStep).Edge, failed.EdgeId);
         Assert.Contains("executed controller: unknown", d.ToText());
+    }
+
+    // ------------------------------------------------------------------ full static context, immutable save
+
+    [Fact]
+    public async Task AVerifiedRunDiagnosticCarriesTheStaticContextOfEveryRouteStep()
+    {
+        var (session, request, runner) = Arrange();
+        runner.Release.Set();
+        await session.PlayAsync(request);
+        Assert.Equal(VerifyStatus.Verified, session.Outcome!.Report.Status);
+        var d = session.DiagnosticForLatestAttempt()!;
+        Assert.Null(d.FailedStep);
+        Assert.Equal(request.Route.Steps.Count, d.StaticSteps.Count);             // every step, not only a failed one
+        Assert.Equal(d.Route.Select(r => r.Edge), d.StaticSteps.Select(x => x.EdgeId));
+        foreach (var step in d.StaticSteps)
+        {
+            Assert.False(string.IsNullOrEmpty(step.ControllerId));
+            Assert.NotEmpty(step.ModelledRequirements);
+            Assert.NotNull(step.ControllerSource);
+            Assert.NotEmpty(step.TriggerGroups.SelectMany(g => g.Lines));         // numbered trigger groups with their source lines
+            Assert.NotEmpty(step.Commands);
+        }
+
+        var text = d.ToText();
+        for (var i = 1; i <= d.StaticSteps.Count; i++) Assert.Contains($"static step {i}", text);
+        Assert.Contains("unmodelled expressions (as written)", text);
+    }
+
+    [Fact]
+    public async Task ADiagnosticSavedWhileAnotherAttemptIsRefusedStillBelongsToItsOwnRun()
+    {
+        var store = Temp2();
+        var runner = new GateRunner();
+        runner.Release.Set();
+        var (_, request, _) = Arrange();
+        PlaybackSession? session = null;
+        var fired = 0;
+        session = new PlaybackSession(new ComboPlaybackService(runner, store, Temp2()))
+        {
+            // The race window: A's result is published, A's diagnostic is not yet written — and attempt B is refused right now.
+            SaveSeam = p => { if (p == "before-diagnostic-save" && Interlocked.Increment(ref fired) == 1) session!.RefuseAttempt("another-route", "refused during A's save"); }
+        };
+        await session.PlayAsync(request);
+
+        Assert.Equal((2, AttemptState.PreflightRefused), (session.AttemptId, session.Attempt));   // the session has moved on to attempt 2
+        var folder = Assert.Single(Directory.EnumerateDirectories(store));
+        using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "diagnostic.json")));
+        var root = doc.RootElement;
+        Assert.Equal("run", root.GetProperty("kind").GetString());
+        Assert.Equal(1, root.GetProperty("attempt").GetProperty("id").GetInt32());                // A's identity, not B's
+        Assert.Equal("VerdictProduced", root.GetProperty("attempt").GetProperty("state").GetString());
+        Assert.Equal(Path.GetFileName(folder), root.GetProperty("result").GetProperty("runId").GetString());   // A's run in A's folder
+        Assert.Equal(request.Route.Key, root.GetProperty("attempt").GetProperty("routeKey").GetString());
+        Assert.DoesNotContain("refused during A's save", File.ReadAllText(Path.Combine(folder, "diagnostic.json")));
+    }
+
+    [Fact]
+    public async Task ADiagnosticSavedWhileAReplayStartsNeverMixesTheTwoAttempts()
+    {
+        var store = Temp2();
+        var runner = new GateRunner();
+        runner.Release.Set();
+        var (_, request, _) = Arrange();
+        PlaybackSession? session = null;
+        var fired = 0;
+        session = new PlaybackSession(new ComboPlaybackService(runner, store, Temp2()))
+        {
+            SaveSeam = p => { if (p == "before-diagnostic-save" && Interlocked.Increment(ref fired) == 1) _ = session!.ReplayAsync(); }   // B begins while A's save is pending
+        };
+        await session.PlayAsync(request);
+        Assert.True(SpinWait.SpinUntil(() => session.AttemptId == 2 && session.Attempt == AttemptState.VerdictProduced, 15000), "the replay never finished");
+
+        var folders = Directory.EnumerateDirectories(store).ToList();
+        Assert.Equal(2, folders.Count);
+        var attempts = new List<int>();
+        foreach (var folder in folders)
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "diagnostic.json")));
+            Assert.Equal(Path.GetFileName(folder), doc.RootElement.GetProperty("result").GetProperty("runId").GetString());   // each folder holds its own run's diagnostic
+            Assert.Equal(doc.RootElement.GetProperty("attempt").GetProperty("id").GetInt32(), doc.RootElement.GetProperty("result").GetProperty("attemptId").GetInt32());
+            attempts.Add(doc.RootElement.GetProperty("attempt").GetProperty("id").GetInt32());
+        }
+
+        Assert.Equal([1, 2], attempts.OrderBy(x => x).ToList());
     }
 }

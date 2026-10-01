@@ -11,12 +11,13 @@ public sealed record SnapshotTrigger(string Text, SourceSpan? Source);
 public sealed record SnapshotGroup(int Number, bool IsExpectedBranch, IReadOnlyList<SnapshotTrigger> Lines);
 
 /// <summary>
-/// A controller that the static graph shows reading one of the same commands from the same source. It is listed for context only: nothing here says
-/// which controller the engine executed, and file order is not engine priority.
+/// A controller that the static graph shows reading one of the same commands from the same source, with the same captured detail as the expected
+/// controller. Listed for context only: nothing here says which controller the engine executed, and file order is not engine priority.
 /// </summary>
 public sealed record CompetingController(
-    string ControllerId, string StateId, string TargetId, string Kind, int BranchNumber, string Confidence, IReadOnlyList<string> SharedCommands,
-    int UnmodelledCount, SourceSpan? Source, string FileOrder);
+    string ControllerId, string StateId, string? ControllerName, string TargetId, string Kind, int BranchNumber, string Confidence, IReadOnlyList<string> SharedCommands,
+    string FileOrder, IReadOnlyList<string> ModelledRequirements, IReadOnlyList<string> Unmodelled, SourceSpan? ControllerSource,
+    IReadOnlyList<SnapshotTrigger> TriggerAll, IReadOnlyList<SnapshotGroup> TriggerGroups);
 
 public sealed record StepStaticSnapshot(
     int Index, string EdgeId, string Kind, string From, string To, string ControllerId, string? ControllerName, int BranchNumber, string Confidence,
@@ -55,13 +56,7 @@ public sealed record StaticSnapshot(
 
     private static StepStaticSnapshot CaptureStep(CandidateGraph graph, SemanticIndex index, CandidateEdge edge, int number)
     {
-        SourceSpan? Span(SourceRef? r) => r is { } s && index.FileOf(s) is { } f ? new SourceSpan(f.RelPath, s.StartLine, s.EndLine) : null;
-        SnapshotTrigger Trig(TriggerLine l) => new(l.Text, Span(l.Source));
-
-        var controller = index.Get(edge.ControllerId);
-        var gate = controller?.Gate;
-        var groups = gate?.Branches.Select(b => new SnapshotGroup(b.Number, b.Number == edge.BranchNumber, b.Lines.Select(Trig).ToList())).ToList() ?? [];
-
+        var (name, span, triggerAll, groups) = Detail(index, edge);
         var competing = new List<CompetingController>();
         var total = 0;
         foreach (var other in graph.Edges.Where(e => e.ControllerId != edge.ControllerId && e.From == edge.From && e.Commands.Intersect(edge.Commands).Any())
@@ -69,16 +64,26 @@ public sealed record StaticSnapshot(
         {
             total++;
             if (competing.Count >= MaxCompeting) continue;
-            var c = index.Get(other.ControllerId);
-            competing.Add(new CompetingController(other.ControllerId, other.ControllerId.Split('/')[0], other.To, other.Kind.ToString(), other.BranchNumber, other.Confidence.ToString(),
-                other.Commands.Intersect(edge.Commands).OrderBy(x => x, StringComparer.Ordinal).ToList(), other.Unmodelled.Count, Span(c?.Source),
-                FileOrder(edge.ControllerId, other.ControllerId)));
+            var (otherName, otherSpan, otherAll, otherGroups) = Detail(index, other);
+            competing.Add(new CompetingController(other.ControllerId, other.ControllerId.Split('/')[0], otherName, other.To, other.Kind.ToString(), other.BranchNumber,
+                other.Confidence.ToString(), other.Commands.Intersect(edge.Commands).OrderBy(x => x, StringComparer.Ordinal).ToList(), FileOrder(edge.ControllerId, other.ControllerId),
+                Requirements(other.Facets), other.Unmodelled.ToList(), otherSpan, otherAll, otherGroups));
         }
 
-        return new StepStaticSnapshot(number, edge.Id, edge.Kind.ToString(), edge.From, edge.To, edge.ControllerId, controller?.Name, edge.BranchNumber, edge.Confidence.ToString(),
+        return new StepStaticSnapshot(number, edge.Id, edge.Kind.ToString(), edge.From, edge.To, edge.ControllerId, name, edge.BranchNumber, edge.Confidence.ToString(),
             edge.Evidence.Select(e => e.RuleId).Distinct().OrderBy(x => x, StringComparer.Ordinal).ToList(), edge.Commands.ToList(), edge.Contact == ContactRequirement.None ? null : edge.Contact.ToString().ToLowerInvariant(),
-            edge.EarliestTick, Requirements(edge.Facets), edge.Unmodelled.ToList(), Span(controller?.Source),
-            gate?.TriggerAll.Select(Trig).ToList() ?? [], groups, competing, total > competing.Count);
+            edge.EarliestTick, Requirements(edge.Facets), edge.Unmodelled.ToList(), span, triggerAll, groups, competing, total > competing.Count);
+    }
+
+    /// <summary>The controller's name, source span, triggerall lines and numbered trigger groups (with source lines), as written in the files.</summary>
+    private static (string? Name, SourceSpan? Span, IReadOnlyList<SnapshotTrigger> TriggerAll, IReadOnlyList<SnapshotGroup> Groups) Detail(SemanticIndex index, CandidateEdge edge)
+    {
+        SourceSpan? Span(SourceRef? r) => r is { } s && index.FileOf(s) is { } f ? new SourceSpan(f.RelPath, s.StartLine, s.EndLine) : null;
+        SnapshotTrigger Trig(TriggerLine l) => new(l.Text, Span(l.Source));
+        var controller = index.Get(edge.ControllerId);
+        var gate = controller?.Gate;
+        var groups = gate?.Branches.Select(b => new SnapshotGroup(b.Number, b.Number == edge.BranchNumber, b.Lines.Select(Trig).ToList())).ToList() ?? [];
+        return (controller?.Name, Span(controller?.Source), gate?.TriggerAll.Select(Trig).ToList() ?? [], groups);
     }
 
     private static (string, int) Order(string controllerId)

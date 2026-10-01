@@ -229,6 +229,12 @@ case "playback-wait":
 case "playback-inspect":
     PlaybackAction(p => p.InspectFailureCommand, "InspectFailure");
     break;
+case "playback-diagnostic":
+    PlaybackDiagnosticVerb();
+    break;
+case "playback-setup":
+    PlaybackSetupVerb(rest);
+    break;
 case "playback-trace":
     PlaybackAction(p => p.ViewTraceCommand, "ViewTrace");
     break;
@@ -813,6 +819,45 @@ case "xray-combos-find":
     }
 
 
+    /// <summary>
+    /// playback-diagnostic - logs the latest attempt's full diagnostic for the SELECTED route: exactly the text (then JSON) that the Copy Full Diagnostic button puts on the
+    /// clipboard, produced by the same panel method. When the selected route is not the attempt's route (or there is no attempt) it logs "(none)" instead of anything else.
+    /// </summary>
+    private void PlaybackDiagnosticVerb()
+    {
+        var text = Playback().DiagnosticText();
+        if (text.Length == 0) { _log.Add("  playback-diagnostic: (none) - no attempt, or the selected route is not the attempt's route"); return; }
+        foreach (var line in text.Split('\n')) _log.Add("  diag| " + line);
+    }
+
+    /// <summary>
+    /// playback-setup key=value|key=value … - sets the real Playback setup fields (engine, dlls, dummy, stage, approachDistance) through the same properties the setup UI binds
+    /// to, then logs the resulting validation state, so an invalid value is observable. A blank value clears the field.
+    /// </summary>
+    private void PlaybackSetupVerb(string rest)
+    {
+        var panel = Playback();
+        foreach (var pair in rest.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eq = pair.IndexOf('=');
+            if (eq <= 0) throw new InvalidOperationException($"playback-setup expects key=value pairs, got '{pair}'");
+            var key = pair[..eq].Trim().ToLowerInvariant();
+            var value = pair[(eq + 1)..].Trim();
+            switch (key)
+            {
+                case "engine": panel.EnginePath = value; break;
+                case "dlls": panel.EngineDlls = value; break;
+                case "dummy": panel.Dummy = value; break;
+                case "stage": panel.Stage = value; break;
+                case "approachdistance": panel.ApproachDistance = value; break;
+                default: throw new InvalidOperationException($"playback-setup: unknown key '{key}' (engine, dlls, dummy, stage, approachDistance)");
+            }
+        }
+
+        _log.Add($"  playback-setup: approachDistance='{panel.ApproachDistance}' error='{panel.ApproachDistanceError}' hasError={panel.HasApproachDistanceError}");
+        _log.Add($"  playback-setup: {panel.SetupSummary}");
+    }
+
     /// <summary>playback-status - one machine-readable key=value block so a script can assert without parsing prose.</summary>
     private void PlaybackStatus()
     {
@@ -860,6 +905,9 @@ case "xray-combos-find":
         _log.Add($"  status.sessionClosed={p.SessionIsClosed}");
         _log.Add($"  status.error={p.SessionError}");
         _log.Add($"  status.setupSummary={p.SetupSummary}");
+        _log.Add($"  status.approachDistance={p.ApproachDistance}");
+        _log.Add($"  status.approachDistanceError={p.ApproachDistanceError}");
+        _log.Add($"  status.hasApproachDistanceError={p.HasApproachDistanceError}");
     }
 
     private static bool VerdictSettled(ComboPlaybackPanel p)

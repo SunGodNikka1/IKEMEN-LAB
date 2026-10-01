@@ -95,12 +95,7 @@ public static class PlaybackInspector
         if (report.Reason == VerifyReason.ComboDropped && report.Continuity.DropFrame is { } drop) return drop;
         // Decisive evidence outranks bookkeeping: the first wrong move (never replaced by a later return to neutral or a driver timeout), or the end of the
         // source move whose required contact never came.
-        if (step?.Evidence is { } ev)
-        {
-            if (ev.FirstMismatchFrame is { } mismatch) return mismatch;
-            if (ev.Failure is PrerequisiteFailure.RequiredContactNotObserved && ev.SourceStateLastFrame is { } last) return last;
-        }
-
+        if (step?.Evidence?.FailureAnchorFrame is { } anchor) return anchor;
         if (step is { } s)
         {
             if (s.TransitionFrame is { } t) return t;

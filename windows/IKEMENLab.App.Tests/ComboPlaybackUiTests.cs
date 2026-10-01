@@ -673,4 +673,91 @@ public class ComboPlaybackUiTests : IDisposable
             window.Close();
         });
     }
+
+    [Fact]
+    public void TheApproachDistanceValidationNotifiesAndShowsThroughValidInvalidValid()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, _) = Install();
+            var vm = ViewModel(new MemorySettings(), root);
+            var window = ShowWindow(vm);
+            vm.Combos.Playback.ToggleSetupCommand.Execute(null);
+            WpfHost.Layout(window, window.ActualWidth);
+            var panel = vm.Combos.Playback;
+            var error = Named<TextBlock>(window, "Approach distance error");
+            var raised = new System.Collections.Generic.List<string>();
+            panel.PropertyChanged += (_, e) => raised.Add(e.PropertyName ?? string.Empty);
+
+            panel.ApproachDistance = "45";                                              // valid
+            Assert.False(panel.HasApproachDistanceError);
+            Assert.False(error.IsVisible);
+
+            raised.Clear();
+            panel.ApproachDistance = "abc";                                             // invalid: the visibility property must be notified, not just the text
+            WpfHost.Layout(window, window.ActualWidth);
+            Assert.Contains(nameof(ComboPlaybackPanel.HasApproachDistanceError), raised);
+            Assert.True(panel.HasApproachDistanceError);
+            Assert.True(error.IsVisible, "The inline validation message did not appear for an invalid value.");
+            Assert.Contains("whole number", error.Text);
+
+            raised.Clear();
+            panel.ApproachDistance = "60";                                             // valid again: it must disappear
+            WpfHost.Layout(window, window.ActualWidth);
+            Assert.Contains(nameof(ComboPlaybackPanel.HasApproachDistanceError), raised);
+            Assert.False(panel.HasApproachDistanceError);
+            Assert.False(error.IsVisible, "The inline validation message stayed visible after the value became valid.");
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public void TheRealQaRunnerExposesDiagnosticSetupAndExactRouteVerbs()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, engine) = Install();
+            var vm = ViewModel(new MemorySettings(), root, Service(new GateRunner()));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var exactKey = vm.Combos.Routes[1].Id;
+            var script = Path.Combine(Temp("xray-qa-"), "script.qa");
+            File.WriteAllLines(script,
+            [
+                "xray-combo-route cand:neutral",                                        // ambiguous substring: must be an error, never 'the first match'
+                "xray-combo-route-index 99",                                            // out of range: an error
+                "xray-combo-route-index 1",
+                "xray-combo-route-key " + exactKey,
+                "playback-diagnostic",                                                  // no attempt yet
+                "playback-setup approachDistance=abc",                                  // invalid value is observable
+                "playback-setup engine=" + engine + "|dummy=kfm|stage=stages/ring.def|approachDistance=45",
+                "playback-play",
+                "playback-wait verdict 20000",
+                "playback-diagnostic",
+                "playback-status"
+            ]);
+
+            // The runner is the real one; it only needs the playback panel (via the open X-Ray window), so the main view model is not required.
+            var run = new IKEMENLab.App.Services.QaScriptRunner(null!, window).RunAsync(script);
+            Assert.True(WpfHost.PumpUntil(() => run.IsCompleted, 60000), "The QA script never finished.");
+            run.GetAwaiter().GetResult();
+            var log = File.ReadAllText(Path.ChangeExtension(script, ".log"));
+
+            Assert.Contains("! 'cand:neutral' matches", log);                           // substring ambiguity is an error with the candidates listed
+            Assert.Contains("! Route index 99 is out of range", log);
+            Assert.Contains("selected route #1 of", log);
+            Assert.Contains("selected route #2 of", log);
+            Assert.Contains("key=" + exactKey, log);                                    // proof of exactly which candidate was selected
+            Assert.Contains("playback-diagnostic: (none)", log);
+            Assert.Contains("playback-setup: approachDistance='abc' error='Approach distance must be a whole number", log);
+            Assert.Contains("hasError=True", log);
+            Assert.Contains("approachDistance='45' error='' hasError=False", log);
+            Assert.Contains("diag| IKEMEN Lab combo playback diagnostic (ikemenlab.xray.diagnostic/1)", log);   // the same text Copy Full Diagnostic copies
+            Assert.Contains("approach distance 45", log);
+            Assert.Contains("status.hasApproachDistanceError=False", log);
+            Assert.Contains("status.attemptId=1", log);
+            Assert.Equal(1, vm.Combos.Playback.AttemptId);
+            window.Close();
+        });
+    }
 }

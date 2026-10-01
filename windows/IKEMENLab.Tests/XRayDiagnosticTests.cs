@@ -73,7 +73,7 @@ public class XRayDiagnosticTests : IDisposable
         Assert.False(ev.ExpectedStateEverObserved);
         Assert.True(ev.InputAttempted);
         Assert.Equal(["a"], ev.AttemptedKeys);
-        Assert.Equal(290, ev.FirstInputFrame);
+        Assert.Equal(290, ev.InputAttemptFrame);
         Assert.Equal(PrerequisiteFailure.DifferentMoveEntered, ev.Failure);
         Assert.Equal("unknown", ev.ExecutedController);                         // the destination state does not identify the controller
 
@@ -129,7 +129,7 @@ public class XRayDiagnosticTests : IDisposable
 
         var ev = report.Steps[1].Evidence!;
         Assert.True(ev.SourceStateObserved);
-        Assert.Equal((274L, 287L), (ev.SourceStateFirstFrame, ev.SourceStateLastFrame));
+        Assert.Equal((274L, 287L), (ev.SourceOccurrenceStartFrame, ev.SourceOccurrenceEndFrame));
         Assert.Equal("contact", ev.RequiredContact);
         Assert.False(ev.RequiredContactObserved);
         Assert.False(ev.InputAttempted);
@@ -177,11 +177,10 @@ public class XRayDiagnosticTests : IDisposable
         var frames = log.Frames.Where(f => f.Frame >= 273).ToList();
         var inputs = log.Events.OfType<InputEvent>().ToList();
         var drivers = log.Events.OfType<DriverEvent>().ToList();
-        var step = plan.Steps[1] with { EarliestTick = 30 };                       // a timing requirement State 200 (14 frames) cannot meet
         var cursor = frames.FindIndex(f => f.P1.State == 200);
-        var timing = StepEvidenceBuilder.Build(step with { Contact = null }, frames, cursor, [], drivers, 60);
-        Assert.False(timing.TimingSatisfied);
-        Assert.Equal(PrerequisiteFailure.TimingNotSatisfied, timing.Failure);
+        var noTiming = StepEvidenceBuilder.Build(plan.Steps[1] with { EarliestTick = 30, Contact = null }, frames, cursor, [], drivers, 60);
+        Assert.Null(noTiming.TimingSatisfied);                                   // no input was attempted: input timing is not inferred from how long the state lasted
+        Assert.Null(noTiming.SourceTickAtInput);
 
         var neverThere = StepEvidenceBuilder.Build(plan.Steps[1] with { FromState = 999 }, frames, cursor, [], drivers, 60);
         Assert.False(neverThere.SourceStateObserved);
@@ -237,7 +236,10 @@ public class XRayDiagnosticTests : IDisposable
         Assert.Contains("required contact: contact  observed: no", text);
         Assert.Contains("planned input attempted: no", text);
         Assert.Contains("configured approach distance: 60", text);
-        Assert.Contains("derived separation around the input/source move", text);
+        Assert.Contains("telemetry at the attempted input: n/a (no input was attempted)", text);   // Step 2 had no input: nothing is labelled as input telemetry
+        Assert.Contains("derived separation at the attempted input: n/a (no input)", text);
+        Assert.Contains("derived separation over the source-occurrence: start 60, end 59, min 59, max 60", text);
+        Assert.Contains("source occurrence start: frame 274", text);
         Assert.Contains("does not mean the engine has none", text);
         Assert.DoesNotContain("took priority", text);
     }
@@ -291,6 +293,14 @@ public class XRayDiagnosticTests : IDisposable
         Assert.All(snap.Files, f => Assert.False(string.IsNullOrEmpty(f.ContentHash)));   // the index's own content hash of each source file
 
         var other = Assert.Single(step.CompetingControllers);                     // the other controller reading command x from the same source
+        // A competitor is exported with the same captured detail as the expected controller, not just an identity.
+        Assert.Contains("command = \"x\"", other.ModelledRequirements);
+        Assert.Contains(other.TriggerAll, t => t.Text.Contains("command"));
+        Assert.Contains(other.TriggerGroups.SelectMany(g => g.Lines), t => t.Text.Contains("var(3) = 1") && t.Source is { StartLine: > 0 });
+        Assert.NotEmpty(other.Unmodelled);                                         // var(3) = 1 is a condition the index does not model
+        Assert.Contains(other.Unmodelled, u => u.Contains("var"));
+        Assert.NotNull(other.ControllerSource);
+        Assert.EndsWith("Dup.cmd", other.ControllerSource!.File);
         Assert.Equal("state:210", other.TargetId);
         Assert.Equal(["x"], other.SharedCommands);
         Assert.Equal("later in the same Statedef", other.FileOrder);              // file order only; never "has priority"

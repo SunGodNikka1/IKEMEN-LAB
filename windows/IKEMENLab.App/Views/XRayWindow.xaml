@@ -520,7 +520,7 @@
                                     <TextBlock Text="Approach distance (blank = 60; how close P1 walks before the route starts — a threshold, not the attack's range)" Style="{StaticResource SectionLabel}"/>
                                     <TextBox Style="{StaticResource FieldBox}" Width="120" HorizontalAlignment="Left" Margin="0,2,0,2" Text="{Binding Combos.Playback.ApproachDistance, UpdateSourceTrigger=LostFocus}"
                                              AutomationProperties.Name="Approach distance"/>
-                                    <TextBlock Text="{Binding Combos.Playback.ApproachDistanceError}" FontSize="11" Foreground="{DynamicResource NegativeBrush}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                    <TextBlock AutomationProperties.Name="Approach distance error" Text="{Binding Combos.Playback.ApproachDistanceError}" FontSize="11" Foreground="{DynamicResource NegativeBrush}" TextWrapping="Wrap" Margin="0,0,0,6"
                                                Visibility="{Binding Combos.Playback.HasApproachDistanceError, Converter={StaticResource BoolToVis}}"/>
                                     <WrapPanel>
                                         <StackPanel Margin="0,0,12,0">

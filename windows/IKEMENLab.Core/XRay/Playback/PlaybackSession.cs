@@ -171,6 +171,7 @@ public sealed class PlaybackSession
         // The static evidence is captured once, now, from the graph this attempt was given; the diagnostic reads this copy, never the live files.
         if (request.Snapshot is null) request = request with { Snapshot = StaticSnapshot.Capture(request.Graph, request.Route) };
         PlaybackCancellation gate;
+        int myAttempt;
         lock (_gate)
         {
             if (IsBusy || _closed) return;
@@ -184,6 +185,7 @@ public sealed class PlaybackSession
             ResultAttemptId = null;
             Error = null;
             AttemptId++;
+            myAttempt = AttemptId;   // this call's own identity; nothing below reads the session's 'latest attempt' to describe it
             Attempt = AttemptState.Started;
             AttemptIssue = null;
             AttemptRouteKey = request.Route.Key;
@@ -198,8 +200,15 @@ public sealed class PlaybackSession
             lock (_gate) _run = run;
             var outcome = await run.ConfigureAwait(false);
             // The service has already committed this result (it is on disk); a Cancel that arrived after that point does not undo it.
-            lock (_gate) { Outcome = outcome; ResultAttemptId = AttemptId; Attempt = AttemptState.VerdictProduced; State = PlaybackState.Finished; Phase = string.Empty; }
-            SaveDiagnostic();
+            PlaybackDiagnostic.Source completed;
+            lock (_gate)
+            {
+                Outcome = outcome; ResultAttemptId = myAttempt; Attempt = AttemptState.VerdictProduced; State = PlaybackState.Finished; Phase = string.Empty;
+                // One immutable completed-attempt context, built in the same step that publishes the result: this attempt's identity, request, snapshot and outcome.
+                completed = new PlaybackDiagnostic.Source(myAttempt, AttemptState.VerdictProduced, null, request.Route.Key, request.Setup, request, request.Snapshot, outcome, myAttempt);
+            }
+
+            SaveDiagnostic(completed);
         }
         catch (OperationCanceledException)
         {
@@ -258,12 +267,18 @@ public sealed class PlaybackSession
     /// <summary>The latest attempt's diagnostic, only when it belongs to <paramref name="routeKey"/> (the selected route); otherwise null.</summary>
     public PlaybackDiagnostic? DiagnosticFor(string? routeKey) => routeKey is not null && AttemptRouteKey == routeKey ? DiagnosticForLatestAttempt() : null;
 
-    private void SaveDiagnostic()
+    /// <summary>Test seam, called with "before-diagnostic-save" after the result is published and before the diagnostic is written. Null in production.</summary>
+    public Action<string>? SaveSeam { get; init; }
+
+    /// <summary>Writes the diagnostic of THIS completed attempt into ITS run folder. It reads nothing from the session, so a replay, refusal or new Play that starts meanwhile cannot change what is written.</summary>
+    private void SaveDiagnostic(PlaybackDiagnostic.Source completed)
     {
+        SaveSeam?.Invoke("before-diagnostic-save");
         try
         {
-            if (Outcome is { } o && DiagnosticForLatestAttempt() is { } d && Directory.Exists(o.Record.Directory))
-                File.WriteAllText(o.Record.DiagnosticPath, d.ToJson(), new System.Text.UTF8Encoding(false));
+            var outcome = completed.Outcome!;
+            if (!Directory.Exists(outcome.Record.Directory)) return;
+            File.WriteAllText(outcome.Record.DiagnosticPath, PlaybackDiagnostic.Build(completed).ToJson(), new System.Text.UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the diagnostic can still be built on demand */ }
     }

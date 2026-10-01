@@ -20,10 +20,11 @@ public sealed record DiagWindowRow(
     long Frame, int? P1State, string? P1MoveType, bool? P1Ctrl, int? P1MoveHit, int? P1MoveContact, int? P2State, string? P2MoveType, double? P2Life,
     double? P1X, double? P2X, double? DerivedDistance, string? DistanceSource, string Notes);
 public sealed record DiagSpacing(
-    int ConfiguredApproachDistance, string ConfiguredMeaning, double? DerivedSeparationAtInput, double? DerivedSeparationMin, double? DerivedSeparationMax,
-    IReadOnlyList<string> DistanceSources, string Note);
+    int ConfiguredApproachDistance, string ConfiguredMeaning, double? DerivedSeparationAtInput, string? MeasuredWindow, double? DerivedSeparationAtWindowStart,
+    double? DerivedSeparationAtWindowEnd, double? DerivedSeparationMin, double? DerivedSeparationMax, IReadOnlyList<string> DistanceSources, string Note);
 public sealed record DiagRuntime(
-    string? FailureReason, StepEvidence? Failure, string? Narrative, IReadOnlyList<DiagReportedInput> DriverReportedInputs, long? AnchorFrame, DiagTelemetry? PreInputTelemetry,
+    string? FailureReason, StepEvidence? Failure, string? Narrative, IReadOnlyList<DiagReportedInput> DriverReportedInputs, long? FailureAnchorFrame,
+    DiagTelemetry? PreInputTelemetry, DiagTelemetry? SourceOccurrenceStartTelemetry, DiagTelemetry? SourceOccurrenceEndTelemetry,
     DiagSpacing Spacing, long? DecisiveFrame, IReadOnlyList<DiagWindowRow> DecisiveWindow, IReadOnlyList<string> MissingTelemetry, IReadOnlyList<string> TraceIntegrityIssues,
     string ExecutedController);
 public sealed record DiagEngine(string? Executable, string? Sha256, string? Version, string? Source);
@@ -35,7 +36,7 @@ public sealed record DiagSetup(string? Dummy, string? Stage, int ApproachDistanc
 /// </summary>
 public sealed record PlaybackDiagnostic(
     string Schema, string Kind, DiagAttempt Attempt, DiagResult? Result, DiagCharacter? Character, IReadOnlyList<DiagRouteStep> Route,
-    int? FailedStep, StepStaticSnapshot? ExpectedStep, IReadOnlyList<DiagPlannedInput> PlannedInput, DiagRuntime? Runtime, DiagEngine? Engine, DiagSetup Setup,
+    int? FailedStep, IReadOnlyList<StepStaticSnapshot> StaticSteps, IReadOnlyList<DiagPlannedInput> PlannedInput, DiagRuntime? Runtime, DiagEngine? Engine, DiagSetup Setup,
     IReadOnlyList<string> Limitations)
 {
     public const string SchemaVersion = "ikemenlab.xray.diagnostic/1";
@@ -84,7 +85,7 @@ public sealed record PlaybackDiagnostic(
         {
             var why = kind == Kinds.Refused ? "No runtime evidence exists: the attempt was refused before any engine launch." : "No runtime verdict exists for this attempt.";
             limitations.Insert(0, why);
-            return new PlaybackDiagnostic(SchemaVersion, kind, attempt, null, character, route, null, null, [], null, null, setup, limitations);
+            return new PlaybackDiagnostic(SchemaVersion, kind, attempt, null, character, route, null, s.Snapshot?.Steps ?? [], [], null, null, setup, limitations);
         }
 
         var report = outcome.Report;
@@ -93,17 +94,19 @@ public sealed record PlaybackDiagnostic(
         var inspection = outcome.Failure;
         var result = new DiagResult(outcome.Record.Id, s.ResultAttemptId, report.RouteKey, report.Status.ToString(), report.Reason, report.FailedStep, inspection?.Headline ?? (report.Status == VerifyStatus.Verified ? "Verified" : null));
 
-        var expected = s.Snapshot?.Steps.FirstOrDefault(x => x.Index == report.FailedStep);
         var planned = outcome.Plan?.Steps.Select(p => new DiagPlannedInput(p.Index, p.Command ?? string.Empty, p.Input.Select(f => f.Keys.Count == 0 ? "·" : string.Join("+", f.Keys)).ToList())).ToList() ?? [];
         var reported = log.Events.OfType<InputEvent>().Where(e => e.Player == 1).Take(80).Select(e => new DiagReportedInput(e.Frame, e.Step, e.Phase, e.Keys)).ToList();
 
         var ev = failure?.Evidence;
-        var anchor = ev?.FirstInputFrame ?? ev?.SourceStateLastFrame ?? inspection?.FocusFrame;
         var focus = inspection?.FocusFrame;
         var frames = log.Frames.ToList();
-        DiagTelemetry? pre = null;
-        if (anchor is { } a && frames.LastOrDefault(f => f.Frame <= a) is { } pf)
-            pre = new DiagTelemetry(pf.Frame, pf.P1.State, pf.P1.Ctrl, pf.P1.StateType, pf.P1.MoveType, pf.P1.Power, pf.P1.Facing, pf.P1.PosX, pf.P1.PosY, pf.Distance, pf.DistanceSource);
+        // Telemetry is labelled by what it is: the frame at the attempted input (null when no input was attempted), and the start / end of the source occurrence.
+        DiagTelemetry? At(long? frame) => frame is { } f && frames.LastOrDefault(x => x.Frame <= f) is { } pf
+            ? new DiagTelemetry(pf.Frame, pf.P1.State, pf.P1.Ctrl, pf.P1.StateType, pf.P1.MoveType, pf.P1.Power, pf.P1.Facing, pf.P1.PosX, pf.P1.PosY, pf.Distance, pf.DistanceSource)
+            : null;
+        var pre = At(ev?.InputAttemptFrame);
+        var occStart = At(ev?.SourceOccurrenceStartFrame);
+        var occEnd = At(ev?.SourceOccurrenceEndFrame);
 
         var window = focus is { } fr
             ? PlaybackInspector.Timeline(log).Where(r => r.Frame >= fr - WindowRadius && r.Frame <= fr + WindowRadius)
@@ -111,13 +114,13 @@ public sealed record PlaybackDiagnostic(
             : [];
 
         var spacing = new DiagSpacing(approach, "The distance P1 walks to before the route starts. It is a threshold, not the attack's range.",
-            ev?.SeparationAtInput, ev?.SeparationMin, ev?.SeparationMax, ev?.SeparationSources ?? [],
-            "Separation is derived telemetry (see its source), measured around the input or source move; it is a different fact from the configured approach distance.");
+            ev?.SeparationAtInput, ev?.SeparationWindow, ev?.SeparationAtSourceStart, ev?.SeparationAtSourceEnd, ev?.SeparationMin, ev?.SeparationMax, ev?.SeparationSources ?? [],
+            "Separation is derived telemetry (see its source). 'At input' exists only when an input was attempted; the window figures describe the source occurrence (or the attempt window) and are not input telemetry. None of it is the configured approach distance.");
 
-        var runtime = new DiagRuntime(report.Reason, ev, failure?.Detail, reported, anchor, pre, spacing, focus, window, MissingTelemetry(frames, log.Meta),
+        var runtime = new DiagRuntime(report.Reason, ev, failure?.Detail, reported, ev?.FailureAnchorFrame, pre, occStart, occEnd, spacing, focus, window, MissingTelemetry(frames, log.Meta),
             log.Issues.Select(i => $"line {i.Line}: {i.Message}").ToList(), "unknown");
         var engine = new DiagEngine(report.EngineExecutable, report.EngineSha256, report.EngineVersion, report.EngineSource);
-        return new PlaybackDiagnostic(SchemaVersion, kind, attempt, result, character, route, report.FailedStep, expected, planned, runtime, engine, setup, limitations);
+        return new PlaybackDiagnostic(SchemaVersion, kind, attempt, result, character, route, report.FailedStep, s.Snapshot?.Steps ?? [], planned, runtime, engine, setup, limitations);
     }
 
     private static FrameEvent? FrameOf(List<FrameEvent> frames, long frame) => frames.FirstOrDefault(f => f.Frame == frame);
@@ -158,6 +161,7 @@ public sealed record PlaybackDiagnostic(
     {
         var sb = new StringBuilder();
         void L(string s = "") => sb.Append(s).Append('\n');
+        void Gate(IReadOnlyList<string> m, IReadOnlyList<string> u, IReadOnlyList<SnapshotTrigger> all, IReadOnlyList<SnapshotGroup> g, string indent) => GateLines(sb, indent, m, u, all, g);
         L($"IKEMEN Lab combo playback diagnostic ({Schema})");
         L($"kind: {Kind}");
         L($"attempt {Attempt.Id}: {Attempt.State}" + (Attempt.Issue is { Length: > 0 } i ? $" — {i}" : string.Empty));
@@ -184,21 +188,19 @@ public sealed record PlaybackDiagnostic(
             foreach (var step in Route) L($"  {step.Index}. {step.Kind} {step.From} -> {step.To}" + (step.Command is null ? string.Empty : $"  [{step.Command}]") + $"  {step.Edge}");
         }
 
-        if (ExpectedStep is { } e)
+        foreach (var e in StaticSteps)
         {
             L();
-            L($"expected step {e.Index}: {e.Kind} {e.From} -> {e.To}");
-            L($"  controller: {e.ControllerId}" + (e.ControllerName is { Length: > 0 } n ? $" ({n})" : string.Empty) + $"  branch {e.BranchNumber}  confidence {e.Confidence}");
+            L($"static step {e.Index}{(e.Index == FailedStep ? " (FAILED STEP)" : string.Empty)}: {e.Kind} {e.From} -> {e.To}" + (e.Commands.Count > 0 ? $"  [{string.Join("+", e.Commands)}]" : string.Empty));
+            L($"  controller: {e.ControllerId}" + (e.ControllerName is { Length: > 0 } n ? $" ({n})" : string.Empty) + $"  branch {e.BranchNumber}  confidence {e.Confidence}  rules {string.Join(",", e.EvidenceRules)}");
             if (e.ControllerSource is { } cs) L($"  source: {cs.File}:{cs.StartLine}" + (cs.EndLine != cs.StartLine ? $"-{cs.EndLine}" : string.Empty));
-            L("  modelled requirements: " + (e.ModelledRequirements.Count == 0 ? "none" : string.Join("; ", e.ModelledRequirements)));
-            L("  unmodelled expressions (as written): " + (e.Unmodelled.Count == 0 ? "none" : string.Join(" | ", e.Unmodelled)));
-            foreach (var t in e.TriggerAll) L($"  triggerall = {t.Text}" + Loc(t.Source));
-            foreach (var g in e.TriggerGroups)
-                foreach (var t in g.Lines) L($"  trigger{g.Number}{(g.IsExpectedBranch ? "*" : " ")}= {t.Text}" + Loc(t.Source));
-            L("  (* = the branch the edge was derived from)");
-            L($"  statically related controllers sharing a command ({e.CompetingControllers.Count}{(e.CompetingControllersTruncated ? ", list truncated" : string.Empty)}):");
+            Gate(e.ModelledRequirements, e.Unmodelled, e.TriggerAll, e.TriggerGroups, "  ");
+            L($"  statically related controllers sharing a command ({e.CompetingControllers.Count}{(e.CompetingControllersTruncated ? ", list truncated at " + StaticSnapshot.MaxCompeting : string.Empty)}):");
             foreach (var x in e.CompetingControllers)
-                L($"    {x.ControllerId} -> {x.TargetId}  shares {string.Join(",", x.SharedCommands)}  {x.FileOrder}  unmodelled {x.UnmodelledCount}" + Loc(x.Source));
+            {
+                L($"    - {x.ControllerId}" + (x.ControllerName is { Length: > 0 } xn ? $" ({xn})" : string.Empty) + $" -> {x.TargetId}  shares {string.Join(",", x.SharedCommands)}  {x.FileOrder}  confidence {x.Confidence}" + Loc(x.ControllerSource));
+                Gate(x.ModelledRequirements, x.Unmodelled, x.TriggerAll, x.TriggerGroups, "      ");
+            }
         }
 
         if (PlannedInput.Count > 0)
@@ -218,19 +220,23 @@ public sealed record PlaybackDiagnostic(
                 L($"  failure: {F(ev.Failure)}");
                 L($"  expected state: {F((long?)ev.ExpectedState)}  expected state ever observed: {F(ev.ExpectedStateEverObserved)}" + (ev.ExpectedStateFirstFrame is { } ef ? $" (first at frame {ef})" : string.Empty));
                 L($"  first mismatch: state {F((long?)ev.FirstMismatchState)} at frame {F(ev.FirstMismatchFrame)}");
-                L($"  source state observed: {F(ev.SourceStateObserved)}" + (ev.SourceStateFirstFrame is { } sf ? $" (frames {sf}-{F(ev.SourceStateLastFrame)})" : string.Empty));
+                L($"  source state observed: {F(ev.SourceStateObserved)}" + (ev.SourceOccurrenceStartFrame is { } sf ? $" (occurrence frames {sf}-{F(ev.SourceOccurrenceEndFrame)})" : string.Empty));
                 L($"  required contact: {F(ev.RequiredContact)}  observed: {F(ev.RequiredContactObserved)}");
-                L($"  timing requirement (earliest tick {F((long?)ev.EarliestTick)}) satisfied: {F(ev.TimingSatisfied)}");
-                L($"  planned input attempted: {F(ev.InputAttempted)}" + (ev.AttemptedKeys.Count > 0 ? $" ({string.Join("+", ev.AttemptedKeys)} at frame {F(ev.FirstInputFrame)})" : string.Empty));
+                L($"  timing: required earliest tick {F((long?)ev.RequiredEarliestTick)}; source tick at the attempted input {F((long?)ev.SourceTickAtInput)}; satisfied: {F(ev.TimingSatisfied)}");
+                L($"  planned input attempted: {F(ev.InputAttempted)}" + (ev.AttemptedKeys.Count > 0 ? $" ({string.Join("+", ev.AttemptedKeys)} at frame {F(ev.InputAttemptFrame)})" : string.Empty));
+                L($"  failure anchor frame: {F(ev.FailureAnchorFrame)}");
                 L($"  driver reported: {F(ev.DriverClaim)}" + (ev.DriverClaimFrame is { } df ? $" (frame {df}); this is the driver's claim, not a measurement" : string.Empty));
             }
 
             L($"  executed controller: {rt.ExecutedController} (the trace does not record it)");
             L("  driver-reported inputs: " + (rt.DriverReportedInputs.Count == 0 ? "none" : string.Join(", ", rt.DriverReportedInputs.Select(x => $"f{x.Frame} step {F((long?)x.Step)} {(x.Keys.Count == 0 ? "release" : string.Join("+", x.Keys))}"))));
-            if (rt.PreInputTelemetry is { } t)
-                L($"  telemetry at frame {t.Frame} (anchor {F(rt.AnchorFrame)}): state {F((long?)t.State)} ctrl {F(t.Ctrl)} statetype {F(t.StateType)} movetype {F(t.MoveType)} power {F(t.Power)} facing {F((long?)t.Facing)} pos ({F(t.X)}, {F(t.Y)}) derived distance {F(t.DerivedDistance)} [{F(t.DistanceSource)}]");
+            string Tel(DiagTelemetry t) => $"frame {t.Frame}: state {F((long?)t.State)} ctrl {F(t.Ctrl)} statetype {F(t.StateType)} movetype {F(t.MoveType)} power {F(t.Power)} facing {F((long?)t.Facing)} pos ({F(t.X)}, {F(t.Y)}) derived distance {F(t.DerivedDistance)} [{F(t.DistanceSource)}]";
+            L("  telemetry at the attempted input: " + (rt.PreInputTelemetry is { } t ? Tel(t) : "n/a (no input was attempted)"));
+            if (rt.SourceOccurrenceStartTelemetry is { } ts) L("  source occurrence start: " + Tel(ts));
+            if (rt.SourceOccurrenceEndTelemetry is { } te) L("  source occurrence end: " + Tel(te));
             L($"  configured approach distance: {rt.Spacing.ConfiguredApproachDistance} — {rt.Spacing.ConfiguredMeaning}");
-            L($"  derived separation around the input/source move: at input {F(rt.Spacing.DerivedSeparationAtInput)}, min {F(rt.Spacing.DerivedSeparationMin)}, max {F(rt.Spacing.DerivedSeparationMax)} [{string.Join(",", rt.Spacing.DistanceSources)}]");
+            L($"  derived separation at the attempted input: {F(rt.Spacing.DerivedSeparationAtInput)}" + (rt.Spacing.DerivedSeparationAtInput is null ? " (no input)" : string.Empty));
+            L($"  derived separation over the {F(rt.Spacing.MeasuredWindow)}: start {F(rt.Spacing.DerivedSeparationAtWindowStart)}, end {F(rt.Spacing.DerivedSeparationAtWindowEnd)}, min {F(rt.Spacing.DerivedSeparationMin)}, max {F(rt.Spacing.DerivedSeparationMax)} [{string.Join(",", rt.Spacing.DistanceSources)}]");
             L($"  decisive frame: {F(rt.DecisiveFrame)}; window ±{WindowRadius}:");
             foreach (var w in rt.DecisiveWindow)
                 L($"    f{w.Frame}{(w.Frame == rt.DecisiveFrame ? "*" : " ")} P1 {F((long?)w.P1State)}/{F(w.P1MoveType)} ctrl {F(w.P1Ctrl)} hit {F((long?)w.P1MoveHit)} contact {F((long?)w.P1MoveContact)} | P2 {F((long?)w.P2State)}/{F(w.P2MoveType)} life {F(w.P2Life)} | x {F(w.P1X)},{F(w.P2X)} dist {F(w.DerivedDistance)} | {w.Notes}");
@@ -251,6 +257,15 @@ public sealed record PlaybackDiagnostic(
         L("limits of this diagnostic:");
         foreach (var lim in Limitations) L("  - " + lim);
         return sb.ToString();
+    }
+
+    private static void GateLines(StringBuilder sb, string indent, IReadOnlyList<string> modelled, IReadOnlyList<string> unmodelled, IReadOnlyList<SnapshotTrigger> all, IReadOnlyList<SnapshotGroup> groups)
+    {
+        sb.Append(indent).Append("modelled requirements: ").Append(modelled.Count == 0 ? "none" : string.Join("; ", modelled)).Append('\n');
+        sb.Append(indent).Append("unmodelled expressions (as written): ").Append(unmodelled.Count == 0 ? "none" : string.Join(" | ", unmodelled)).Append('\n');
+        foreach (var t in all) sb.Append(indent).Append("triggerall = ").Append(t.Text).Append(Loc(t.Source)).Append('\n');
+        foreach (var g in groups)
+            foreach (var t in g.Lines) sb.Append(indent).Append("trigger").Append(g.Number).Append(g.IsExpectedBranch ? "*" : " ").Append("= ").Append(t.Text).Append(Loc(t.Source)).Append('\n');
     }
 
     private static string Loc(SourceSpan? s) => s is null ? string.Empty : $"   [{s.File}:{s.StartLine}" + (s.EndLine != s.StartLine ? $"-{s.EndLine}" : string.Empty) + "]";

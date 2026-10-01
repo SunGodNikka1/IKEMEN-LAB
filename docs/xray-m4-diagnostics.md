@@ -44,3 +44,23 @@ The statement "the semantic model does not require X" is never rendered as "the 
 
 ## Validation honesty
 Executed here: the Core suite (Linux). Compile-checked only: WPF app and WPF tests (scratch project against the desktop reference assemblies). Mock/fixture: the Goku trace (reconstructed), the mock-engine driver traces. Not executed: any WPF test, any real Windows playback.
+
+
+## Corrective pass (on `5fed21f`)
+
+**Goku fixture.** The real Goku `trace.jsonl` was **not** available to this pass (only the Funny Valentine files were present), so the reconstructed Goku fixture remains and is still labelled as reconstructed. `TheRealGokuTraceIfPresentPreservesTheFirstWrongStateAtFrame291`
+activates as soon as the real file is added as `IKEMENLab.Tests/Fixtures/m4_goku_real_trace.jsonl` (it needs no plan: it asserts input `a` at 290, first State 200 at 291, State 17200 never observed, and a driver timeout). The matching real plan is also unavailable; nothing about it was invented.
+
+**Evidence anchoring.** `StepEvidence` is now anchored to the occurrence and attempt window the verifier judged: the source occurrence starts at the frame where the preceding step's transition was observed and is the contiguous run in the source state
+(`sourceOccurrenceStartFrame`/`EndFrame`); `inputAttemptFrame` is the first attempted input; `sourceTickAtInput` = input frame − occurrence start; `requiredEarliestTick`; `timingSatisfied` answers *"was the attempted input late enough within that occurrence"* (null without an input or a requirement) —
+never "did the state last N frames"; `failureAnchorFrame` is where the failure is decided (first mismatch, else occurrence end, else the input frame). `firstMismatch` for a step with a source state is how **that occurrence ended** (its first exit, even if before the input); a later repeated occurrence of the same state cannot replace it.
+For a neutral start it is the first attack/control-loss after the input within the verifier's attempt limit. `DifferentMoveEntered` takes precedence once an attempted input led to another move, and the text says "observed later" (not "never") when the expected state shows up after the failure.
+
+**Telemetry labels.** Input telemetry exists only when an input was attempted (`preInputTelemetry`, `derivedSeparationAtInput` are null otherwise). Source-occurrence telemetry is separate and labelled (`sourceOccurrenceStartTelemetry`/`EndTelemetry`, `derivedSeparationAtSourceStart`/`End`/`Min`/`Max` with `derivedSeparationWindow` = `source-occurrence` | `attempt-window`). Funny Valentine step 2: no input, occurrence 274–287, derived separation 60→59, contact not observed.
+
+**Static snapshot.** `staticSteps` holds every route step (Failed, Verified, Inconclusive, cancelled): edge/controller identity, source/target, command, confidence, rules, modelled requirements, `triggerall`, numbered trigger groups, unmodelled expressions, source file:line. Each of the ≤ 10 statically related controllers carries the same detail (name, source, shared command, file order, modelled requirements, `triggerall`, trigger groups, unmodelled expressions). The coverage limits stay; no priority or execution claim (`executedController = unknown`).
+
+**Immutable save.** `PlaybackSession.PlayAsync` takes its attempt identity at the start and, in the same lock that publishes the result, builds one `PlaybackDiagnostic.Source` (that attempt's id, request, snapshot and outcome). `SaveDiagnostic(source)` reads nothing from the session, so a refusal, replay or new Play starting meanwhile cannot change what is written into that run's folder (tested with a seam that refuses / replays at the exact point between publishing and saving).
+
+**QA verbs (real `QaScriptRunner`).** `playback-diagnostic` (the same text+JSON as the button, via the panel's `DiagnosticText()`; `(none)` when the selected route is not the attempt's), `playback-setup key=value|…` (engine, dlls, dummy, stage, `approachDistance`; logs validation state so an invalid value is observable), `xray-combo-route-index N`, `xray-combo-route-key <exact key>`, and an ambiguous `xray-combo-route <substring>` is an error. `playback-status` also prints `approachDistance`, `approachDistanceError`, `hasApproachDistanceError`.
+**WPF.** `ApproachDistance` now notifies `HasApproachDistanceError`; regression covers valid → invalid → valid, including the visibility of the inline message.
