@@ -59,6 +59,10 @@ public sealed class ComboPlaybackPanel : ObservableObject
         RefreshSetup(showIssuesAsSetup: false);
     }
 
+    /// <summary>Notifications this panel applied to its view state / that the session dropped because the window had closed. For tests and diagnostics.</summary>
+    public int NotificationsApplied => _session.DeliveredNotifications;
+    public int NotificationsDropped => _session.DroppedNotifications;
+
     public ICommand PlayCommand { get; }
     public ICommand ReplayCommand { get; }
     public ICommand CancelCommand { get; }

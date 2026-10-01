@@ -23,6 +23,11 @@ public sealed class PlaybackSession
     private volatile bool _closed;
     private readonly List<string> _leftovers = [];
     private Task<ShutdownResult>? _shutdown;
+    private int _delivered, _dropped;
+
+    /// <summary>Notifications that reached <see cref="Changed"/> listeners / that were queued but dropped because the session had closed by the time they ran. Direct signals for tests: unlike the state getters, these cannot change legitimately after a close.</summary>
+    public int DeliveredNotifications => Volatile.Read(ref _delivered);
+    public int DroppedNotifications => Volatile.Read(ref _dropped);
 
     /// <param name="post">How a notification reaches its listener. It must not block waiting for the listener's thread (use a dispatcher BeginInvoke, not Invoke). Null = call inline.</param>
     public PlaybackSession(ComboPlaybackService service, Action<Action>? post = null)
@@ -175,7 +180,12 @@ public sealed class PlaybackSession
     private void Raise()
     {
         if (_closed) return;
-        _post(() => { if (!_closed) Changed?.Invoke(); });
+        _post(() =>
+        {
+            if (_closed) { Interlocked.Increment(ref _dropped); return; }
+            Interlocked.Increment(ref _delivered);
+            Changed?.Invoke();
+        });
     }
 
     private void OnPhase(string phase)

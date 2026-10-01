@@ -19,8 +19,10 @@ public partial class App : Application
 {
     protected override void OnExit(ExitEventArgs e)
     {
-        // Any playback shutdown started by closing an X-Ray window must finish (engine killed, sandbox deleted) before the process goes.
-        PlaybackShutdowns.WaitAll(TimeSpan.FromSeconds(15));
+        // Best effort, bounded: give playback cleanups started by closing X-Ray windows a chance to finish (engine killed, sandbox deleted)
+        // before the process goes. If the wait runs out the user is told — it is not a guarantee that no engine survives the exit.
+        var exit = PlaybackShutdowns.WaitAll(TimeSpan.FromSeconds(15));
+        if (exit.Message is { } warning) UserDialogs.Warn(warning, "Combo playback");
         base.OnExit(e);
     }
 

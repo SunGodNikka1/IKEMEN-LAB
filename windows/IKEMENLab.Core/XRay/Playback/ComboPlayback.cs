@@ -59,6 +59,9 @@ public sealed class ComboPlaybackService
     /// <summary>Test seam: called with "before-commit" (after the last pre-commit check, before the atomic commit) and "after-commit". Null in production.</summary>
     public Action<string>? CommitSeam { get; init; }
 
+    /// <summary>Test seam: replaces sandbox deletion (returns (false, reason) to simulate a folder that cannot be removed). Null in production.</summary>
+    public Func<string, (bool Ok, string? Why)>? SandboxDeleter { get; init; }
+
     /// <summary>Raised when a sandbox could not be deleted (path, reason). The folder carries the sandbox marker and is safe to delete by hand.</summary>
     public event Action<string, string?>? CleanupFailed;
 
@@ -79,7 +82,7 @@ public sealed class ComboPlaybackService
         var planOptions = new PlanOptions();
 
         var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, planOptions.MaxFrames, _sandboxBase,
-            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames };
+            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames, Deleter = SandboxDeleter };
         var run = new VerifyRunRequest(sandbox, TimeSpan.FromSeconds(180))
         {
             Progress = progress,

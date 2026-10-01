@@ -35,6 +35,10 @@ public sealed record SandboxRequest(
     public int? LingerFrames { get; init; }
     /// <summary>Checked between the copy steps so closing the app during preparation stops promptly; the half-built sandbox is deleted.</summary>
     public CancellationToken Cancel { get; init; }
+    /// <summary>Called (path, reason) when a sandbox could not be deleted — after a failed or cancelled preparation as well as after a run.</summary>
+    public Action<string, string?>? CleanupFailed { get; init; }
+    /// <summary>Deletes a sandbox folder, returning (false, reason) on failure. Null = <see cref="RuntimeSandbox.Delete"/>. A seam so cleanup failure can be injected deterministically.</summary>
+    public Func<string, (bool Ok, string? Why)>? Deleter { get; init; }
 }
 
 public static class RuntimeProbe
@@ -156,12 +160,22 @@ public sealed class RuntimeSandbox : IDisposable
         }
         catch
         {
-            sandbox.Dispose();
+            // A failed or cancelled preparation must not silently leave a sandbox: the deletion result is reported like any other cleanup.
+            RemoveReporting(root, request);
             throw;
         }
 
         sandbox.Notes = notes;
         return sandbox;
+    }
+
+    /// <summary>Deletes the sandbox at <paramref name="root"/> through the request's deleter and reports a failure to its <see cref="SandboxRequest.CleanupFailed"/> callback. True when nothing is left.</summary>
+    public static bool RemoveReporting(string root, SandboxRequest request)
+    {
+        if (!Directory.Exists(root)) return true;
+        var (ok, why) = request.Deleter is { } d ? d(root) : (Delete(root), LastFailure);
+        if (!ok) request.CleanupFailed?.Invoke(root, why ?? "the folder could not be deleted");
+        return ok;
     }
 
     public const string MarkerFileName = ".ikemenlab-runtime-sandbox";

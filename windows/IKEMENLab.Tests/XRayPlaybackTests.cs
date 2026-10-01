@@ -405,6 +405,56 @@ public class XRayPlaybackTests : IDisposable
         Assert.True(gate.Cancel());
     }
 
+    // ------------------------------------------------------------------ cleanup failure during preparation
+
+    [Fact]
+    public void AFailedPreparationWhoseSandboxCannotBeDeletedReportsTheLeftover()
+    {
+        var (_, request, _) = Arrange("verified");
+        var runner = new FakeRunner("");
+        var sbx = Temp("xray-sbx-");
+        var reported = new List<(string Path, string? Why)>();
+        var service = new ComboPlaybackService(runner, Temp("xray-store-"), sbx) { SandboxDeleter = _ => (false, "deliberately locked") };
+        service.CleanupFailed += (p, w) => reported.Add((p, w));
+
+        using var cts = new CancellationTokenSource();
+        Assert.Throws<OperationCanceledException>(() => service.Play(request, p => { if (p == "preparing") cts.Cancel(); }, cts.Token));
+
+        Assert.Null(runner.Seen);                                   // preparation was cancelled: the engine never started
+        var leftover = Assert.Single(reported);                     // ... and the failed deletion was reported, not swallowed
+        Assert.StartsWith(sbx, leftover.Path);
+        Assert.Equal("deliberately locked", leftover.Why);
+        Assert.True(Directory.Exists(leftover.Path));               // the injected deleter really left it behind
+        Assert.True(RuntimeSandbox.Delete(leftover.Path));          // tidy up with the real deleter
+    }
+
+    [Fact]
+    public void AFailedPreparationThatCleansUpReportsNothing()
+    {
+        var (_, request, _) = Arrange("verified");
+        var sbx = Temp("xray-sbx-");
+        var reported = 0;
+        var service = new ComboPlaybackService(new FakeRunner(""), Temp("xray-store-"), sbx);
+        service.CleanupFailed += (_, _) => reported++;
+        using var cts = new CancellationTokenSource();
+        Assert.Throws<OperationCanceledException>(() => service.Play(request, p => { if (p == "preparing") cts.Cancel(); }, cts.Token));
+        Assert.Equal(0, reported);
+        Assert.Empty(Directory.EnumerateDirectories(sbx));
+    }
+
+    [Fact]
+    public void APostRunCleanupFailureIsReportedThroughTheSamePath()
+    {
+        var (_, request, _) = Arrange("verified");
+        var sbx = Temp("xray-sbx-");
+        var reported = new List<string?>();
+        var service = new ComboPlaybackService(new FakeRunner(Trace("verified", request.Route)), Temp("xray-store-"), sbx) { SandboxDeleter = _ => (false, "still open") };
+        service.CleanupFailed += (_, w) => reported.Add(w);
+        service.Play(request);                                       // the verdict stands; only the cleanup problem is reported
+        Assert.Equal(["still open"], reported);
+        foreach (var d in Directory.EnumerateDirectories(sbx)) RuntimeSandbox.Delete(d);
+    }
+
     // ------------------------------------------------------------------ trace provenance, DLL convention, linger
 
     [Fact]
@@ -685,6 +735,8 @@ public class XRayPlaybackSessionTests : IDisposable
 
         while (queue.TryDequeue(out var late)) late();                // the pending notifications finally run — after the close
         Assert.Equal(0, delivered);                                   // none reaches the (closed) listener
+        Assert.Equal(0, session.DeliveredNotifications);
+        Assert.True(session.DroppedNotifications > 0, "The queued notifications should have been dropped, not delivered.");
         Assert.Empty(Directory.EnumerateDirectories(_store));
         Assert.Empty(Directory.EnumerateDirectories(_sbx));
     }
@@ -712,4 +764,27 @@ public class XRayPlaybackSessionTests : IDisposable
         Assert.False(session.Cancel());                           // nothing is running: not accepted, state stays Finished
         Assert.Equal(PlaybackState.Finished, session.State);
     }
+
+    [Fact]
+    public async Task ShutdownReportsASandboxThatPreparationFailureCouldNotRemove()
+    {
+        var (_, request, _) = Arrange();
+        var sbx = Temp2();
+        var service = new ComboPlaybackService(new GateRunner(), Temp2(), sbx) { SandboxDeleter = _ => (false, "deliberately locked") };
+        var session = new PlaybackSession(service);
+        var changes = 0;
+        // Changed #1 = play requested, #2 = planning, #3 = preparing: cancel at #3, before the sandbox is built.
+        session.Changed += () => { if (Interlocked.Increment(ref changes) == 3) session.Cancel(); };
+
+        await session.PlayAsync(request);
+        Assert.Equal(PlaybackState.Cancelled, session.State);
+        var result = await session.ShutdownAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(result.Clean);                                  // never a false "clean"
+        var left = Assert.Single(result.LeftoverSandboxes);
+        Assert.Contains("deliberately locked", left);
+        foreach (var d in Directory.EnumerateDirectories(sbx)) RuntimeSandbox.Delete(d);
+    }
+
+    private string Temp2() { var d = Path.Combine(Path.GetTempPath(), "xray-ps2-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(d); _cleanup.Add(d); return d; }
 }

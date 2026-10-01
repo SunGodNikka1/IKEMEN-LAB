@@ -347,15 +347,15 @@ public class ComboPlaybackUiTests : IDisposable
         var sw = System.Diagnostics.Stopwatch.StartNew();
         window.Close();                                            // Closed → XRayViewModel.Close: starts cleanup and returns; it never waits for the worker
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Closing the window stalled the UI thread for {sw.Elapsed.TotalSeconds:0.0} s.");
+        var appliedAtClose = vm.Combos.Playback.NotificationsApplied;   // notifications the view had legitimately applied while it was open
 
         Assert.True(WpfHost.PumpUntil(() => vm.ShutdownTask.IsCompleted), "The playback cleanup never completed.");
+        WpfHost.Pump();                                            // anything still queued runs now, after the close
+        Assert.Equal(appliedAtClose, vm.Combos.Playback.NotificationsApplied);   // no notification was applied after the close
         Assert.True(vm.ShutdownTask.Result.Clean, vm.ShutdownTask.Result.Problem);
         Assert.False(Directory.Exists(runner.SandboxRoot), "The sandbox survived the window closing.");
         Assert.Empty(Directory.EnumerateDirectories(store));       // a cancelled playback saves no record
         Assert.Empty(Directory.EnumerateDirectories(sandboxes));
-        var after = vm.Combos.Playback.Headline;
-        WpfHost.Pump();
-        Assert.Equal(after, vm.Combos.Playback.Headline);          // no late update reaches the closed window's view model
     });
 
     [Fact]
@@ -370,11 +370,14 @@ public class ComboPlaybackUiTests : IDisposable
         window.Close();
         Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2), $"Closing stalled the UI thread for {sw.Elapsed.TotalSeconds:0.0} s.");
 
-        var before = vm.Combos.Playback.Headline;
+        // The invariant is about notifications, not state getters: the session may legitimately move to Cancelled, so a changed Headline would
+        // prove nothing. What must hold is that no queued notification was applied to the view after the close — it was dropped instead.
+        Assert.Equal(0, vm.Combos.Playback.NotificationsApplied);   // nothing had been pumped before the close
         Assert.True(WpfHost.PumpUntil(() => vm.ShutdownTask.IsCompleted), "The playback cleanup never completed (a worker waiting on the UI thread?).");
         WpfHost.Pump();                                            // the queued notifications run now — after the close
         Assert.True(vm.ShutdownTask.Result.Clean, vm.ShutdownTask.Result.Problem);
-        Assert.Equal(before, vm.Combos.Playback.Headline);         // none of them mutated the closed view model
+        Assert.Equal(0, vm.Combos.Playback.NotificationsApplied);   // none was applied to the closed view
+        Assert.True(vm.Combos.Playback.NotificationsDropped > 0, "The notifications queued before the close should have been dropped.");
         Assert.Empty(Directory.EnumerateDirectories(store));       // pre-commit close: no record
         Assert.Empty(Directory.EnumerateDirectories(sandboxes));
         if (runner.Started) Assert.False(Directory.Exists(runner.SandboxRoot));

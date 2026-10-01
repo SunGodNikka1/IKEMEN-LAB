@@ -88,7 +88,7 @@ public static class VerifyRunner
         if (planned.Plan is null) throw new InvalidOperationException(planned.RefusedReason);
 
         request.Progress?.Invoke("preparing");
-        var sandboxRequest = request.Sandbox with { Plan = planned.Plan, Cancel = request.Cancel };
+        var sandboxRequest = request.Sandbox with { Plan = planned.Plan, Cancel = request.Cancel, CleanupFailed = request.Sandbox.CleanupFailed ?? request.CleanupFailed };
         var sandbox = RuntimeSandbox.Create(sandboxRequest);
         var keep = request.KeepSandbox;
         try
@@ -119,11 +119,7 @@ public static class VerifyRunner
         }
         finally
         {
-            if (!keep)
-            {
-                var root = sandbox.Root;
-                if (!RuntimeSandbox.Delete(root)) request.CleanupFailed?.Invoke(root, RuntimeSandbox.LastFailure);
-            }
+            if (!keep) RuntimeSandbox.RemoveReporting(sandbox.Root, sandboxRequest);
         }
     }
 }
