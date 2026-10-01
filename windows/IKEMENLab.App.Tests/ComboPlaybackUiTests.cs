@@ -490,7 +490,7 @@ public class ComboPlaybackUiTests : IDisposable
             var panel = vm.Combos.Playback;
             Ready(panel, root, engine);
             panel.PlayCommand.Execute(null);
-            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "the first run never finished");
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult && panel.PlayCommand.CanExecute(null)));
             var first = panel.Outcome!.Record.Id;
 
             Assert.True(panel.ReplayCommand.CanExecute(null));
@@ -518,7 +518,7 @@ public class ComboPlaybackUiTests : IDisposable
             var routeB = vm.Combos.Routes[1];
             vm.Combos.SelectedRoute = routeA;
             panel.PlayCommand.Execute(null);
-            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A run never finished");
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult && panel.PlayCommand.CanExecute(null)));
             var keyA = panel.CurrentRouteKey;
             Assert.Equal(keyA, panel.RunRouteKey);
 
@@ -550,7 +550,7 @@ public class ComboPlaybackUiTests : IDisposable
             var routeB = vm.Combos.Routes[1];
             vm.Combos.SelectedRoute = routeA;
             panel.PlayCommand.Execute(null);
-            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A run never finished");
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult && panel.PlayCommand.CanExecute(null)));
             var keyA = panel.CurrentRouteKey;
 
             // While A is selected the inspection actions belong to A.
@@ -583,7 +583,7 @@ public class ComboPlaybackUiTests : IDisposable
             Ready(panel, root, engine);
             vm.Combos.SelectedRoute = vm.Combos.Routes[0];
             panel.PlayCommand.Execute(null);
-            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A never produced a result");
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult && panel.PlayCommand.CanExecute(null)));
             Assert.Equal(1, panel.AttemptId);
             Assert.True(panel.ResultIsCurrent);
             var oldRun = panel.ResultRunId;
@@ -650,7 +650,7 @@ public class ComboPlaybackUiTests : IDisposable
 
             vm.Combos.SelectedRoute = vm.Combos.Routes[0];
             panel.PlayCommand.Execute(null);
-            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A never produced a result");
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult && panel.PlayCommand.CanExecute(null)));
             Assert.True(panel.CopyDiagnosticCommand.CanExecute(null));
             var runDiagnostic = panel.DiagnosticText();
             Assert.Contains("kind: run", runDiagnostic);
@@ -761,3 +761,4 @@ public class ComboPlaybackUiTests : IDisposable
         });
     }
 }
+
