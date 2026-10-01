@@ -78,6 +78,34 @@ public sealed class ComboPlaybackPanel : ObservableObject
     /// <summary>The route the user has selected right now. Every result and result action below is scoped to the route the run belonged to.</summary>
     private string? SelectedKey => _lens.CurrentRoute?.Route.Key;
 
+    // QA status passthroughs. The panel already proxies IsBusy/HasResult/Headline; the QA harness needs the run identity
+    // and the session phase to assert on, so expose them read-only rather than letting QA reach into the session.
+
+    /// <summary>The route key the lens has selected right now; empty when no route is selected.</summary>
+    public string CurrentRouteKey => _lens.CurrentRoute?.Route.Key ?? string.Empty;
+    /// <summary>The route key of the run this session actually played; empty before any run.</summary>
+    public string RunRouteKey => _session.RunRouteKey ?? string.Empty;
+    public string SessionState => _session.State.ToString();
+    public string SessionPhase => _session.Phase;
+    public string SessionError => _session.Error ?? string.Empty;
+    public PlaybackRequest? LastRun => _session.Last;
+    public PlaybackOutcome? Outcome => _session.Outcome;
+    public bool SessionIsClosed => _session.IsClosed;
+
+    // Attempt / result identity for the QA status block: which Play press this is, what became of it, and which press produced the stored result.
+    public int AttemptId => _session.AttemptId;
+    public string AttemptState => _session.Attempt.ToString();
+    public string AttemptIssue => _session.AttemptIssue ?? string.Empty;
+    public string AttemptRouteKey => _session.AttemptRouteKey ?? string.Empty;
+    public string ResultAttemptId => _session.ResultAttemptId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+    public string ResultRunId => _session.ResultRunId ?? string.Empty;
+    public string ResultRouteKey => _session.ResultRouteKey ?? string.Empty;
+    /// <summary>True only when the stored result was produced by the latest attempt.</summary>
+    public bool ResultIsCurrent => _session.ResultIsCurrent;
+    public VerdictWait VerdictForLatestAttempt() => _session.VerdictForLatestAttempt();
+
+    /// <summary>Requests cancellation exactly as the Cancel button does; false when the committed result already won.</summary>
+    public bool RequestCancel() => _session.Cancel();
     public bool IsBusy => _session.IsBusy;
     public bool HasResult => _session.HasResultFor(SelectedKey);
     public bool CanInspect => _session.CanInspectFor(SelectedKey);
@@ -141,7 +169,12 @@ public sealed class ComboPlaybackPanel : ObservableObject
     {
         if (_lens.CurrentRoute is not { } current || _lens.Graph is not { } graph) return;
         var setup = RefreshSetup(showIssuesAsSetup: true);
-        if (setup is null || !setup.Ready) return;
+        if (setup is null || !setup.Ready)
+        {
+            // A refused press is still an attempt: it gets its own identity and never inherits an earlier run's verdict.
+            _session.RefuseAttempt(current.Route.Key, setup is null ? SetupSummary : string.Join(" ", setup.Issues));
+            return;
+        }
 
         ShowFailure = false;
         var entry = _owner.Entry;
@@ -153,7 +186,13 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private async Task ReplayAsync()
     {
         var setup = RefreshSetup(showIssuesAsSetup: true);
-        if (setup is null || !setup.Ready || !_session.CanReplayFor(SelectedKey) || _session.Last is not { } last) return;
+        if (!_session.CanReplayFor(SelectedKey) || _session.Last is not { } last) return;
+        if (setup is null || !setup.Ready)
+        {
+            _session.RefuseAttempt(last.Route.Key, setup is null ? SetupSummary : string.Join(" ", setup.Issues));
+            return;
+        }
+
         ShowFailure = false;
         await _session.PlayAsync(last with { Setup = setup });
     }
@@ -252,3 +291,4 @@ public sealed class ComboPlaybackPanel : ObservableObject
         CommandManager.InvalidateRequerySuggested();
     }
 }
+

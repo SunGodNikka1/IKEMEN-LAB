@@ -5,12 +5,51 @@ namespace IKEMENLab.Core.XRay.Playback;
 /// <summary>How closing the owner went. <see cref="Clean"/> is false when the run did not stop in time or a sandbox could not be deleted.</summary>
 public sealed record ShutdownResult(bool Clean, string? Problem, IReadOnlyList<string> LeftoverSandboxes);
 
+/// <summary>
+/// What became of one Play press. Every press gets its own <see cref="PlaybackSession.AttemptId"/>, even one refused before any engine was launched,
+/// so a caller can tell "this press produced a runtime verdict" from "an older run's verdict is still on file".
+/// </summary>
+public enum AttemptState
+{
+    /// <summary>No Play has been pressed in this session.</summary>
+    None,
+    /// <summary>Play was accepted and the run is preparing (no engine yet).</summary>
+    Started,
+    /// <summary>Refused before launch (setup incomplete, engine lacks the X-Ray hook…). No runtime verification took place and none is implied.</summary>
+    PreflightRefused,
+    /// <summary>The sandbox is built and the engine is (about to be) running.</summary>
+    RuntimeStarted,
+    /// <summary>The run finished and committed a verdict (Verified, Failed or runtime Inconclusive). The verdict belongs to this attempt.</summary>
+    VerdictProduced,
+    Cancelled,
+    /// <summary>The attempt failed for a reason other than a preflight refusal (e.g. the route cannot be scripted).</summary>
+    Error
+}
+
+public enum VerdictWaitKind
+{
+    /// <summary>No Play has been pressed: there is nothing to wait for.</summary>
+    NoAttempt,
+    /// <summary>The latest attempt is still running.</summary>
+    Pending,
+    /// <summary>The latest attempt produced a runtime verdict (Verified, Failed or runtime Inconclusive) and it is the stored result.</summary>
+    Verdict,
+    /// <summary>The latest attempt was refused before any engine launch: there is no runtime verdict, whatever an earlier run left behind.</summary>
+    RefusedPreflight,
+    /// <summary>The latest attempt ended without a verdict (cancelled, or failed for another reason).</summary>
+    EndedWithoutVerdict
+}
+
+public sealed record VerdictWait(VerdictWaitKind Kind, string Message);
+
 public enum PlaybackState { Idle, Preparing, Running, Judging, Finished, Cancelled, Error }
 
 /// <summary>
 /// The state machine behind the Combo Lens's Play button, kept out of the UI so it can be tested: one run at a time, a phase text for
 /// the status line, a Cancel that stops the engine, and the last request kept so Replay plays exactly the same route again.
-/// <see cref="Changed"/> is delivered through the <c>post</c> scheduler the owner supplies (the UI passes an asynchronous dispatcher
+/// <b>Delivery contract:</b> no subscriber begins after the session is closed — not a later queued notification, and not the remaining subscribers of the notification that
+/// was being delivered when a subscriber closed it. A subscriber already running on another thread when the close is requested finishes first (the close waits for it);
+/// a subscriber that itself closes the session completes normally. <see cref="Changed"/> is delivered through the <c>post</c> scheduler the owner supplies (the UI passes an asynchronous dispatcher
 /// post), never by blocking the worker, and a notification still queued when the session closes is dropped when it finally runs.
 /// </summary>
 public sealed class PlaybackSession
@@ -64,6 +103,37 @@ public sealed class PlaybackSession
     /// <summary>The banner for <paramref name="routeKey"/>: the live phase while a run is in progress (naming its route), the result only for the run's own route, otherwise empty.</summary>
     public string HeadlineFor(string? routeKey) => IsBusy || IsFor(routeKey) ? Headline : string.Empty;
 
+    // ---- attempt identity (every Play press, including refused ones)
+    public int AttemptId { get; private set; }
+    public AttemptState Attempt { get; private set; } = AttemptState.None;
+    public string? AttemptIssue { get; private set; }
+    public string? AttemptRouteKey { get; private set; }
+    /// <summary>The attempt that produced the stored <see cref="Outcome"/>; null when there is none.</summary>
+    public int? ResultAttemptId { get; private set; }
+    public string? ResultRunId => Outcome?.Record.Id;
+    public string? ResultRouteKey => Outcome?.Report.RouteKey;
+    /// <summary>True only when the stored result was produced by the latest attempt. A result left over from an earlier attempt is never current.</summary>
+    public bool ResultIsCurrent => Outcome is not null && ResultAttemptId == AttemptId;
+
+    /// <summary>
+    /// What "wait for a verdict" means right now: always about the LATEST attempt. A result stored by an earlier attempt never satisfies it, and a
+    /// preflight-refused attempt is reported as having no runtime verdict.
+    /// </summary>
+    public VerdictWait VerdictForLatestAttempt()
+    {
+        lock (_gate)
+        {
+            return Attempt switch
+            {
+                AttemptState.None => new(VerdictWaitKind.NoAttempt, "no runtime verdict: no Play attempt has been made"),
+                AttemptState.PreflightRefused => new(VerdictWaitKind.RefusedPreflight, $"no runtime verdict: attempt {AttemptId} refused during preflight: {AttemptIssue}"),
+                AttemptState.VerdictProduced when ResultIsCurrent => new(VerdictWaitKind.Verdict, $"attempt {AttemptId} produced a runtime verdict (run {ResultRunId})"),
+                AttemptState.Cancelled or AttemptState.Error => new(VerdictWaitKind.EndedWithoutVerdict, $"attempt {AttemptId} ended without a verdict ({Attempt})" + (AttemptIssue is null ? string.Empty : ": " + AttemptIssue)),
+                _ => new(VerdictWaitKind.Pending, $"attempt {AttemptId} is {Attempt}")
+            };
+        }
+    }
+
     public bool IsBusy => State is PlaybackState.Preparing or PlaybackState.Running or PlaybackState.Judging;
     public bool HasResult => Outcome is not null && State == PlaybackState.Finished;
     public bool CanInspect => HasResult && Outcome!.Report.Status != VerifyStatus.Verified;
@@ -105,7 +175,12 @@ public sealed class PlaybackSession
             gate = _cancel;
             Last = request;
             Outcome = null;
+            ResultAttemptId = null;
             Error = null;
+            AttemptId++;
+            Attempt = AttemptState.Started;
+            AttemptIssue = null;
+            AttemptRouteKey = request.Route.Key;
             State = PlaybackState.Preparing;
             Phase = "Preparing the sandbox…";
         }
@@ -117,15 +192,39 @@ public sealed class PlaybackSession
             lock (_gate) _run = run;
             var outcome = await run.ConfigureAwait(false);
             // The service has already committed this result (it is on disk); a Cancel that arrived after that point does not undo it.
-            lock (_gate) { Outcome = outcome; State = PlaybackState.Finished; Phase = string.Empty; }
+            lock (_gate) { Outcome = outcome; ResultAttemptId = AttemptId; Attempt = AttemptState.VerdictProduced; State = PlaybackState.Finished; Phase = string.Empty; }
         }
         catch (OperationCanceledException)
         {
-            lock (_gate) { State = PlaybackState.Cancelled; Phase = string.Empty; }
+            lock (_gate) { Attempt = AttemptState.Cancelled; State = PlaybackState.Cancelled; Phase = string.Empty; }
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
         {
-            lock (_gate) { Error = ex.Message; State = PlaybackState.Error; Phase = string.Empty; }
+            lock (_gate)
+            {
+                // An incomplete setup is a preflight refusal, not a failed run.
+                Attempt = request.Setup.Ready ? AttemptState.Error : AttemptState.PreflightRefused;
+                AttemptIssue = ex.Message;
+                Error = ex.Message; State = PlaybackState.Error; Phase = string.Empty;
+            }
+        }
+
+        Raise();
+    }
+
+    /// <summary>
+    /// Records a Play press that was refused before any run (the caller's preflight found the setup unusable). It gets its own attempt id, leaves any earlier
+    /// result untouched but no longer current, and never produces a verdict. Ignored while a run is active.
+    /// </summary>
+    public void RefuseAttempt(string? routeKey, string issue)
+    {
+        lock (_gate)
+        {
+            if (IsBusy || _closed) return;
+            AttemptId++;
+            Attempt = AttemptState.PreflightRefused;
+            AttemptIssue = issue;
+            AttemptRouteKey = routeKey;
         }
 
         Raise();
@@ -192,9 +291,22 @@ public sealed class PlaybackSession
             {
                 if (_closed) { Interlocked.Increment(ref _dropped); return; }
                 Interlocked.Increment(ref _delivered);
-                Changed?.Invoke();
+                // Subscribers are invoked one by one with the closed check repeated before each, so a subscriber that closes the session
+                // (the lock is reentrant on its own thread) stops the later subscribers of this same notification instead of letting a multicast Invoke run on.
+                if (Changed is { } handlers)
+                    foreach (var h in handlers.GetInvocationList())
+                    {
+                        if (_closed) break;
+                        ((Action)h)();
+                    }
             }
         });
+    }
+
+    private (PlaybackState, string) Running()
+    {
+        Attempt = AttemptState.RuntimeStarted;
+        return (PlaybackState.Running, "Playing the combo in IKEMEN — watch the engine window…");
     }
 
     private void OnPhase(string phase)
@@ -204,7 +316,7 @@ public sealed class PlaybackSession
             if (_closed) return;
             (State, Phase) = phase switch
             {
-                "running" => (PlaybackState.Running, "Playing the combo in IKEMEN — watch the engine window…"),
+                "running" => Running(),
                 "judging" => (PlaybackState.Judging, "Checking what happened…"),
                 _ => (PlaybackState.Preparing, "Preparing the sandbox…")
             };

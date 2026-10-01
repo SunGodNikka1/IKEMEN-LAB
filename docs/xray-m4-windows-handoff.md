@@ -21,3 +21,9 @@ Core logic (planner, session scoping, cancel boundary, shutdown, linger trace, p
 6. **Focus / linger:** is the engine window visible and the final pose on screen for ≈ 1.5 s after the combo? In the saved trace find `linger_start` / `linger_end`: report their tick difference (should be 90) and probeTick/engineTick values as *execution* evidence, and separately your **wall-clock** measurement of how long the engine window stayed up after the combo (the trace has no wall-clock; `os.clock()` was removed because it is CPU time). The match keeps running with no input during the hold (it is not frozen): describe what the final pose does during it, and whether anything is lost when `esc` is requested.
 7. **Saved evidence:** `xray-playback\<id>\` has plan/trace/report/meta; View Trace shows `P1 x`, `P2 x` and Distance labelled with its source.
 8. Production `Ikemen_GO.exe` hash unchanged; no orphan engine processes after any of the above.
+
+
+## Scripted acceptance notes (QA verbs)
+- Select routes with `xray-combo-route-index N` or `xray-combo-route-key <exact key>` and keep the logged `selected route #N … key=…` line as proof of which candidate ran.
+- Preflight vs runtime: an engine refused before launch shows `attemptState=PreflightRefused` and `playback-wait verdict` fails with `no runtime verdict: attempt N refused during preflight`; an engine that launched and could not inject shows `attemptState=VerdictProduced`, `verdict=Inconclusive`, `reason=InputInjectionUnavailable`, a `runId` and an engine hash. Report these as different results.
+- Check `status.resultIsCurrent=True` before trusting any verdict/hash fields.

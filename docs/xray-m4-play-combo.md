@@ -65,11 +65,31 @@ a detached window never realises its content tree. Close/notification tests asse
 Timing-window search, conditional routes, infinites, recording video, choosing P2 behaviour, playing a route that starts from a
 state (neutral-start routes only), and the non-default `inputRemap` case.
 
-## Notification delivery vs close (diagnosis note)
+## Notification delivery vs close — the contract
 
-`PlaybackSession` guarantees: **once `ShutdownAsync` has taken effect, no listener callback is running and none will start; queued ones are dropped (counted).**
-Delivery (`closed` check + `Changed` invoke) and the close (`closed = true`) both run under one delivery lock (order: delivery → gate), so a callback that passed its
-closed check can no longer invoke the listener after the close. In the application both run on the UI thread, which already serialised them; the lock makes the
-guarantee hold for a close issued from another thread too (a QA verb, a test). A counter that moves after `IsClosed` was read as true therefore indicates a
-sampling-order problem in the observer (counters read from a different instance, or a baseline taken before the close actually ran), not a delivery after the close.
-Regressions: an in-flight delivery blocks the close until it finishes; a 300-round contention test asserts no listener ever observes `IsClosed`.
+**No subscriber begins after the session is closed.** That covers a later queued notification *and* the remaining subscribers of the notification being delivered when
+a subscriber closes the session (delivery invokes subscribers one at a time and re-checks `closed` before each, instead of a single multicast `Invoke`). The check and the
+delivery share one lock with the close (order: delivery → gate): a subscriber already running on **another** thread when a close is requested finishes first (the close waits
+for it); a subscriber that itself closes the session (the lock is reentrant on its own thread) completes normally. In the application delivery and close both run on the UI thread;
+the lock makes the contract hold for a close from any thread (a QA verb, a test). Tests: in-flight delivery blocks a cross-thread close; subscriber A closes → subscriber B does not run;
+a contention test asserts no listener ever observes `IsClosed`. These do **not** explain the earlier "0 → 3 after SessionIsClosed" counter observation, which was never reproduced.
+
+## Attempt identity (QA / evidence)
+
+Every Play press has its own `AttemptId` — including one refused before any engine was launched — with an explicit `AttemptState`:
+`None → Started → RuntimeStarted → VerdictProduced`, or `PreflightRefused` / `Cancelled` / `Error`. The stored result remembers which attempt produced it
+(`ResultAttemptId`, `ResultRunId`, `ResultRouteKey`); `ResultIsCurrent` is true only when that is the latest attempt. `PlaybackSession.VerdictForLatestAttempt()` is what "wait for a verdict"
+means: `Verdict` only when the **latest** attempt produced the stored result; `RefusedPreflight` (message `no runtime verdict: attempt N refused during preflight: …`) when the latest
+attempt was refused; `Pending` while it runs; `EndedWithoutVerdict` for cancel/error; `NoAttempt` before any press. An earlier run's committed result never satisfies a wait for a newer attempt.
+
+**Preflight refusal ≠ runtime Inconclusive.** Preflight refusal: the engine/setup is rejected before launch (e.g. the engine does not appear to contain the X-Ray input hook) — attempt `PreflightRefused`, no
+verdict, no run. Runtime Inconclusive: the engine launched and the verifier returned `Inconclusive / InputInjectionUnavailable` — attempt `VerdictProduced`, a record exists. They are never converted into each other.
+
+## QA verbs (`QaScriptRunner`)
+
+`playback-play | -cancel | -replay | -status | -wait | -inspect | -trace` drive the real `ComboPlaybackPanel → PlaybackSession → M3/M4 pipeline`; `playback-play` is asynchronous.
+`playback-status` prints identity first (`selectedRouteKey`, `attemptId`, `attemptState`, `attemptIssue`, `attemptRouteKey`, `runRouteKey`, `resultAttemptId`, `resultRunId`, `resultRouteKey`, `resultIsCurrent`);
+verdict/reason/record/engine-hash/dummy/stage fields are printed **only when the result is current**, so a stale verdict can never sit beside a newer setup.
+`playback-wait verdict` is attempt-bound as above and throws on a preflight-refused attempt.
+Route selection: `xray-combo-route-index N` (1-based, as `--route N`), `xray-combo-route-key <exact key>` (ordinal, exact); the historical `xray-combo-route <substring>` now **errors when the substring matches more than one route** (listing them) instead of taking the first.
+Every selection logs `selected route #N of M by …; key=…; title=…` and re-checks that the lens really selected it.

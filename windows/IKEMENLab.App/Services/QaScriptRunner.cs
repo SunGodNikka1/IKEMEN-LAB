@@ -8,6 +8,7 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using IKEMENLab.App.ViewModels;
+using IKEMENLab.Core.XRay.Playback;
 using IKEMENLab.App.Views;
 using IKEMENLab.Core.Collections;
 using IKEMENLab.Core.Services;
@@ -210,7 +211,28 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
             case "xray-shot":
                 XRayShot(rest);
                 break;
-            case "xray-combos-find":
+            case "playback-play":
+    PlaybackPlay(rest);
+    break;
+case "playback-cancel":
+    PlaybackCancel();
+    break;
+case "playback-replay":
+    PlaybackReplay();
+    break;
+case "playback-status":
+    PlaybackStatus();
+    break;
+case "playback-wait":
+    await PlaybackWait(rest);
+    break;
+case "playback-inspect":
+    PlaybackAction(p => p.InspectFailureCommand, "InspectFailure");
+    break;
+case "playback-trace":
+    PlaybackAction(p => p.ViewTraceCommand, "ViewTrace");
+    break;
+case "xray-combos-find":
                 ComboFind();
                 break;
             case "xray-combos-config":
@@ -220,7 +242,16 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 ComboPick((o, r) => o.Combos.SelectedEdge = r, ComboLens().Edges, rest);
                 break;
             case "xray-combo-route":
-                ComboPick((o, r) => o.Combos.SelectedRoute = r, ComboLens().Routes, rest);
+                // Substring selector kept for exploration, but it must identify exactly one route: ambiguity is an error, never "the first match".
+                ComboRoutePick(RouteSelection.BySubstring(ComboLens().Routes.Select(r => r.Id).ToList(), rest), "substring '" + rest + "'");
+                break;
+            case "xray-combo-route-index":
+                // 1-based, as in the CLI's --route N.
+                if (!int.TryParse(rest.Trim(), out var routeNumber)) throw new InvalidOperationException("xray-combo-route-index needs a whole number (1-based).");
+                ComboRoutePick(RouteSelection.ByIndex(ComboLens().Routes.Count, routeNumber), "index " + routeNumber);
+                break;
+            case "xray-combo-route-key":
+                ComboRoutePick(RouteSelection.ByKey(ComboLens().Routes.Select(r => r.Id).ToList(), rest.Trim()), "exact key");
                 break;
             case "xray-combo-step":
                 ComboPick((o, r) => o.Combos.SelectedStep = r, ComboLens().RouteSteps, rest);
@@ -548,6 +579,20 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         _log.Add($"  xray-combos-config: meter='{lens.MeterText}' moves={lens.MaxMoves} hitConfirm={lens.HitConfirmOnly} links={lens.AllowLinks} fromSelected={lens.FromSelected}");
     }
 
+    /// <summary>Selects the route at a 0-based position and logs exactly which candidate it was (position, key, title) so evidence can be tied to it.</summary>
+    private void ComboRoutePick(int position, string how)
+    {
+        var rows = ComboLens().Routes;
+        var row = rows[position];
+        XRayVm().Combos.SelectedRoute = row;
+        XRayWin().UpdateLayout();
+        var selected = ComboLens().Playback.CurrentRouteKey;
+        if (!string.Equals(selected, row.Id, StringComparison.Ordinal))
+            throw new InvalidOperationException($"route selection did not take effect: wanted {row.Id}, the lens selected '{selected}'");
+        _log.Add($"  selected route #{position + 1} of {rows.Count} by {how}; key={row.Id}; title={row.Title}");
+        _log.Add($"  status.selectedRouteKey={selected}");
+    }
+
     private void ComboPick(Action<XRayViewModel, XRayRow?> set, ObservableCollection<XRayRow> rows, string needle)
     {
         var row = rows.FirstOrDefault(r => r.Id.Contains(needle, StringComparison.OrdinalIgnoreCase))
@@ -711,5 +756,154 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
             _log.Add($"    name=[{name}] visible={b.IsVisible} w={b.ActualWidth:F0} right={b.ActualWidth + b.TranslatePoint(new System.Windows.Point(0, 0), inspector).X:F0} panelW={inspector.ActualWidth:F0} bound={b.Command is not null} canExecute={can}");
         }
     }
+
+    // ---------------------------------------------------------------- Combo Playback (M4)
+
+    private ComboPlaybackPanel Playback() => ComboLens().Playback;
+
+    /// <summary>playback-play [engine|dlls|dummy|stage] - configure the real setup model then invoke the real Play command.
+    /// Fire-and-forget on purpose: a script has to be able to cancel, switch route or close the window while the engine runs.</summary>
+    private void PlaybackPlay(string rest)
+    {
+        var panel = Playback();
+        var parts = rest.Split('|', StringSplitOptions.TrimEntries);
+        if (parts.Length > 0 && parts[0].Length > 0) panel.EnginePath = parts[0];
+        if (parts.Length > 1) panel.EngineDlls = parts[1];
+        if (parts.Length > 2) panel.Dummy = parts[2];
+        if (parts.Length > 3) panel.Stage = parts[3];
+        if (panel.CurrentRouteKey.Length == 0)
+            throw new InvalidOperationException("playback-play needs a selected route; use xray-combo-route first");
+        if (!panel.PlayCommand.CanExecute(null))
+            throw new InvalidOperationException("playback-play refused: setup not ready, or a run is already active");
+        var before = panel.AttemptId;
+        panel.PlayCommand.Execute(null);
+        // The attempt exists as soon as Execute returns (a refused press included), so the script can name it before waiting for anything.
+        _log.Add($"  playback-play: invoked for route {panel.CurrentRouteKey}; attemptId={panel.AttemptId} (previous {before}) attemptState={panel.AttemptState}" +
+                 (panel.AttemptState == "PreflightRefused" ? $" — refused before any engine launch: {panel.AttemptIssue}" : string.Empty));
+    }
+
+    private void PlaybackCancel()
+    {
+        var panel = Playback();
+        if (!panel.IsBusy) { _log.Add("  playback-cancel: unavailable, no run is active"); return; }
+        _log.Add(panel.RequestCancel()
+            ? "  playback-cancel: accepted"
+            : "  playback-cancel: refused, the result was already committed");
+    }
+
+    private void PlaybackReplay()
+    {
+        var panel = Playback();
+        if (!panel.ReplayCommand.CanExecute(null))
+            throw new InvalidOperationException("playback-replay refused: no recorded run for the selected route");
+        var before = panel.Outcome?.Record.Id ?? string.Empty;
+        panel.ReplayCommand.Execute(null);
+        _log.Add($"  playback-replay: invoked, previous run id {before}");
+    }
+
+    /// <summary>Invoke an existing panel command the way its button does, refusing when the button would be disabled.</summary>
+    private void PlaybackAction(Func<ComboPlaybackPanel, System.Windows.Input.ICommand> pick, string name)
+    {
+        var panel = Playback();
+        var command = pick(panel);
+        if (!command.CanExecute(null))
+            throw new InvalidOperationException($"playback-{name.ToLowerInvariant()} refused: the command is disabled for this route");
+        command.Execute(null);
+        _log.Add($"  playback-{name.ToLowerInvariant()}: invoked");
+    }
+
+
+    /// <summary>playback-status - one machine-readable key=value block so a script can assert without parsing prose.</summary>
+    private void PlaybackStatus()
+    {
+        var p = Playback();
+        var r = p.Outcome?.Record;
+        // Identity first: which route is selected, which press (attempt) this is, what became of it, and which press produced the stored result.
+        _log.Add($"  status.selectedRouteKey={p.CurrentRouteKey}");
+        _log.Add($"  status.attemptId={p.AttemptId}");
+        _log.Add($"  status.attemptState={p.AttemptState}");
+        _log.Add($"  status.attemptIssue={p.AttemptIssue}");
+        _log.Add($"  status.attemptRouteKey={p.AttemptRouteKey}");
+        _log.Add($"  status.runRouteKey={p.RunRouteKey}");
+        _log.Add($"  status.runId={r?.Id ?? string.Empty}");
+        _log.Add($"  status.resultAttemptId={p.ResultAttemptId}");
+        _log.Add($"  status.resultRunId={p.ResultRunId}");
+        _log.Add($"  status.resultRouteKey={p.ResultRouteKey}");
+        _log.Add($"  status.resultIsCurrent={p.ResultIsCurrent}");
+        // Evidence about a result is only printed when the latest attempt produced it, so a stale verdict/engine hash can never sit beside a newer setup.
+        var cur = p.ResultIsCurrent;
+        var e = cur ? r : null;
+        _log.Add($"  status.sessionState={p.SessionState}");
+        _log.Add($"  status.phase={p.SessionPhase}");
+        _log.Add($"  status.isBusy={p.IsBusy}");
+        _log.Add($"  status.verdict={e?.Status ?? string.Empty}");
+        _log.Add($"  status.reason={e?.Reason ?? string.Empty}");
+        _log.Add($"  status.failedStep={e?.FailedStep?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}");
+        _log.Add($"  status.hasResult={p.HasResult}");
+        _log.Add($"  status.showFailure={p.ShowFailure}");
+        _log.Add($"  status.canPlay={p.PlayCommand.CanExecute(null)}");
+        _log.Add($"  status.canCancel={p.CancelCommand.CanExecute(null)}");
+        _log.Add($"  status.canReplay={p.ReplayCommand.CanExecute(null)}");
+        _log.Add($"  status.canInspect={p.CanInspect}");
+        _log.Add($"  status.canViewTrace={p.ViewTraceCommand.CanExecute(null)}");
+        _log.Add($"  status.recordDirectory={e?.Directory ?? string.Empty}");
+        _log.Add($"  status.tracePath={e?.TracePath ?? string.Empty}");
+        _log.Add($"  status.enginePath={p.EnginePath}");
+        _log.Add($"  status.engineDlls={p.EngineDlls}");
+        _log.Add($"  status.recordedEngineSha={e?.EngineSha256 ?? string.Empty}");
+        _log.Add($"  status.engineSource={(cur ? p.Outcome?.Report.EngineSource : null) ?? string.Empty}");
+        _log.Add($"  status.engineVersion={(cur ? p.Outcome?.Report.EngineVersion : null) ?? string.Empty}");
+        _log.Add($"  status.dummy={e?.Dummy ?? string.Empty}");
+        _log.Add($"  status.stage={e?.Stage ?? string.Empty}");
+        _log.Add($"  status.notificationsApplied={p.NotificationsApplied}");
+        _log.Add($"  status.notificationsDropped={p.NotificationsDropped}");
+        _log.Add($"  status.sessionClosed={p.SessionIsClosed}");
+        _log.Add($"  status.error={p.SessionError}");
+        _log.Add($"  status.setupSummary={p.SetupSummary}");
+    }
+
+    private static bool VerdictSettled(ComboPlaybackPanel p)
+    {
+        var v = p.VerdictForLatestAttempt();
+        return v.Kind switch
+        {
+            VerdictWaitKind.Verdict or VerdictWaitKind.EndedWithoutVerdict => true,
+            VerdictWaitKind.Pending => false,
+            _ => throw new InvalidOperationException(v.Message)   // NoAttempt / RefusedPreflight: there will never be a runtime verdict for this attempt
+        };
+    }
+
+    /// <summary>playback-wait &lt;running|verdict|idle|phase=NAME&gt; [timeoutMs] - bounded; always resolves or throws.</summary>
+    private async Task PlaybackWait(string rest)
+    {
+        var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var what = parts.ElementAtOrDefault(0) ?? "verdict";
+        var ms = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : 180000;
+        var until = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < until)
+        {
+            var p = Playback();
+            var hit = what switch
+            {
+                "running" => p.SessionState == "Running",
+                "idle" => p.SessionState == "Idle",
+                // A verdict is waited for on the LATEST attempt only: an older run's committed result never satisfies it, and an attempt that was refused
+                // during preflight has no runtime verdict at all, so that is reported as such rather than answered with a previous result.
+                "verdict" => VerdictSettled(p),
+                var s when s.StartsWith("phase=", StringComparison.OrdinalIgnoreCase) =>
+                    p.SessionPhase.Contains(s["phase=".Length..], StringComparison.OrdinalIgnoreCase),
+                _ => throw new InvalidOperationException($"unknown playback-wait condition '{what}'")
+            };
+            if (hit)
+            {
+                _log.Add($"  playback-wait: {what} satisfied for attempt {p.AttemptId} (attemptState={p.AttemptState} state={p.SessionState} phase={p.SessionPhase})");
+                return;
+            }
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException($"playback-wait timed out after {ms}ms waiting for '{what}' (state={Playback().SessionState} phase={Playback().SessionPhase})");
+    }
 }
+
 

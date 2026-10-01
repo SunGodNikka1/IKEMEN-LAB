@@ -844,4 +844,159 @@ public class XRayPlaybackSessionTests : IDisposable
         }
         Assert.True(exercised > 0, "The contention test never produced a notification, so it proved nothing.");
     }
+
+    // ------------------------------------------------------------------ attempt identity, preflight vs runtime, reentrancy, route selection
+
+    private PlaybackRequest Unready(PlaybackRequest r, string engine = "") =>
+        r with { Setup = PlaybackPreflight.Check(r.Root, "ComboGuy", new AppSettings { XRayEnginePath = engine.Length == 0 ? null : engine }) };
+
+    [Fact]
+    public async Task AnOldResultCanNeverSatisfyAWaitForTheNewAttemptAfterAPreflightRefusal()
+    {
+        // Codex's sequence: successful A -> configure an unpatched engine -> Play -> preflight refusal -> wait for a verdict.
+        var (session, request, runner) = Arrange();
+        runner.Release.Set();
+        await session.PlayAsync(request);
+        Assert.Equal(1, session.AttemptId);
+        Assert.Equal(AttemptState.VerdictProduced, session.Attempt);
+        Assert.True(session.ResultIsCurrent);
+        Assert.Equal(VerdictWaitKind.Verdict, session.VerdictForLatestAttempt().Kind);
+        var oldRun = session.ResultRunId;
+
+        var unpatched = Path.Combine(Temp2(), "stock.exe");
+        File.WriteAllText(unpatched, "an engine without the hook");
+        var refused = PlaybackPreflight.Check(request.Root, "ComboGuy", new AppSettings { XRayEnginePath = unpatched });
+        Assert.False(refused.Ready);                                              // preflight refuses (no X-Ray hook) ...
+        session.RefuseAttempt(request.Route.Key, string.Join(" ", refused.Issues)); // ... exactly as the panel records it
+
+        Assert.Equal(2, session.AttemptId);                                       // a distinct attempt, although no engine ran
+        Assert.Equal(AttemptState.PreflightRefused, session.Attempt);
+        Assert.Contains("virtual-input hook", session.AttemptIssue);
+        Assert.False(session.ResultIsCurrent);                                    // the old result is on file but is not this attempt's
+        Assert.Equal(1, session.ResultAttemptId);
+        Assert.Equal(oldRun, session.ResultRunId);
+        var wait = session.VerdictForLatestAttempt();
+        Assert.Equal(VerdictWaitKind.RefusedPreflight, wait.Kind);                // the wait must NOT be satisfied by the old verdict
+        Assert.Contains("no runtime verdict", wait.Message);
+        Assert.Contains("refused during preflight", wait.Message);
+        Assert.Equal(1, runner.Runs);                                             // no second engine launch happened
+    }
+
+    [Fact]
+    public async Task PreflightRefusalAndRuntimeInconclusiveAreDifferentOutcomes()
+    {
+        // Preflight refusal: the setup is rejected before launch; there is no verdict of any kind.
+        var (refusedSession, request, _) = Arrange("noinject");
+        await refusedSession.PlayAsync(Unready(request));
+        Assert.Equal(AttemptState.PreflightRefused, refusedSession.Attempt);
+        Assert.Null(refusedSession.Outcome);
+        Assert.Equal(VerdictWaitKind.RefusedPreflight, refusedSession.VerdictForLatestAttempt().Kind);
+
+        // Runtime Inconclusive: the engine launched and the verifier said InputInjectionUnavailable.
+        var (ranSession, ranRequest, runner) = Arrange("noinject");
+        runner.Release.Set();
+        await ranSession.PlayAsync(ranRequest);
+        Assert.Equal(AttemptState.VerdictProduced, ranSession.Attempt);
+        Assert.Equal(VerifyStatus.Inconclusive, ranSession.Outcome!.Report.Status);
+        Assert.Equal(VerifyReason.InputInjectionUnavailable, ranSession.Outcome.Report.Reason);
+        Assert.Equal(1, runner.Runs);                                             // the engine really ran
+        Assert.Equal(VerdictWaitKind.Verdict, ranSession.VerdictForLatestAttempt().Kind);
+    }
+
+    [Fact]
+    public async Task EveryPressGetsItsOwnAttemptIdAndAttemptStatesAreExplicit()
+    {
+        var (session, request, runner) = Arrange();
+        Assert.Equal((0, AttemptState.None), (session.AttemptId, session.Attempt));
+        Assert.Equal(VerdictWaitKind.NoAttempt, session.VerdictForLatestAttempt().Kind);
+
+        var run = session.PlayAsync(request);
+        Assert.True(runner.Entered.Wait(TimeSpan.FromSeconds(10)));
+        Assert.Equal((1, AttemptState.RuntimeStarted), (session.AttemptId, session.Attempt));
+        Assert.Equal(VerdictWaitKind.Pending, session.VerdictForLatestAttempt().Kind);
+        Assert.Equal(request.Route.Key, session.AttemptRouteKey);
+        runner.Release.Set();
+        await run;
+
+        session.RefuseAttempt("route-x", "setup incomplete");
+        Assert.Equal((2, AttemptState.PreflightRefused, "route-x"), (session.AttemptId, session.Attempt, session.AttemptRouteKey));
+        await session.ReplayAsync();                                              // replays the last RUN: a third, real attempt
+        Assert.Equal((3, AttemptState.VerdictProduced), (session.AttemptId, session.Attempt));
+        Assert.True(session.ResultIsCurrent);
+        Assert.Equal(3, session.ResultAttemptId);
+    }
+
+    [Fact]
+    public async Task ACancelledAttemptEndsWithoutAVerdictAndDoesNotInheritAnEarlierOne()
+    {
+        var (session, request, runner) = Arrange();
+        runner.Release.Set();
+        await session.PlayAsync(request);
+        var waiting = new WaitingRunner();
+        var cancellable = new PlaybackSession(new ComboPlaybackService(waiting, Temp2(), Temp2()));
+        var run = cancellable.PlayAsync(request);
+        Assert.True(waiting.Entered.Wait(TimeSpan.FromSeconds(10)));
+        Assert.True(cancellable.Cancel());
+        await run;
+        Assert.Equal(AttemptState.Cancelled, cancellable.Attempt);
+        Assert.Equal(VerdictWaitKind.EndedWithoutVerdict, cancellable.VerdictForLatestAttempt().Kind);
+        Assert.False(cancellable.ResultIsCurrent);
+    }
+
+    [Fact]
+    public void ASubscriberThatClosesTheSessionStopsTheLaterSubscribersOfTheSameNotification()
+    {
+        var queue = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        var (_, request, _) = Arrange();
+        var session = new PlaybackSession(new ComboPlaybackService(new GateRunner(), Temp2(), Temp2()), queue.Enqueue);
+        var ran = new List<string>();
+        session.Changed += () => { ran.Add("A"); session.ShutdownAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult(); };   // A closes the session
+        session.Changed += () => ran.Add("B");
+
+        session.RefuseAttempt("r", "x");                       // raises one notification
+        Assert.True(queue.TryDequeue(out var delivery));
+        delivery!();
+
+        Assert.Equal(["A"], ran);                              // B never starts: the contract is "no subscriber begins after the session is closed"
+        Assert.True(session.IsClosed);
+        while (queue.TryDequeue(out var late)) late();
+        Assert.Equal(["A"], ran);
+    }
+
+    [Fact]
+    public void WithoutAClosingSubscriberEverySubscriberRunsInOrder()
+    {
+        var queue = new System.Collections.Concurrent.ConcurrentQueue<Action>();
+        var (_, request, _) = Arrange();
+        var session = new PlaybackSession(new ComboPlaybackService(new GateRunner(), Temp2(), Temp2()), queue.Enqueue);
+        var ran = new List<string>();
+        session.Changed += () => ran.Add("A");
+        session.Changed += () => ran.Add("B");
+        session.RefuseAttempt("r", "x");
+        queue.TryDequeue(out var delivery);
+        delivery!();
+        Assert.Equal(["A", "B"], ran);
+    }
+
+    [Fact]
+    public void RouteSelectionIsExplicitAndNeverPicksTheFirstSubstringMatch()
+    {
+        var keys = new[] { "cand:neutral>state:200@c0", "cand:neutral>state:2000@c1", "cand:neutral>state:210@c2" };
+        Assert.Equal(0, RouteSelection.ByIndex(3, 1));
+        Assert.Equal(2, RouteSelection.ByIndex(3, 3));
+        Assert.Throws<InvalidOperationException>(() => RouteSelection.ByIndex(3, 0));
+        Assert.Throws<InvalidOperationException>(() => RouteSelection.ByIndex(3, 4));
+        Assert.Throws<InvalidOperationException>(() => RouteSelection.ByIndex(0, 1));
+
+        Assert.Equal(1, RouteSelection.ByKey(keys, "cand:neutral>state:2000@c1"));
+        Assert.Throws<InvalidOperationException>(() => RouteSelection.ByKey(keys, "cand:neutral>state:200"));       // exact means exact: a prefix is not a key
+        Assert.Throws<InvalidOperationException>(() => RouteSelection.ByKey(keys, "CAND:NEUTRAL>STATE:200@C0"));     // ordinal, case-sensitive
+
+        Assert.Equal(2, RouteSelection.BySubstring(keys, "state:210"));
+        var ambiguous = Assert.Throws<InvalidOperationException>(() => RouteSelection.BySubstring(keys, "state:200"));  // matches #1 and #2: not silently #1
+        Assert.Contains("#1", ambiguous.Message);
+        Assert.Contains("#2", ambiguous.Message);
+        Assert.Throws<InvalidOperationException>(() => RouteSelection.BySubstring(keys, "nothing"));
+        Assert.Throws<InvalidOperationException>(() => RouteSelection.ByKey([keys[0], keys[0]], keys[0]));            // duplicate keys are not selectable by key
+    }
 }

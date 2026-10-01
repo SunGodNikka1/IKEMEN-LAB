@@ -351,7 +351,7 @@ public class ComboPlaybackUiTests : IDisposable
 
         Assert.True(WpfHost.PumpUntil(() => vm.ShutdownTask.IsCompleted), "The playback cleanup never completed.");
         WpfHost.Pump();                                            // anything still queued runs now, after the close
-        Assert.Equal(appliedAtClose, vm.Combos.Playback.NotificationsApplied);   // no notification was applied after the close
+        Assert.Equal(appliedAtClose, vm.Combos.Playback.NotificationsApplied);
         Assert.True(vm.ShutdownTask.Result.Clean, vm.ShutdownTask.Result.Problem);
         Assert.False(Directory.Exists(runner.SandboxRoot), "The sandbox survived the window closing.");
         Assert.Empty(Directory.EnumerateDirectories(store));       // a cancelled playback saves no record
@@ -382,4 +382,228 @@ public class ComboPlaybackUiTests : IDisposable
         Assert.Empty(Directory.EnumerateDirectories(sandboxes));
         if (runner.Started) Assert.False(Directory.Exists(runner.SandboxRoot));
     });
+
+    // ------------------------------------------------------------------ M4 QA harness (lifecycle + route scoping)
+
+    /// <summary>An engine stand-in that can be held open, so a test can act while a run is genuinely in flight.</summary>
+    private sealed class GateRunner(ManualResetEventSlim? gate = null) : IEngineRunner
+    {
+        public int Runs;
+        public RuntimeSandbox? Last;
+        public EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout)
+        {
+            Interlocked.Increment(ref Runs);
+            Last = sandbox;
+            gate?.Wait(TimeSpan.FromSeconds(30));
+            File.WriteAllText(sandbox.TracePath, MinimalTrace());
+            return new EngineRunResult(0, false, null);
+        }
+
+        private static string MinimalTrace() => string.Join("\n", new[]
+        {
+            """{"type":"meta","engineVersion":"fake-1"}""",
+            """{"type":"driver","frame":1,"event":"plan_start","step":null,"detail":"cand:neutral>state:200@state:-1/ctrl:0#0"}""",
+            """{"type":"input","frame":5,"player":1,"keys":["x"],"step":1,"source":"input"}""",
+            """{"type":"frame","frame":6,"engineTick":6,"round":1,"p1":[{"key":"state","value":200}],"p2":[{"key":"state","value":0},{"key":"moveType","value":"I"},{"key":"ctrl","value":true}],"distance":40,"p1TargetCount":1,"p1TargetId":2,"combo":0}""",
+            """{"type":"driver","frame":6,"event":"step_done","step":1,"detail":"200"}""",
+            """{"type":"driver","frame":6,"event":"plan_complete","step":2,"detail":null}""",
+            """{"type":"end","frame":7,"reason":"planComplete"}"""
+        }) + "\n";
+    }
+
+    private static ComboPlaybackService Service(IEngineRunner runner) =>
+        new(runner, Path.Combine(Path.GetTempPath(), "xray-qa-store-" + Guid.NewGuid().ToString("N")),
+            Path.Combine(Path.GetTempPath(), "xray-qa-sbx-" + Guid.NewGuid().ToString("N")));
+
+    private static void Ready(ComboPlaybackPanel panel, string root, string engine)
+    {
+        panel.EnginePath = engine;
+        panel.Dummy = "kfm";
+        panel.Stage = "stages/ring.def";
+        Assert.DoesNotContain("not", panel.SetupSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.True(panel.PlayCommand.CanExecute(null), panel.SetupSummary);
+    }
+
+    [Fact]
+    public void PlayBeginsAsynchronouslyAndReportsStatusWhileRunning()
+    {
+        WpfHost.Run(() =>
+        {
+            var gate = new ManualResetEventSlim();
+            var (root, engine) = Install();
+            var vm = ViewModel(new MemorySettings(), root, Service(new GateRunner(gate)));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var panel = vm.Combos.Playback;
+            Ready(panel, root, engine);
+
+            Assert.True(panel.PlayCommand.CanExecute(null));
+            panel.PlayCommand.Execute(null);
+
+            // Execute must return while the engine is still held open: a blocking Play would deadlock a script.
+            Assert.True(panel.IsBusy, "Play did not start an asynchronous run.");
+            Assert.True(panel.CancelCommand.CanExecute(null));
+            Assert.False(panel.HasResult);
+            gate.Set();
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult || panel.SessionState is "Cancelled" or "Error"),
+                "the run never settled (state=" + panel.SessionState + ")");
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public void CancelDuringRunStopsItAndCommitsNoResult()
+    {
+        WpfHost.Run(() =>
+        {
+            var gate = new ManualResetEventSlim();
+            var (root, engine) = Install();
+            var runner = new GateRunner(gate);
+            var vm = ViewModel(new MemorySettings(), root, Service(runner));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var panel = vm.Combos.Playback;
+            Ready(panel, root, engine);
+            panel.PlayCommand.Execute(null);
+            Assert.True(panel.IsBusy);
+
+            Assert.True(panel.RequestCancel(), "Cancel should be accepted while the run is in flight.");
+            gate.Set();
+            Assert.True(WpfHost.PumpUntil(() => panel.SessionState is "Cancelled" or "Finished" or "Error"),
+                "the cancelled run never settled (state=" + panel.SessionState + ")");
+            Assert.Equal("Cancelled", panel.SessionState);
+            Assert.False(panel.HasResult, "a cancelled run must not commit a result");
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public void ReplayStartsAFreshRunRatherThanReusingTheLastResult()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, engine) = Install();
+            var runner = new GateRunner();
+            var vm = ViewModel(new MemorySettings(), root, Service(runner));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var panel = vm.Combos.Playback;
+            Ready(panel, root, engine);
+            panel.PlayCommand.Execute(null);
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "the first run never finished");
+            var first = panel.Outcome!.Record.Id;
+
+            Assert.True(panel.ReplayCommand.CanExecute(null));
+            panel.ReplayCommand.Execute(null);
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult && panel.Outcome!.Record.Id != first),
+                "replay did not produce a new run record");
+            Assert.NotEqual(first, panel.Outcome!.Record.Id);
+            Assert.Equal(2, runner.Runs);
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public void ResultIsScopedToTheRouteItWasPlayedFor()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, engine) = Install();
+            var vm = ViewModel(new MemorySettings(), root, Service(new GateRunner()));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var panel = vm.Combos.Playback;
+            Ready(panel, root, engine);
+            var routeA = vm.Combos.Routes[0];
+            var routeB = vm.Combos.Routes[1];
+            vm.Combos.SelectedRoute = routeA;
+            panel.PlayCommand.Execute(null);
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A run never finished");
+            var keyA = panel.CurrentRouteKey;
+            Assert.Equal(keyA, panel.RunRouteKey);
+
+            vm.Combos.SelectedRoute = routeB;
+            Assert.NotEqual(keyA, panel.CurrentRouteKey);
+            Assert.False(panel.HasResult, "route A's result must not stay on screen while route B is selected");
+            Assert.False(panel.CanInspect, "Inspect must be unavailable for a route that was not played");
+            Assert.False(panel.ViewTraceCommand.CanExecute(null));
+            Assert.Equal("Neutral", panel.ResultKind);
+
+            vm.Combos.SelectedRoute = routeA;
+            Assert.True(panel.HasResult, "reselecting route A must restore its own result");
+            window.Close();
+        });
+    }
+
+    [Fact]
+    public void InspectFailureStaysBoundToTheRouteThatWasPlayed()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, engine) = Install();
+            var vm = ViewModel(new MemorySettings(), root, Service(new GateRunner()));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var panel = vm.Combos.Playback;
+            Ready(panel, root, engine);
+            var routeA = vm.Combos.Routes[0];
+            var routeB = vm.Combos.Routes[1];
+            vm.Combos.SelectedRoute = routeA;
+            panel.PlayCommand.Execute(null);
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A run never finished");
+            var keyA = panel.CurrentRouteKey;
+
+            // While A is selected the inspection actions belong to A.
+            Assert.True(panel.InspectFailureCommand.CanExecute(null));
+            Assert.True(panel.ViewTraceCommand.CanExecute(null));
+
+            // Switching away must withdraw them, so nothing can inspect B using A's evidence.
+            vm.Combos.SelectedRoute = routeB;
+            Assert.False(panel.InspectFailureCommand.CanExecute(null),
+                "Inspect remained enabled for a route that was never played");
+            Assert.False(panel.ViewTraceCommand.CanExecute(null));
+            vm.Combos.SelectedRoute = routeA;
+            Assert.True(panel.InspectFailureCommand.CanExecute(null));
+            Assert.Equal(keyA, panel.RunRouteKey);
+            window.Close();
+        });
+    }
+
+
+    [Fact]
+    public void APreflightRefusalAfterASuccessfulRunNeverInheritsTheEarlierVerdict()
+    {
+        WpfHost.Run(() =>
+        {
+            var (root, engine) = Install();
+            var vm = ViewModel(new MemorySettings(), root, Service(new GateRunner()));
+            var window = ShowWindow(vm);
+            LoadRoutes(vm);
+            var panel = vm.Combos.Playback;
+            Ready(panel, root, engine);
+            vm.Combos.SelectedRoute = vm.Combos.Routes[0];
+            panel.PlayCommand.Execute(null);
+            Assert.True(WpfHost.PumpUntil(() => panel.HasResult), "route A never produced a result");
+            Assert.Equal(1, panel.AttemptId);
+            Assert.True(panel.ResultIsCurrent);
+            var oldRun = panel.ResultRunId;
+
+            // Configure an engine without the X-Ray hook, press Play: refused before any launch.
+            var unpatched = Path.Combine(Temp("xray-stock-"), "stock.exe");
+            File.WriteAllText(unpatched, "stock engine");
+            panel.EnginePath = unpatched;
+            panel.PlayCommand.Execute(null);
+
+            Assert.Equal("PreflightRefused", panel.AttemptState);          // a distinct attempt that never reached an engine
+            Assert.Equal(2, panel.AttemptId);
+            Assert.Contains("hook", panel.AttemptIssue);
+            Assert.False(panel.ResultIsCurrent, "the old result must not be presented as this attempt's");
+            Assert.Equal(oldRun, panel.ResultRunId);                       // it is still on file, but attributed to attempt 1
+            Assert.Equal("1", panel.ResultAttemptId);
+            var wait = panel.VerdictForLatestAttempt();
+            Assert.Equal(VerdictWaitKind.RefusedPreflight, wait.Kind);
+            Assert.Contains("refused during preflight", wait.Message);
+            window.Close();
+        });
+    }
 }
