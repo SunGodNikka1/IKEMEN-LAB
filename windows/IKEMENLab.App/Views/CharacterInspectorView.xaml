@@ -76,8 +76,8 @@
                 </UniformGrid>
 
                 <!-- ============ Tools ============ -->
-                <StackPanel Orientation="Horizontal" Margin="0,20,0,0"
-                            Visibility="{Binding CanShowTools, Converter={StaticResource BoolToVis}}">
+                <WrapPanel Margin="0,20,0,0"
+                           Visibility="{Binding CanShowTools, Converter={StaticResource BoolToVis}}">
                     <Button Content="Inspect Sprites&#x2026;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,0"
                             Command="{Binding OpenSpritesCommand}" CommandParameter="{Binding Row}"
                             AutomationProperties.Name="Inspect Sprites"/>
@@ -88,7 +88,7 @@
                             Command="{Binding OpenXRayCommand}" CommandParameter="{Binding Row}"
                             ToolTip="Abilities, triggers, state graph, variables, helpers and animations of this character"
                             AutomationProperties.Name="Open Character X-Ray"/>
-                </StackPanel>
+                </WrapPanel>
 
                 <!-- ============ Attributes ============ -->
                 <DockPanel Margin="0,28,0,0">

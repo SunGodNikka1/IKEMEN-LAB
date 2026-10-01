@@ -51,6 +51,18 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         }
 
         _held?.Dispose();
+
+        // The transcript was only ever accumulated in a list and then dropped, so a scripted run left no
+        // record to assert on. Write it beside the script so an automated run can verify what happened.
+        try
+        {
+            var logPath = Path.ChangeExtension(scriptPath, ".log");
+            await File.WriteAllLinesAsync(logPath, _log);
+        }
+        catch (Exception ex)
+        {
+            _log.Add("! could not write log: " + ex.Message);
+        }
     }
 
     private async Task ExecuteAsync(string verb, string[] p, string rest)
@@ -134,6 +146,9 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
                 break;
             case "sleep":
                 await Task.Delay(int.Parse(p[1]));
+                break;
+            case "char-tools":
+                CharTools();
                 break;
             case "dump":
                 Dump(rest);
@@ -678,4 +693,23 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
         using var stream = File.Create(path);
         encoder.Save(stream);
     }
+
+    /// <summary>char-tools - list the action buttons the selected character detail panel actually renders,
+    /// with the command each one is bound to. A build must be able to prove the X-Ray entry point exists
+    /// and is invokable, not merely that the window type is present in the assembly.</summary>
+    private void CharTools()
+    {
+        var inspector = Descendants(window).OfType<Views.CharacterInspectorView>().FirstOrDefault()
+            ?? throw new InvalidOperationException("The character detail panel is not on screen");
+        var buttons = Descendants(inspector).OfType<System.Windows.Controls.Button>().ToList();
+        if (buttons.Count == 0) throw new InvalidOperationException("The character detail panel rendered no actions");
+        _log.Add($"  char-tools: {buttons.Count} action(s)");
+        foreach (var b in buttons)
+        {
+            var name = System.Windows.Automation.AutomationProperties.GetName(b);
+            var can = b.Command?.CanExecute(b.CommandParameter);
+            _log.Add($"    name=[{name}] visible={b.IsVisible} w={b.ActualWidth:F0} right={b.ActualWidth + b.TranslatePoint(new System.Windows.Point(0, 0), inspector).X:F0} panelW={inspector.ActualWidth:F0} bound={b.Command is not null} canExecute={can}");
+        }
+    }
 }
+
