@@ -210,7 +210,28 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
             case "xray-shot":
                 XRayShot(rest);
                 break;
-            case "xray-combos-find":
+            case "playback-play":
+    PlaybackPlay(rest);
+    break;
+case "playback-cancel":
+    PlaybackCancel();
+    break;
+case "playback-replay":
+    PlaybackReplay();
+    break;
+case "playback-status":
+    PlaybackStatus();
+    break;
+case "playback-wait":
+    await PlaybackWait(rest);
+    break;
+case "playback-inspect":
+    PlaybackAction(p => p.InspectFailureCommand, "InspectFailure");
+    break;
+case "playback-trace":
+    PlaybackAction(p => p.ViewTraceCommand, "ViewTrace");
+    break;
+case "xray-combos-find":
                 ComboFind();
                 break;
             case "xray-combos-config":
@@ -711,5 +732,126 @@ public sealed class QaScriptRunner(MainViewModel main, Window window)
             _log.Add($"    name=[{name}] visible={b.IsVisible} w={b.ActualWidth:F0} right={b.ActualWidth + b.TranslatePoint(new System.Windows.Point(0, 0), inspector).X:F0} panelW={inspector.ActualWidth:F0} bound={b.Command is not null} canExecute={can}");
         }
     }
+
+    // ---------------------------------------------------------------- Combo Playback (M4)
+
+    private ComboPlaybackPanel Playback() => ComboLens().Playback;
+
+    /// <summary>playback-play [engine|dlls|dummy|stage] - configure the real setup model then invoke the real Play command.
+    /// Fire-and-forget on purpose: a script has to be able to cancel, switch route or close the window while the engine runs.</summary>
+    private void PlaybackPlay(string rest)
+    {
+        var panel = Playback();
+        var parts = rest.Split('|', StringSplitOptions.TrimEntries);
+        if (parts.Length > 0 && parts[0].Length > 0) panel.EnginePath = parts[0];
+        if (parts.Length > 1) panel.EngineDlls = parts[1];
+        if (parts.Length > 2) panel.Dummy = parts[2];
+        if (parts.Length > 3) panel.Stage = parts[3];
+        if (panel.CurrentRouteKey.Length == 0)
+            throw new InvalidOperationException("playback-play needs a selected route; use xray-combo-route first");
+        if (!panel.PlayCommand.CanExecute(null))
+            throw new InvalidOperationException("playback-play refused: setup not ready, or a run is already active");
+        panel.PlayCommand.Execute(null);
+        _log.Add($"  playback-play: invoked for route {panel.CurrentRouteKey}");
+    }
+
+    private void PlaybackCancel()
+    {
+        var panel = Playback();
+        if (!panel.IsBusy) { _log.Add("  playback-cancel: unavailable, no run is active"); return; }
+        _log.Add(panel.RequestCancel()
+            ? "  playback-cancel: accepted"
+            : "  playback-cancel: refused, the result was already committed");
+    }
+
+    private void PlaybackReplay()
+    {
+        var panel = Playback();
+        if (!panel.ReplayCommand.CanExecute(null))
+            throw new InvalidOperationException("playback-replay refused: no recorded run for the selected route");
+        var before = panel.Outcome?.Record.Id ?? string.Empty;
+        panel.ReplayCommand.Execute(null);
+        _log.Add($"  playback-replay: invoked, previous run id {before}");
+    }
+
+    /// <summary>Invoke an existing panel command the way its button does, refusing when the button would be disabled.</summary>
+    private void PlaybackAction(Func<ComboPlaybackPanel, System.Windows.Input.ICommand> pick, string name)
+    {
+        var panel = Playback();
+        var command = pick(panel);
+        if (!command.CanExecute(null))
+            throw new InvalidOperationException($"playback-{name.ToLowerInvariant()} refused: the command is disabled for this route");
+        command.Execute(null);
+        _log.Add($"  playback-{name.ToLowerInvariant()}: invoked");
+    }
+
+
+    /// <summary>playback-status - one machine-readable key=value block so a script can assert without parsing prose.</summary>
+    private void PlaybackStatus()
+    {
+        var p = Playback();
+        var r = p.Outcome?.Record;
+        _log.Add($"  status.selectedRouteKey={p.CurrentRouteKey}");
+        _log.Add($"  status.runRouteKey={p.RunRouteKey}");
+        _log.Add($"  status.runId={r?.Id ?? string.Empty}");
+        _log.Add($"  status.sessionState={p.SessionState}");
+        _log.Add($"  status.phase={p.SessionPhase}");
+        _log.Add($"  status.isBusy={p.IsBusy}");
+        _log.Add($"  status.verdict={r?.Status ?? string.Empty}");
+        _log.Add($"  status.reason={r?.Reason ?? string.Empty}");
+        _log.Add($"  status.failedStep={r?.FailedStep?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty}");
+        _log.Add($"  status.hasResult={p.HasResult}");
+        _log.Add($"  status.showFailure={p.ShowFailure}");
+        _log.Add($"  status.canPlay={p.PlayCommand.CanExecute(null)}");
+        _log.Add($"  status.canCancel={p.CancelCommand.CanExecute(null)}");
+        _log.Add($"  status.canReplay={p.ReplayCommand.CanExecute(null)}");
+        _log.Add($"  status.canInspect={p.CanInspect}");
+        _log.Add($"  status.canViewTrace={p.ViewTraceCommand.CanExecute(null)}");
+        _log.Add($"  status.recordDirectory={r?.Directory ?? string.Empty}");
+        _log.Add($"  status.tracePath={r?.TracePath ?? string.Empty}");
+        _log.Add($"  status.enginePath={p.EnginePath}");
+        _log.Add($"  status.engineDlls={p.EngineDlls}");
+        _log.Add($"  status.recordedEngineSha={r?.EngineSha256 ?? string.Empty}");
+        _log.Add($"  status.engineSource={p.Outcome?.Report.EngineSource ?? string.Empty}");
+        _log.Add($"  status.engineVersion={p.Outcome?.Report.EngineVersion ?? string.Empty}");
+        _log.Add($"  status.dummy={r?.Dummy ?? string.Empty}");
+        _log.Add($"  status.stage={r?.Stage ?? string.Empty}");
+        _log.Add($"  status.notificationsApplied={p.NotificationsApplied}");
+        _log.Add($"  status.notificationsDropped={p.NotificationsDropped}");
+        _log.Add($"  status.sessionClosed={p.SessionIsClosed}");
+        _log.Add($"  status.error={p.SessionError}");
+        _log.Add($"  status.setupSummary={p.SetupSummary}");
+    }
+
+    /// <summary>playback-wait &lt;running|verdict|idle|phase=NAME&gt; [timeoutMs] - bounded; always resolves or throws.</summary>
+    private async Task PlaybackWait(string rest)
+    {
+        var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var what = parts.ElementAtOrDefault(0) ?? "verdict";
+        var ms = parts.Length > 1 && int.TryParse(parts[1], out var n) ? n : 180000;
+        var until = DateTime.UtcNow.AddMilliseconds(ms);
+        while (DateTime.UtcNow < until)
+        {
+            var p = Playback();
+            var hit = what switch
+            {
+                "running" => p.SessionState == "Running",
+                "idle" => p.SessionState == "Idle",
+                "verdict" => p.HasResult || p.SessionState is "Cancelled" or "Error",
+                var s when s.StartsWith("phase=", StringComparison.OrdinalIgnoreCase) =>
+                    p.SessionPhase.Contains(s["phase=".Length..], StringComparison.OrdinalIgnoreCase),
+                _ => throw new InvalidOperationException($"unknown playback-wait condition '{what}'")
+            };
+            if (hit)
+            {
+                _log.Add($"  playback-wait: {what} satisfied (state={p.SessionState} phase={p.SessionPhase})");
+                return;
+            }
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException($"playback-wait timed out after {ms}ms waiting for '{what}' (state={Playback().SessionState} phase={Playback().SessionPhase})");
+    }
 }
+
 

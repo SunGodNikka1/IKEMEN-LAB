@@ -78,6 +78,22 @@ public sealed class ComboPlaybackPanel : ObservableObject
     /// <summary>The route the user has selected right now. Every result and result action below is scoped to the route the run belonged to.</summary>
     private string? SelectedKey => _lens.CurrentRoute?.Route.Key;
 
+    // QA status passthroughs. The panel already proxies IsBusy/HasResult/Headline; the QA harness needs the run identity
+    // and the session phase to assert on, so expose them read-only rather than letting QA reach into the session.
+
+    /// <summary>The route key the lens has selected right now; empty when no route is selected.</summary>
+    public string CurrentRouteKey => _lens.CurrentRoute?.Route.Key ?? string.Empty;
+    /// <summary>The route key of the run this session actually played; empty before any run.</summary>
+    public string RunRouteKey => _session.RunRouteKey ?? string.Empty;
+    public string SessionState => _session.State.ToString();
+    public string SessionPhase => _session.Phase;
+    public string SessionError => _session.Error ?? string.Empty;
+    public PlaybackRequest? LastRun => _session.Last;
+    public PlaybackOutcome? Outcome => _session.Outcome;
+    public bool SessionIsClosed => _session.IsClosed;
+
+    /// <summary>Requests cancellation exactly as the Cancel button does; false when the committed result already won.</summary>
+    public bool RequestCancel() => _session.Cancel();
     public bool IsBusy => _session.IsBusy;
     public bool HasResult => _session.HasResultFor(SelectedKey);
     public bool CanInspect => _session.CanInspectFor(SelectedKey);
@@ -252,3 +268,4 @@ public sealed class ComboPlaybackPanel : ObservableObject
         CommandManager.InvalidateRequerySuggested();
     }
 }
+
