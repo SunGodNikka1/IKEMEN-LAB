@@ -12,11 +12,20 @@ public interface IEngineRunner
     EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout);
 }
 
-/// <summary>Launches the sandbox's own copy of the engine, working directory = the sandbox, killed when the timeout passes.</summary>
-public sealed class ProcessEngineRunner : IEngineRunner
+/// <summary>A runner that can also be stopped from outside (the app's Cancel button): the engine is killed and the call throws <see cref="OperationCanceledException"/>.</summary>
+public interface ICancellableEngineRunner : IEngineRunner
 {
-    public EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout)
+    EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout, CancellationToken cancel);
+}
+
+/// <summary>Launches the sandbox's own copy of the engine, working directory = the sandbox, killed when the timeout passes or the run is cancelled.</summary>
+public sealed class ProcessEngineRunner : ICancellableEngineRunner
+{
+    public EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout) => Run(sandbox, timeout, CancellationToken.None);
+
+    public EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout, CancellationToken cancel)
     {
+        cancel.ThrowIfCancellationRequested();
         if (!File.Exists(sandbox.ExePath)) return new EngineRunResult(null, false, $"The sandbox has no engine executable at {sandbox.ExePath}.");
         var psi = new ProcessStartInfo(sandbox.ExePath) { WorkingDirectory = sandbox.Root, UseShellExecute = false };
         foreach (var a in sandbox.Arguments) psi.ArgumentList.Add(a);
@@ -24,9 +33,19 @@ public sealed class ProcessEngineRunner : IEngineRunner
         {
             using var p = Process.Start(psi);
             if (p is null) return new EngineRunResult(null, false, "The engine process did not start.");
-            if (p.WaitForExit(timeout)) return new EngineRunResult(p.ExitCode, false, null);
-            try { p.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* already gone */ }
-            return new EngineRunResult(null, true, null);
+            // Poll so a Cancel is honoured within a fraction of a second without a second thread owning the process.
+            var deadline = DateTime.UtcNow + timeout;
+            while (!p.WaitForExit(200))
+            {
+                var cancelled = cancel.IsCancellationRequested;
+                if (!cancelled && DateTime.UtcNow < deadline) continue;
+                try { p.Kill(entireProcessTree: true); } catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception) { /* already gone */ }
+                p.WaitForExit(2000);
+                if (cancelled) throw new OperationCanceledException(cancel);
+                return new EngineRunResult(null, true, null);
+            }
+
+            return new EngineRunResult(p.ExitCode, false, null);
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
@@ -35,28 +54,51 @@ public sealed class ProcessEngineRunner : IEngineRunner
     }
 }
 
+/// <summary>What a caller can still read before the sandbox is deleted.</summary>
+public sealed record VerifyArtifacts(InputPlan Plan, string SandboxRoot, string TracePath, string? RawTrace);
+
 public sealed record VerifyRunRequest(
     SandboxRequest Sandbox,
     TimeSpan Timeout,
-    bool KeepSandbox = false);
+    bool KeepSandbox = false)
+{
+    /// <summary>Phase names as the run advances: planning, preparing, running, judging. For a progress display only.</summary>
+    public Action<string>? Progress { get; init; }
+    /// <summary>Called with the plan and the raw trace after the engine exits and before the sandbox is deleted.</summary>
+    public Action<VerifyArtifacts>? Collect { get; init; }
+    public CancellationToken Cancel { get; init; }
+}
 
-public sealed record VerifyRunResult(VerificationReport Report, string? SandboxPath, string? TracePath, EngineRunResult Engine);
+public sealed record VerifyRunResult(VerificationReport Report, string? SandboxPath, string? TracePath, EngineRunResult Engine)
+{
+    public InputPlan? Plan { get; init; }
+    public TraceLog? Log { get; init; }
+}
 
 /// <summary>Route → plan → disposable sandbox → engine → trace → verdict. The one path that can produce a RuntimeVerified route.</summary>
 public static class VerifyRunner
 {
     public static VerifyRunResult Run(CandidateGraph graph, ComboRoute route, VerifyRunRequest request, IEngineRunner runner, PlanOptions? planOptions = null)
     {
+        request.Progress?.Invoke("planning");
+        request.Cancel.ThrowIfCancellationRequested();
         var planned = InputPlanner.Plan(graph, route, planOptions);
         if (planned.Plan is null) throw new InvalidOperationException(planned.RefusedReason);
 
+        request.Progress?.Invoke("preparing");
         var sandboxRequest = request.Sandbox with { Plan = planned.Plan };
         var sandbox = RuntimeSandbox.Create(sandboxRequest);
         var keep = request.KeepSandbox;
         try
         {
-            var engine = runner.Run(sandbox, request.Timeout);
-            var log = File.Exists(sandbox.TracePath) ? TraceReader.ReadFile(sandbox.TracePath) : new TraceLog { Events = [], Issues = [] };
+            request.Progress?.Invoke("running");
+            var engine = runner is ICancellableEngineRunner cancellable
+                ? cancellable.Run(sandbox, request.Timeout, request.Cancel)
+                : runner.Run(sandbox, request.Timeout);
+            request.Progress?.Invoke("judging");
+            var raw = File.Exists(sandbox.TracePath) ? File.ReadAllText(sandbox.TracePath) : null;
+            request.Collect?.Invoke(new VerifyArtifacts(planned.Plan, sandbox.Root, sandbox.TracePath, raw));
+            var log = raw is null ? new TraceLog { Events = [], Issues = [] } : TraceReader.ReadFile(sandbox.TracePath);
             var report = RouteVerifier.Verify(planned.Plan, log);
             var notes = report.Notes.ToList();
             notes.AddRange(sandbox.Notes);
@@ -65,7 +107,7 @@ public static class VerifyRunner
             if (engine.Error is not null) notes.Add("Engine: " + engine.Error);
             if (engine.TimedOut) notes.Add("The engine was stopped after the timeout.");
             report = report with { Notes = notes };
-            return new VerifyRunResult(report, keep ? sandbox.Root : null, keep ? sandbox.TracePath : null, engine);
+            return new VerifyRunResult(report, keep ? sandbox.Root : null, keep ? sandbox.TracePath : null, engine) { Plan = planned.Plan, Log = log };
         }
         finally
         {

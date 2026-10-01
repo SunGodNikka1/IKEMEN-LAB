@@ -19,7 +19,7 @@ DEF [Files] ─▶ CMD · CNS · ST · AIR · common1.cns · SFF
      WPF lenses     ikemenlab xray …        runtime traces (spike) attach by state number
 ```
 
-Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md).**
+Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md); accepted in [xray-milestone-3-acceptance.md](xray-milestone-3-acceptance.md).** **Milestone 4 (Play / Verify Combo from the Combos lens) is in [xray-m4-play-combo.md](xray-m4-play-combo.md).**
 
 ## The model
 

@@ -66,6 +66,22 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="PlaybackBanner" TargetType="Border">
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Combos.Playback.ResultKind}" Value="Verified">
+                    <Setter Property="Background" Value="{DynamicResource PositiveBackgroundBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Combos.Playback.ResultKind}" Value="Failed">
+                    <Setter Property="Background" Value="{DynamicResource NegativeBackgroundBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Combos.Playback.ResultKind}" Value="Inconclusive">
+                    <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="LensCombos" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding ActiveLens}" Value="Combos">
@@ -430,6 +446,7 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <StackPanel Grid.Row="0" Orientation="Horizontal">
@@ -455,7 +472,56 @@
                                          ItemsSource="{Binding Combos.Routes}" SelectedItem="{Binding Combos.SelectedRoute, Mode=TwoWay}"
                                          ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Candidate routes"/>
                             </DockPanel>
-                            <DockPanel Grid.Row="3" Margin="0,8,0,0">
+                            <!-- Milestone 4: play the selected candidate route in a disposable IKEMEN match and bring the verdict back here -->
+                            <StackPanel Grid.Row="3" Margin="0,8,0,0" x:Name="PlaybackBar">
+                                <WrapPanel>
+                                    <Button Content="▶ Play Combo" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.PlayCommand}"
+                                            AutomationProperties.Name="Play the selected combo in IKEMEN" ToolTip="Plays the selected candidate route in a disposable sandbox match and reports Verified, Failed or Inconclusive."/>
+                                    <Button Content="Cancel" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.CancelCommand}"
+                                            Visibility="{Binding Combos.Playback.IsBusy, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Cancel playback"/>
+                                    <Button Content="Replay" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.ReplayCommand}"
+                                            AutomationProperties.Name="Replay the last combo"/>
+                                    <Button Content="Inspect Failure" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.InspectFailureCommand}"
+                                            Visibility="{Binding Combos.Playback.CanInspect, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Inspect why the combo failed"/>
+                                    <Button Content="View Trace" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Combos.Playback.ViewTraceCommand}"
+                                            Visibility="{Binding Combos.Playback.HasResult, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="View the recorded trace"/>
+                                    <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Combos.Playback.ToggleSetupCommand}"
+                                            AutomationProperties.Name="Playback setup"/>
+                                </WrapPanel>
+                                <Border Style="{StaticResource PlaybackBanner}" Margin="0,0,0,6"
+                                        Visibility="{Binding Combos.Playback.HasStatus, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Playback result">
+                                        <Run Text="{Binding Combos.Playback.ResultGlyph, Mode=OneWay}" FontWeight="Bold"/><Run Text="  "/><Run Text="{Binding Combos.Playback.Headline, Mode=OneWay}"/>
+                                    </TextBlock>
+                                </Border>
+                                <Border Style="{StaticResource PlaybackBanner}" Margin="0,0,0,6"
+                                        Visibility="{Binding Combos.Playback.ShowFailure, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Combos.Playback.FailureWhy}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="{Binding Combos.Playback.FailureHints}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel Visibility="{Binding Combos.Playback.ShowSetup, Converter={StaticResource BoolToVis}}" Margin="0,0,0,4">
+                                    <TextBlock Text="{Binding Combos.Playback.SetupSummary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="{DynamicResource TextTertiary}"/>
+                                    <TextBlock Text="X-Ray engine (the installed engine cannot receive scripted input)" Style="{StaticResource SectionLabel}"/>
+                                    <DockPanel Margin="0,2,0,6">
+                                        <Button DockPanel.Dock="Right" Content="Browse…" Style="{StaticResource SecondaryButton}" Margin="6,0,0,0" Command="{Binding Combos.Playback.BrowseEngineCommand}"
+                                                AutomationProperties.Name="Browse for the X-Ray engine"/>
+                                        <TextBox Style="{StaticResource FieldBox}" Text="{Binding Combos.Playback.EnginePath, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="X-Ray engine path"/>
+                                    </DockPanel>
+                                    <WrapPanel>
+                                        <StackPanel Margin="0,0,12,0">
+                                            <TextBlock Text="Dummy character (chars/ folder, blank = automatic)" Style="{StaticResource SectionLabel}"/>
+                                            <TextBox Style="{StaticResource FieldBox}" Width="200" Text="{Binding Combos.Playback.Dummy, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Dummy character"/>
+                                        </StackPanel>
+                                        <StackPanel>
+                                            <TextBlock Text="Stage (e.g. stages/kfm.def, blank = automatic)" Style="{StaticResource SectionLabel}"/>
+                                            <TextBox Style="{StaticResource FieldBox}" Width="200" Text="{Binding Combos.Playback.Stage, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Stage"/>
+                                        </StackPanel>
+                                    </WrapPanel>
+                                </StackPanel>
+                            </StackPanel>
+                            <DockPanel Grid.Row="4" Margin="0,8,0,0">
                                 <TextBlock DockPanel.Dock="Top" Text="Steps of the selected route" Style="{StaticResource SectionLabel}" Margin="0,0,0,4"/>
                                 <ListBox Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
                                          ItemsSource="{Binding Combos.RouteSteps}" SelectedItem="{Binding Combos.SelectedStep, Mode=TwoWay}"

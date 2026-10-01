@@ -1,0 +1,37 @@
+<Window x:Class="IKEMENLab.App.Views.PlaybackTraceWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Combo trace" Height="620" Width="1000" MinHeight="360" MinWidth="520"
+        WindowStartupLocation="CenterOwner" ResizeMode="CanResizeWithGrip"
+        Background="{DynamicResource WindowBackgroundBrush}">
+    <DockPanel Margin="16">
+        <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+            <TextBlock Text="{Binding Subtitle}" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondary}"/>
+            <WrapPanel Margin="0,8,0,0">
+                <Button Content="Open record folder" Style="{StaticResource SecondaryButton}" Command="{Binding OpenFolderCommand}"
+                        AutomationProperties.Name="Open the folder holding the trace, plan and report"/>
+                <TextBlock Text="{Binding TracePath}" FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextTertiary}"
+                           TextWrapping="Wrap"/>
+            </WrapPanel>
+        </StackPanel>
+        <DataGrid x:Name="TraceGrid" ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected, Mode=TwoWay}"
+                  AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column" GridLinesVisibility="None"
+                  CanUserAddRows="False" SelectionMode="Single" FontSize="12" RowHeaderWidth="0"
+                  Background="Transparent" BorderThickness="0" Foreground="{DynamicResource TextPrimary}"
+                  AutomationProperties.Name="Trace frames">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Frame" Binding="{Binding Frame}" Width="64"/>
+                <DataGridTextColumn Header="P1 state" Binding="{Binding P1State}" Width="70"/>
+                <DataGridTextColumn Header="P1 move" Binding="{Binding P1MoveType}" Width="64"/>
+                <DataGridTextColumn Header="P1 ctrl" Binding="{Binding P1Ctrl}" Width="60"/>
+                <DataGridTextColumn Header="P1 hit" Binding="{Binding P1MoveHit}" Width="56"/>
+                <DataGridTextColumn Header="P2 state" Binding="{Binding P2State}" Width="70"/>
+                <DataGridTextColumn Header="P2 move" Binding="{Binding P2MoveType}" Width="68"/>
+                <DataGridTextColumn Header="P2 life" Binding="{Binding P2Life}" Width="64"/>
+                <DataGridTextColumn Header="Dist" Binding="{Binding Distance}" Width="56"/>
+                <DataGridTextColumn Header="Driver / input" Binding="{Binding Notes}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>

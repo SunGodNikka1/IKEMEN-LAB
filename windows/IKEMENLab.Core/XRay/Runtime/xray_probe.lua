@@ -257,7 +257,7 @@ local function finish(reason)
 	emit(O("type", "end", "frame", tick, "reason", reason))
 	local esc_fn = G("esc")
 	if esc_fn then pcall(esc_fn, true) end
-	exitCountdown = 60
+	exitCountdown = tonumber(cfg.lingerFrames) or 60
 end
 
 local function sample()

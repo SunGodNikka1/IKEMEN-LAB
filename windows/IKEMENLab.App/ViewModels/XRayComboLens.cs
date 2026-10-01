@@ -4,6 +4,7 @@ using System.Windows.Input;
 using IKEMENLab.App.Infrastructure;
 using IKEMENLab.Core.XRay.Combo;
 using IKEMENLab.Core.XRay.Model;
+using IKEMENLab.Core.XRay.Verify;
 
 namespace IKEMENLab.App.ViewModels;
 
@@ -28,11 +29,32 @@ public sealed class ComboLens : XRayLens
     private string _routeStatus = "Choose options and press Find routes.";
     private string _readiness = string.Empty;
     private IReadOnlyList<ComboRoute> _routes = [];
+    private VerificationReport? _report;
 
     public ComboLens(XRayViewModel owner) : base(owner)
     {
         FindRoutesCommand = new AsyncRelayCommand(FindAsync, () => _graph is not null && !_busy);
+        Playback = new ComboPlaybackPanel(owner, this);
     }
+
+    /// <summary>Play / Replay / Inspect Failure / View Trace for the selected route.</summary>
+    public ComboPlaybackPanel Playback { get; }
+    public CandidateGraph? Graph => _graph;
+
+    /// <summary>The selected route and its display title, or null when none is selected.</summary>
+    public (ComboRoute Route, string Title)? CurrentRoute =>
+        _selectedRoute is { } row && _routes.FirstOrDefault(r => r.Key == row.Id) is { } route ? (route, row.Title) : null;
+
+    /// <summary>Shows a finished run's verdict on the steps of the route it belongs to (✓ observed, ✗ failed here, · not reached).</summary>
+    public void ApplyVerdicts(VerificationReport? report)
+    {
+        _report = report;
+        ShowSteps(CurrentRoute?.Route);
+    }
+
+    /// <summary>Selects a step row (1-based) so the failing step is highlighted and shown in every lens.</summary>
+    public void SelectStep(int index, string? fromStateId, string? toStateId) =>
+        SelectedStep = index >= 1 && index <= RouteSteps.Count ? RouteSteps[index - 1] : SelectedStep;
 
     public ObservableCollection<XRayRow> Edges { get; } = [];
     public ObservableCollection<XRayRow> Routes { get; } = [];
@@ -76,6 +98,7 @@ public sealed class ComboLens : XRayLens
         {
             if (!SetProperty(ref _selectedRoute, value)) return;
             ShowSteps(value is null ? null : _routes.FirstOrDefault(r => r.Key == value.Id));
+            Playback.OnRouteChanged();
         }
     }
 
@@ -238,10 +261,15 @@ public sealed class ComboLens : XRayLens
     {
         RouteSteps.Clear();
         if (route is null) return;
-        foreach (var s in route.Steps)
+        var verdicts = _report is { } rep && rep.RouteKey == route.Key ? rep.Steps : null;
+        foreach (var (s, i) in route.Steps.Select((s, i) => (s, i)))
         {
-            RouteSteps.Add(new XRayRow(s.Move.StateId, $"{KindText(s.Edge.Kind)} → {s.Move.Name}" + (s.Damage is { } d ? $"  ({d:0.##} dmg)" : string.Empty),
-                Describe(s.Edge) + (s.Move.PowerCost > 0 ? $" · costs {s.Move.PowerCost:0}" : string.Empty), s.Edge.Confidence, tooltip: Tooltip(s.Edge)));
+            var mark = verdicts is not null && i < verdicts.Count
+                ? verdicts[i].Outcome switch { StepOutcome.Observed => "✓ ", StepOutcome.NotObserved => "✗ ", _ => "· " }
+                : string.Empty;
+            var seen = verdicts is not null && i < verdicts.Count && verdicts[i].Detail is { Length: > 0 } d ? " — " + d : string.Empty;
+            RouteSteps.Add(new XRayRow(s.Move.StateId, $"{mark}{KindText(s.Edge.Kind)} → {s.Move.Name}" + (s.Damage is { } dmg ? $"  ({dmg:0.##} dmg)" : string.Empty),
+                Describe(s.Edge) + (s.Move.PowerCost > 0 ? $" · costs {s.Move.PowerCost:0}" : string.Empty) + seen, s.Edge.Confidence, tooltip: Tooltip(s.Edge)));
         }
 
         foreach (var note in route.Notes.Take(4))

@@ -8,6 +8,8 @@ using IKEMENLab.App.Services;
 using IKEMENLab.App.Views;
 using IKEMENLab.Core.Characters;
 using IKEMENLab.Core.Models;
+using IKEMENLab.Core.Settings;
+using IKEMENLab.Core.XRay.Playback;
 using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
 using IKEMENLab.Core.XRay.Source;
@@ -43,10 +45,12 @@ public sealed class XRayViewModel : ObservableObject
     private XRayLensKind _activeLens = XRayLensKind.Atlas;
     private IReadOnlyList<XRayRow> _searchResults = [];
 
-    public XRayViewModel(string root, CharacterEntry entry, string displayName)
+    public XRayViewModel(string root, CharacterEntry entry, string displayName, ISettingsStore? settings = null, ComboPlaybackService? playback = null)
     {
         _root = root;
         _entry = entry;
+        Settings = settings ?? new JsonSettingsStore();
+        PlaybackService = playback ?? new ComboPlaybackService();
         CharacterName = displayName;
         Atlas = new AbilityAtlasLens(this);
         Triggers = new TriggerExplorerLens(this);
@@ -69,6 +73,10 @@ public sealed class XRayViewModel : ObservableObject
     }
 
     public string CharacterName { get; }
+    public string Root => _root;
+    public CharacterEntry Entry => _entry;
+    public ISettingsStore Settings { get; }
+    public ComboPlaybackService PlaybackService { get; }
     public XRayLensKind ActiveLens { get => _activeLens; set => SetProperty(ref _activeLens, value); }
     public string Legend => ConfidenceStyle.Legend;
     public SemanticIndex? Index => _index;
