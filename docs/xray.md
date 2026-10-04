@@ -52,6 +52,28 @@ Each controller also has a **gate**: `triggerall` lines AND at least one `trigge
 (commands, contact, power, time, AnimElem, ctrl, state/move type, AILevel, and `otherConditions` = how many conjuncts are not a recognised shape).
 `otherConditions > 0` means the facets are incomplete; consumers must not treat them as the whole condition.
 
+## Your names (Phase 1: semantic name overlay)
+
+You can give any state, ability, command, animation, helper, projectile or variable a human name ("State 66345" → "Revolver Shot").
+X-Ray's own name and the id stay as technical metadata; ids, relationships, evidence and confidence never change.
+
+- **One resolver.** `SemanticIndex.NameOf(id)` / `SemanticIndex.Names` (`IKEMENLab.Core.XRay.Names.SemanticNames`) is the only place a
+  label is decided. Lenses, the details panel, search, Explain, the Combos lens and route titles, trace rows, diagnostics and the CLI all use it.
+- **Linked names.** Naming an ability also names its entry state, and the reverse, unless that object has its own name (`nameSource = linked`).
+- **Storage.** `%LOCALAPPDATA%\IKEMEN Lab\xray\names\<hash of the character folder>.json`, written atomically. Character files are never written.
+- **Fingerprint protection.** Each name stores a content fingerprint (`NameFingerprint`) of what the object *is*. For a state that is the Statedef
+  header (type, movetype, physics, anim, ctrl, poweradd …) plus its HitDef attributes. Line moves, comments and AI conditions edited inside
+  the state do not invalidate it; a new animation, state type or attack attribute does. A command's fingerprint is its steps, time and buffer.
+  An animation's is its frame sprites. A helper's is its parameters and states. A variable's is the states that write it.
+- **Review, never guess.** A name whose object changed is **Stale**, and one whose object vanished (e.g. renumbered) is **Orphaned**. Neither is shown
+  until you decide. X-Ray → details panel → *Names to review*: **Keep on changed object**, **Move to selected**, or **Discard**.
+  Unchanged objects with the same fingerprint are listed as suggestions only.
+- **Diagnostics** freeze the names in effect when a Play attempt starts (`names` block, with X-Ray's name beside each). The verifier's own verdict
+  text keeps state numbers: names are presentation, not evidence.
+- **CLI.** Every `ikemenlab xray` command shows names (`"name"` = your name, `"defaultName"` = X-Ray's, `"nameSource"`; a stale saved name adds
+  `"nameReview"`). `--no-names` turns them off. `ikemenlab xray names <character> [list|review|set <id> <name>|clear <id>|keep <id>|attach <old> <new>]`
+  manages them (`200` means `state:200`). `--names-store DIR` uses another store (tools/tests).
+
 ## Evidence confidence
 
 `StaticProven` · `Inferred` · `Unknown` (and `RuntimeVerified`, reserved and never emitted). The rules and the deterministic-vs-inferred table are in

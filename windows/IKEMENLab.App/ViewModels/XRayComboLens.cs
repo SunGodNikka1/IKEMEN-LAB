@@ -123,6 +123,22 @@ public sealed class ComboLens : XRayLens
         CommandManager.InvalidateRequerySuggested();
     }
 
+    /// <summary>
+    /// A rename keeps the candidate graph, the found routes, the selection and any played result: only the labels are redrawn
+    /// (rebuilding the graph would leave routes and a played result pointing at an older graph).
+    /// </summary>
+    public override void RefreshNames(SemanticIndex index)
+    {
+        if (_graph is null) return;
+        if (_center is not null) ShowEdges(index);
+        var selectedKey = _selectedRoute?.Id;
+        for (var i = 0; i < Routes.Count; i++)
+            if (_routes.FirstOrDefault(r => r.Key == Routes[i].Id) is { } route) Routes[i] = RouteRow(route);
+        _selectedRoute = Routes.FirstOrDefault(r => r.Id == selectedKey);
+        OnPropertyChanged(nameof(SelectedRoute));
+        ShowSteps(CurrentRoute?.Route);
+    }
+
     public override void OnSelection(SemanticIndex index, string? id, IReadOnlySet<string> related)
     {
         if (_graph is null || id is null) return;
@@ -159,13 +175,13 @@ public sealed class ComboLens : XRayLens
 
         Caption = move is null
             ? "Select a state"
-            : $"{move.Name}{(move.IsNeutral ? " (neutral)" : string.Empty)} — {edges.Count} candidate edge(s) out of it" +
+            : $"{MoveName(move)}{(move.IsNeutral ? " (neutral)" : string.Empty)} — {edges.Count} candidate edge(s) out of it" +
               (move.Damage is { } d ? $" · {d:0.##}{(move.DamageExact ? string.Empty : "+")} damage" : string.Empty) +
               (move.PowerCost > 0 ? $" · costs {move.PowerCost:0} meter" : string.Empty);
 
         foreach (var e in edges.Take(300))
         {
-            var target = e.To == CandidateGraph.NeutralId ? "neutral" : _graph!.Move(e.To)?.Name ?? e.To;
+            var target = e.To == CandidateGraph.NeutralId ? "neutral" : (_graph!.Move(e.To) is { } m ? MoveName(m) : e.To);
             Edges.Add(new XRayRow(e.To == CandidateGraph.NeutralId ? e.Id : e.To, $"{KindText(e.Kind)} → {target}", Describe(e), e.Confidence,
                 tooltip: Tooltip(e)));
         }
@@ -233,15 +249,7 @@ public sealed class ComboLens : XRayLens
 
             Routes.Clear();
             RouteSteps.Clear();
-            foreach (var r in result.Routes)
-            {
-                var names = new List<string> { r.StartState == CandidateGraph.NeutralId ? string.Empty : ShortName(r.StartState) };
-                names.AddRange(r.Steps.Select(s => ShortName(s.Move.StateId)));
-                Routes.Add(new XRayRow(r.Key, string.Join(" → ", names.Where(n => n.Length > 0)),
-                    $"{r.DamageKnown:0.##}{(r.DamageComplete ? string.Empty : "+")} damage · {r.MeterSpent} meter · {r.UnmodelledCount} unmodelled" +
-                    (r.MinFrames is { } f ? $" · ≥ {f}f{(r.FramesComplete ? string.Empty : "?")}" : string.Empty),
-                    r.Confidence, tooltip: string.Join("\n", r.Notes)));
-            }
+            foreach (var r in result.Routes) Routes.Add(RouteRow(r));
 
             RouteStatus = result.Routes.Count == 0
                 ? "No candidate routes under these options. " + string.Join(" ", result.Warnings.Where(w => !w.StartsWith("Routes are candidates", StringComparison.Ordinal)))
@@ -255,7 +263,24 @@ public sealed class ComboLens : XRayLens
         }
     }
 
-    private string ShortName(string stateId) => stateId.StartsWith("state:", StringComparison.Ordinal) ? stateId["state:".Length..] : stateId;
+    private XRayRow RouteRow(ComboRoute r)
+    {
+        var names = new List<string> { r.StartState == CandidateGraph.NeutralId ? string.Empty : ShortName(r.StartState) };
+        names.AddRange(r.Steps.Select(s => ShortName(s.Move.StateId)));
+        return new XRayRow(r.Key, string.Join(" → ", names.Where(n => n.Length > 0)),
+            $"{r.DamageKnown:0.##}{(r.DamageComplete ? string.Empty : "+")} damage · {r.MeterSpent} meter · {r.UnmodelledCount} unmodelled" +
+            (r.MinFrames is { } f ? $" · ≥ {f}f{(r.FramesComplete ? string.Empty : "?")}" : string.Empty),
+            r.Confidence, tooltip: string.Join("\n", r.Notes));
+    }
+
+    /// <summary>Route titles: the user's name when the state has one, else the bare state number.</summary>
+    private string ShortName(string stateId) =>
+        _graph?.Index is { } index && index.Get(stateId) is not null && index.Names.IsRenamed(stateId) ? index.NameOf(stateId)
+        : stateId.StartsWith("state:", StringComparison.Ordinal) ? stateId["state:".Length..] : stateId;
+
+    /// <summary>A move's label through the shared resolver (the neutral pseudo-state keeps its own name).</summary>
+    private string MoveName(MoveInfo move) =>
+        _graph?.Index is { } index && index.Get(move.StateId) is not null ? index.NameOf(move.StateId) : move.Name;
 
     private void ShowSteps(ComboRoute? route)
     {
@@ -268,7 +293,7 @@ public sealed class ComboLens : XRayLens
                 ? verdicts[i].Outcome switch { StepOutcome.Observed => "✓ ", StepOutcome.NotObserved => "✗ ", _ => "· " }
                 : string.Empty;
             var seen = verdicts is not null && i < verdicts.Count && verdicts[i].Detail is { Length: > 0 } d ? " — " + d : string.Empty;
-            RouteSteps.Add(new XRayRow(s.Move.StateId, $"{mark}{KindText(s.Edge.Kind)} → {s.Move.Name}" + (s.Damage is { } dmg ? $"  ({dmg:0.##} dmg)" : string.Empty),
+            RouteSteps.Add(new XRayRow(s.Move.StateId, $"{mark}{KindText(s.Edge.Kind)} → {MoveName(s.Move)}" + (s.Damage is { } dmg ? $"  ({dmg:0.##} dmg)" : string.Empty),
                 Describe(s.Edge) + (s.Move.PowerCost > 0 ? $" · costs {s.Move.PowerCost:0}" : string.Empty) + seen, s.Edge.Confidence, tooltip: Tooltip(s.Edge)));
         }
 

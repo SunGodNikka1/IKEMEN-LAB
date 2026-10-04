@@ -89,6 +89,8 @@ internal static class RuntimeCommands
         if (located is null) return CliApp.FailWith(output, error, 3, $"Could not find a character DEF at '{opts.Positional[2]}'.");
 
         var index = CharacterSemanticIndexer.Build(located.Root, located.Entry);
+        if (!opts.Flag("no-names"))
+            IKEMENLab.Core.XRay.Names.CharacterNames.Load(CliApp.NamesStore(opts), index, Path.Combine(located.Root, located.Entry.FolderPath));
         var log = TraceReader.ReadFile(tracePath);
         var evidence = RuntimeLink.Associate(index, log);
 
@@ -140,6 +142,7 @@ internal static class RuntimeCommands
                 w.WriteNumber("player", s.Player);
                 w.WriteNumber("stateNo", s.StateNo);
                 if (s.ObjectId is null) w.WriteNull("object"); else w.WriteString("object", s.ObjectId);
+                if (s.ObjectId is not null && index.Names.IsRenamed(s.ObjectId)) w.WriteString("name", index.NameOf(s.ObjectId));
                 w.WriteNumber("firstFrame", s.FirstFrame);
                 w.WriteNumber("frames", s.Frames);
                 w.WriteBoolean("commonState", s.IsCommonState);

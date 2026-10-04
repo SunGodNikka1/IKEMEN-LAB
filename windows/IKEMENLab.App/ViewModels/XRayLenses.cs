@@ -52,7 +52,8 @@ public sealed class AbilityAtlasLens : XRayLens
             var order = Array.IndexOf(CategoryOrder, category);
             var label = a.Labels.FirstOrDefault(l => l.Category == LabelCategories.AbilityCategory);
             var entry = a.Prop("entry") switch { "ai" => "AI decision", "command+ai" => "command or AI", _ => "command" };
-            var row = new XRayRow(a.Id, a.Name, $"{entry} → {a.Prop("entryState")?.Replace("state:", "State ")} · {a.Prop("members")} states",
+            var technical = index.Names.IsRenamed(a.Id) ? $"{a.Name} · " : string.Empty;
+            var row = new XRayRow(a.Id, index.NameOf(a.Id), $"{technical}{entry} → {a.Prop("entryState")?.Replace("state:", "State ")} · {a.Prop("members")} states",
                 label?.Confidence ?? Confidence.Unknown, category, order < 0 ? 99 : order,
                 label is null ? "No category heuristic matched" : $"Category is inferred: {label.RuleId} · {EvidenceRules.Get(label.RuleId).Description}");
             _rows.Add(row);
@@ -136,7 +137,7 @@ public sealed class TriggerExplorerLens : XRayLens
             foreach (var c in list)
             {
                 var type = c.Prop("type") ?? "controller";
-                var targets = string.Join(", ", index.Outgoing(c.Id, RelationKind.ChangesState).Select(r => index.Get(r.To)?.Name ?? r.To));
+                var targets = string.Join(", ", index.Outgoing(c.Id, RelationKind.ChangesState).Select(r => index.NameOf(r.To)));
                 Controllers.Add(new XRayRow(c.Id, $"{Short(c.Id)}  {type}{(c.Prop("name") is { Length: > 0 } n ? " “" + n + "”" : string.Empty)}",
                     targets.Length > 0 ? "→ " + targets : FileLine(index, c.Source)));
             }
@@ -242,7 +243,7 @@ public sealed class TriggerExplorerLens : XRayLens
         {
             if (r.Kind is RelationKind.Contains or RelationKind.ReferencesCommand or RelationKind.GatedByPower or RelationKind.EntryPoint or RelationKind.ActiveAtFrame) continue;
             var target = index.Get(r.To);
-            then.Children.Add(new GateNode($"{Describe(r.Kind)} {target?.Name ?? r.To}", r.Prop("value") is { } v ? "value " + v : r.Prop("scope") is { } sc ? "scope " + sc : string.Empty,
+            then.Children.Add(new GateNode($"{Describe(r.Kind)} {(target is null ? r.To : index.NameOf(r.To))}", r.Prop("value") is { } v ? "value " + v : r.Prop("scope") is { } sc ? "scope " + sc : string.Empty,
                 r.Confidence, r.Evidence.FirstOrDefault()?.Source, r.To));
         }
 
@@ -392,7 +393,7 @@ public sealed class StateGraphLens : XRayLens
         foreach (var n in layout.Nodes)
         {
             var obj = index.Get(n.Id);
-            var name = obj?.Name ?? n.Id;
+            var name = index.NameOf(n.Id);
             var detail = new List<string>();
             if (obj?.Prop("p.type") is { } t) detail.Add(t);
             if (obj?.Prop("p.movetype") is { } m) detail.Add("move " + m);
@@ -437,7 +438,7 @@ public sealed class StateGraphLens : XRayLens
 
         CanvasWidth = layout.Width + margin * 2;
         CanvasHeight = layout.Height + margin * 2;
-        var centerName = index.Get(_center)?.Name ?? _center;
+        var centerName = index.NameOf(_center);
         Caption = $"{centerName} · {layout.Nodes.Count} states within {DepthText}" + (layout.Truncated ? " (trimmed)" : string.Empty)
                   + "   — white = ChangeState, red = victim, orange = attacker, blue = helper";
     }
@@ -524,7 +525,7 @@ public sealed class VariableMapLens : XRayLens
             var z = uses.Count(u => u.Relationship.Kind == RelationKind.ResetsVar);
             var name = v.Labels.FirstOrDefault(l => l.Category == LabelCategories.VariableName)?.Text;
             var confidence = v.Prop("dynamic") == "true" ? Confidence.Unknown : Confidence.StaticProven;
-            var row = new XRayRow(v.Id, v.Name, $"read {r} · written {w} · cleared {z}" + (name is null ? string.Empty : "   ◐ " + name),
+            var row = new XRayRow(v.Id, index.NameOf(v.Id), $"read {r} · written {w} · cleared {z}" + (name is null ? string.Empty : "   ◐ " + name),
                 confidence, tooltip: v.Prop("dynamic") == "true" ? "The index expression is not a literal, so which variable is touched is unknown" : "Index is a literal in the files");
             _rows.Add(row);
             _byId[v.Id] = row;
@@ -548,7 +549,7 @@ public sealed class VariableMapLens : XRayLens
     {
         Uses.Clear();
         var v = index.Get(variableId)!;
-        UsesHeader = $"{v.Name} — who touches it";
+        UsesHeader = $"{index.NameOf(v.Id)} — who touches it";
         Traits = string.Join("  ·  ", v.Labels.Select(l => "◐ " + l.Text));
         foreach (var u in index.VarUsage(variableId).OrderBy(u => u.Relationship.Kind).ThenBy(u => u.Controller.Id, StringComparer.Ordinal))
         {
@@ -557,7 +558,7 @@ public sealed class VariableMapLens : XRayLens
             var arg = u.Relationship.Prop("scopeArg");
             var detail = u.Relationship.Prop("value") is { } val ? $" = {val}" : u.Relationship.Prop("step") is { } st ? $" += {st}" : string.Empty;
             Uses.Add(new XRayRow(u.Controller.Id, $"{verb}{detail}  —  {u.Controller.Name}",
-                $"{u.State?.Name ?? "?"} · scope {scope}{(arg is null ? string.Empty : "(" + arg + ")")}",
+                $"{(u.State is null ? "?" : index.NameOf(u.State.Id))} · scope {scope}{(arg is null ? string.Empty : "(" + arg + ")")}",
                 u.Relationship.Confidence, tooltip: u.Relationship.Evidence.FirstOrDefault() is { } e ? $"{e.RuleId} · {EvidenceRules.Get(e.RuleId).Description}" : null));
         }
     }
@@ -608,20 +609,20 @@ public sealed class HelperTreeLens : XRayLens
         foreach (var helper in index.Of(ObjectKind.Helper).OrderBy(h => h.Id, StringComparer.Ordinal))
         {
             var role = string.Join("; ", helper.Labels.Select(l => l.Text));
-            var node = new TreeNodeVM(helper.Id, helper.Name + (helper.Prop("name") is { Length: > 0 } n ? $" “{n}”" : string.Empty),
+            var node = new TreeNodeVM(helper.Id, index.NameOf(helper.Id) + (helper.Prop("name") is { Length: > 0 } n ? $" “{n}”" : string.Empty),
                 role.Length > 0 ? "◐ " + role : string.Empty, null, expanded: true);
             foreach (var spawn in index.Incoming(helper.Id, RelationKind.SpawnsHelper))
                 node.Children.Add(new TreeNodeVM(spawn.From, "spawned by " + Where(index, spawn.From), GateShort(index, spawn.From), spawn.Confidence));
 
             foreach (var run in index.Outgoing(helper.Id, RelationKind.HelperRunsState))
             {
-                var state = new TreeNodeVM(run.To, "runs " + (index.Get(run.To)?.Name ?? run.To), string.Empty, run.Confidence, expanded: true);
+                var state = new TreeNodeVM(run.To, "runs " + (index.NameOf(run.To)), string.Empty, run.Confidence, expanded: true);
                 foreach (var ctrl in index.ControllersOf(run.To))
                 {
                     foreach (var hit in index.Outgoing(ctrl.Id, RelationKind.DefinesHitDef))
                         state.Children.Add(new TreeNodeVM(hit.To, "HitDef " + (index.Get(hit.To)?.Prop("p.attr") ?? string.Empty), "damage " + (index.Get(hit.To)?.Prop("p.damage") ?? "?"), hit.Confidence));
                     foreach (var w in index.Outgoing(ctrl.Id, RelationKind.WritesVar).GroupBy(r => r.To).Select(g => g.First()))
-                        state.Children.Add(new TreeNodeVM(w.To, "writes " + (index.Get(w.To)?.Name ?? w.To), "scope " + w.Prop("scope"), w.Confidence));
+                        state.Children.Add(new TreeNodeVM(w.To, "writes " + (index.NameOf(w.To)), "scope " + w.Prop("scope"), w.Confidence));
                     if (ctrl.Prop("type") is "bindtoroot" or "bindtoparent" or "bindtotarget" or "bind" or "destroyself")
                         state.Children.Add(new TreeNodeVM(ctrl.Id, ctrl.Prop("type")!, GateShort(index, ctrl.Id), Confidence.StaticProven));
                 }
@@ -639,11 +640,11 @@ public sealed class HelperTreeLens : XRayLens
             var group = new TreeNodeVM("group:projectiles", "Projectiles", string.Empty, null, expanded: true);
             foreach (var p in projectiles)
             {
-                var node = new TreeNodeVM(p.Id, p.Name, string.Empty, null, expanded: true);
+                var node = new TreeNodeVM(p.Id, index.NameOf(p.Id), string.Empty, null, expanded: true);
                 foreach (var spawn in index.Incoming(p.Id, RelationKind.SpawnsProjectile))
                     node.Children.Add(new TreeNodeVM(spawn.From, "fired by " + Where(index, spawn.From), GateShort(index, spawn.From), spawn.Confidence));
                 foreach (var anim in index.Outgoing(p.Id, RelationKind.UsesAnim))
-                    node.Children.Add(new TreeNodeVM(anim.To, $"{anim.Prop("role") ?? "animation"}: {index.Get(anim.To)?.Name ?? anim.To}", string.Empty, anim.Confidence));
+                    node.Children.Add(new TreeNodeVM(anim.To, $"{anim.Prop("role") ?? "animation"}: {index.NameOf(anim.To)}", string.Empty, anim.Confidence));
                 group.Children.Add(node);
                 _all.Add(node);
             }
@@ -670,7 +671,7 @@ public sealed class HelperTreeLens : XRayLens
     }
 
     private static string Where(SemanticIndex index, string controllerId) =>
-        $"{index.OwnerState(controllerId)?.Name ?? "?"} / {Short(controllerId)}";
+        $"{(index.OwnerState(controllerId) is { } owner ? index.NameOf(owner.Id) : "?")} / {Short(controllerId)}";
 
     private static string GateShort(SemanticIndex index, string controllerId)
     {
@@ -805,12 +806,12 @@ public sealed class AnimationTimelineLens : XRayLens
         var anim = index.Get(animId)!;
         if (anim.IsStub)
         {
-            Title = anim.Name;
+            Title = index.NameOf(anim.Id);
             Detail = "Referenced by the character but not defined in its AIR file.";
             return;
         }
 
-        Title = $"{anim.Name} — {anim.Prop("frames")} frames, {anim.Prop("totalTicks")} ticks" + (anim.Prop("endsInfinite") == "true" ? " + holds forever" : string.Empty);
+        Title = $"{index.NameOf(anim.Id)} — {anim.Prop("frames")} frames, {anim.Prop("totalTicks")} ticks" + (anim.Prop("endsInfinite") == "true" ? " + holds forever" : string.Empty);
         Detail = (anim.Prop("loopStart") is { } ls ? $"loops from frame {ls}   " : string.Empty) + "● sprite in the SFF   ? sprite missing   markers show controllers gated on that frame (● AnimElem, ◐ time)";
 
         foreach (var contains in index.Outgoing(animId, RelationKind.Contains))

@@ -122,6 +122,9 @@ public abstract class XRayLens : ObservableObject
     public abstract void Build(SemanticIndex index);
     public abstract void OnSelection(SemanticIndex index, string? id, IReadOnlySet<string> related);
 
+    /// <summary>Called after a name changes. Names never change the index, so lenses only need their labels redrawn; by default that is a rebuild.</summary>
+    public virtual void RefreshNames(SemanticIndex index) => Build(index);
+
     protected static string Short(string id)
     {
         var slash = id.LastIndexOf('/');

@@ -3,6 +3,7 @@ using IKEMENLab.Core.Models;
 using IKEMENLab.Core.XRay.Combo;
 using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
+using IKEMENLab.Core.XRay.Names;
 using IKEMENLab.Core.XRay.Query;
 
 namespace IKEMENLab.Cli;
@@ -14,7 +15,7 @@ namespace IKEMENLab.Cli;
 public static class CliApp
 {
     private const string Usage = """
-        usage: ikemenlab xray <command> <character> [args] [--root <ikemen root>] [--text] [--no-common]
+        usage: ikemenlab xray <command> <character> [args] [--root <ikemen root>] [--text] [--no-common] [--no-names]
 
           index        <character>                 the whole semantic index (objects, relationships, diagnostics)
           explain      <character> <id>            state:200, state:200/ctrl:1, cmd:x, var:var:20, helper:340, ability:200, anim:200 …
@@ -25,6 +26,10 @@ public static class CliApp
           transitions  <character> <200|state:200> ChangeState edges leaving a state, with their gates
           search       <character> <text>
           rules                                    the evidence rules behind every confidence level
+          names        <character> [list|review]   your names for states/abilities/commands (default: list)
+          names        <character> set <id> <name> | clear <id> | keep <id> | attach <old id> <new id>
+                       names are stored by IKEMEN Lab (never in the character files); every command shows them
+                       unless --no-names. A name whose object changed or vanished is NOT shown until reviewed.
           readiness    <character>                 how much the candidate graph can (and cannot) say about this character
           candidates   <character> [--from <state|neutral>]   candidate combo edges with gates, evidence and unmodelled conditions
           combos       <character> [--from <state>] [--max-moves N] [--meter N] [--max-frames N] [--top K]
@@ -42,7 +47,8 @@ public static class CliApp
           rank-subjects   --root R [--limit N]      ranks the installed characters as runtime-verification subjects
           runtime-clean   <sandbox dir>            deletes a sandbox (only folders carrying the sandbox marker)
 
-        <character> is a character folder or its .def. Confidence: StaticProven (literal in the files),
+        <character> is a character folder or its .def. "name" in JSON is your name when one applies
+        ("defaultName" keeps X-Ray's own name, "nameSource" says user/linked); ids never change. Confidence: StaticProven (literal in the files),
         Inferred (heuristic), Unknown; RuntimeVerified only ever comes from a verify run's real trace.
         """;
 
@@ -69,6 +75,8 @@ public static class CliApp
             var rest = opts.Positional.Skip(3).ToList();
             switch (command)
             {
+                case "names":
+                    return NamesCommand(index!, LoadedNames!, rest, output, error);
                 case "index":
                     output.WriteLine(XRayJson.Index(index!));
                     return 0;
@@ -223,7 +231,58 @@ public static class CliApp
         if (resolved is null) return Fail(output, error, 3, $"Could not find a character DEF at '{target}'.");
         index = CharacterSemanticIndexer.Build(resolved.Root, resolved.Entry, new XRayOptions { IncludeCommonStates = !opts.NoCommon });
         if (index.Diagnostics.Any(d => d.Code == "def.unreadable")) return Fail(output, error, 3, $"The DEF '{target}' could not be read.");
+        LoadedNames = null;
+        if (!opts.Flag("no-names"))
+            LoadedNames = CharacterNames.Load(NamesStore(opts), index, Path.Combine(resolved.Root, resolved.Entry.FolderPath));
         return 0;
+    }
+
+    /// <summary>The app-owned name store; <c>--names-store DIR</c> points tools and tests at another folder.</summary>
+    internal static NameOverlayStore NamesStore(Options opts) =>
+        opts.Get("names-store") is { } dir ? new NameOverlayStore(dir) : NameOverlayStore.CreateDefault();
+
+    /// <summary>The names attached by the last <see cref="Load"/> (null with --no-names).</summary>
+    [ThreadStatic] internal static CharacterNames? LoadedNames;
+
+    private static int NamesCommand(SemanticIndex index, CharacterNames? names, IReadOnlyList<string> rest, TextWriter output, TextWriter error)
+    {
+        if (names is null) return Fail(output, error, 2, "names cannot be used with --no-names.");
+        var verb = rest.Count == 0 ? "list" : rest[0].ToLowerInvariant();
+        string? problem = verb switch
+        {
+            "list" or "review" => null,
+            "set" when rest.Count >= 3 => names.Rename(Id(index, rest[1]), string.Join(" ", rest.Skip(2))),
+            "clear" when rest.Count == 2 => names.Clear(Id(index, rest[1])),
+            "keep" when rest.Count == 2 => names.Confirm(Id(index, rest[1])),
+            "attach" when rest.Count == 3 => names.Reattach(Id(index, rest[1]), Id(index, rest[2])),
+            _ => "usage: names <character> [list|review] | set <id> <name> | clear <id> | keep <id> | attach <old id> <new id>"
+        };
+        if (problem is not null) return Fail(output, error, 2, problem);
+        output.WriteLine(NamesJson(names.Names, names.StorePath, verb == "review"));
+        return 0;
+    }
+
+    /// <summary>"200" means state:200; anything else is taken as a semantic id.</summary>
+    private static string Id(SemanticIndex index, string spec) =>
+        int.TryParse(spec, out var n) && index.Get($"state:{n}") is not null ? $"state:{n}" : spec;
+
+    private static string NamesJson(SemanticNames names, string store, bool reviewOnly)
+    {
+        var review = names.Review();
+        var named = reviewOnly ? [] : names.Records.Keys.Where(id => names.StatusOf(id) == NameStatus.Current).OrderBy(id => id, StringComparer.Ordinal)
+            .Select(id => new { id, name = names.Display(id), defaultName = names.Default(id) }).ToList();
+        return JsonSerializer.Serialize(new
+        {
+            schema = "ikemenlab.xray.names/1",
+            character = names.Index.CharacterId,
+            store,
+            names = named,
+            review = review.Select(r => new
+            {
+                id = r.Id, name = r.Label, kind = r.Kind, status = r.Status.ToString().ToLowerInvariant(),
+                defaultNameWhenNamed = r.DefaultNameAtRename, currentDefaultName = r.CurrentDefaultName, suggestions = r.Suggestions
+            })
+        }, new JsonSerializerOptions { WriteIndented = true });
     }
 
     private static int Fail(TextWriter output, TextWriter error, int code, string message)
@@ -236,7 +295,7 @@ public static class CliApp
     private static string ExplainText(SemanticIndex index, Explanation e)
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"{e.Subject.Id}  {e.Subject.Name}  [{e.Subject.Kind}]");
+        sb.AppendLine($"{e.Subject.Id}  {index.Names.WithTechnical(e.Subject.Id)}  [{e.Subject.Kind}]");
         foreach (var l in e.Subject.Labels) sb.AppendLine($"  label ({l.Confidence}): {l.Text}   <{l.RuleId}>");
         foreach (var s in e.Sections)
         {
@@ -272,7 +331,7 @@ public static class CliApp
                     case "--root" when i + 1 < args.Length: root = args[++i]; break;
                     case "--text": text = true; break;
                     case "--no-common": noCommon = true; break;
-                    case "--all-cancels" or "--no-chains" or "--allow-links" or "--keep" or "--lua": flags.Add(args[i][2..]); break;
+                    case "--all-cancels" or "--no-chains" or "--allow-links" or "--keep" or "--lua" or "--no-names": flags.Add(args[i][2..]); break;
                     case var a when a.StartsWith("--", StringComparison.Ordinal) && i + 1 < args.Length:
                         named[a[2..]] = args[++i];
                         break;

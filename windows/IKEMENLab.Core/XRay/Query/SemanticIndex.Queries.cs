@@ -107,7 +107,7 @@ public sealed partial class SemanticIndex
     private ExplainItem ItemOf(string id, Relationship? via = null, string? note = null)
     {
         var o = Get(id);
-        return new ExplainItem(id, o?.Name ?? id, o?.Kind ?? ObjectKind.Entity, via?.Confidence, via?.Kind.ToString(),
+        return new ExplainItem(id, o is null ? id : NameOf(id), o?.Kind ?? ObjectKind.Entity, via?.Confidence, via?.Kind.ToString(),
             via?.Evidence.FirstOrDefault()?.Source ?? o?.Source, note, via?.Evidence.FirstOrDefault()?.RuleId);
     }
 

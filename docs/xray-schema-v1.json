@@ -374,7 +374,20 @@
           "$ref": "#/definitions/objectKind"
         },
         "name": {
-          "type": "string"
+          "type": "string",
+          "description": "Display name: the user's name when one applies (see nameSource), else X-Ray's own name."
+        },
+        "defaultName": {
+          "type": "string",
+          "description": "X-Ray's own name, present only when name is a user name (ids never change)."
+        },
+        "nameSource": {
+          "enum": ["user", "linked"],
+          "description": "user = named directly; linked = the name of the ability this state enters (or of this ability's entry state)."
+        },
+        "nameReview": {
+          "enum": ["stale", "orphaned"],
+          "description": "A saved name is waiting for review because the object changed; it is not shown."
         },
         "parent": {
           "type": "string"

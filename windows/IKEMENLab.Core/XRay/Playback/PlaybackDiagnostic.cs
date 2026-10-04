@@ -44,6 +44,12 @@ public sealed record PlaybackDiagnostic(
     public const string SchemaVersion = "ikemenlab.xray.diagnostic/1";
     public const int WindowRadius = 12;
 
+    /// <summary>User names of the route's states, frozen at attempt start (null = none). The ids and numbers elsewhere stay the evidence.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<SnapshotName>? Names { get; init; }
+
+    private string WithName(string id) => Names?.FirstOrDefault(n => n.Id == id) is { } n ? $"{id} \"{n.Name}\"" : id;
+
     /// <summary>What the attempt was: "run" (an engine ran and produced a verdict), "refused" (rejected before launch), "ended" (cancelled or failed without a verdict).</summary>
     public static class Kinds { public const string Run = "run", Refused = "refused", Ended = "ended"; }
 
@@ -87,7 +93,7 @@ public sealed record PlaybackDiagnostic(
         {
             var why = kind == Kinds.Refused ? "No runtime evidence exists: the attempt was refused before any engine launch." : "No runtime verdict exists for this attempt.";
             limitations.Insert(0, why);
-            return new PlaybackDiagnostic(SchemaVersion, kind, attempt, null, character, route, null, s.Snapshot?.Steps ?? [], [], null, null, setup, limitations);
+            return new PlaybackDiagnostic(SchemaVersion, kind, attempt, null, character, route, null, s.Snapshot?.Steps ?? [], [], null, null, setup, limitations) { Names = SnapshotNames(s.Snapshot) };
         }
 
         var report = outcome.Report;
@@ -123,7 +129,7 @@ public sealed record PlaybackDiagnostic(
             log.Issues.Select(i => $"line {i.Line}: {i.Message}").ToList(), "unknown",
             report.Steps.Select(x => new DiagStepOutcome(x.Index, x.EdgeId, x.Outcome.ToString(), x.Reason, x.InputFrame, x.ContactFrame, x.TransitionFrame)).ToList());
         var engine = new DiagEngine(report.EngineExecutable, report.EngineSha256, report.EngineVersion, report.EngineSource);
-        return new PlaybackDiagnostic(SchemaVersion, kind, attempt, result, character, route, report.FailedStep, s.Snapshot?.Steps ?? [], planned, runtime, engine, setup, limitations);
+        return new PlaybackDiagnostic(SchemaVersion, kind, attempt, result, character, route, report.FailedStep, s.Snapshot?.Steps ?? [], planned, runtime, engine, setup, limitations) { Names = SnapshotNames(s.Snapshot) };
     }
 
     private static FrameEvent? FrameOf(List<FrameEvent> frames, long frame) => frames.FirstOrDefault(f => f.Frame == frame);
@@ -159,6 +165,8 @@ public sealed record PlaybackDiagnostic(
     private static string F(bool? v) => v is { } b ? (b ? "yes" : "no") : "n/a";
     private static string F(string? v) => string.IsNullOrEmpty(v) ? "n/a" : v;
 
+    private static IReadOnlyList<SnapshotName>? SnapshotNames(StaticSnapshot? snapshot) => snapshot is { Names.Count: > 0 } ? snapshot.Names : null;
+
     /// <summary>Readable rendering for pasting. Deterministic: the same diagnostic always renders the same text.</summary>
     public string ToText()
     {
@@ -184,17 +192,24 @@ public sealed record PlaybackDiagnostic(
             foreach (var file in c.Files) L($"  {file.Role,-6} {file.Path}  content-hash {file.ContentHash}");
         }
 
+        if (Names is { Count: > 0 })
+        {
+            L();
+            L("names (user labels in effect when the attempt started; ids and state numbers remain the evidence):");
+            foreach (var n in Names) L($"  {n.Id} = {n.Name}  (X-Ray name: {n.DefaultName}; {n.Source})");
+        }
+
         if (Route.Count > 0)
         {
             L();
             L("route:");
-            foreach (var step in Route) L($"  {step.Index}. {step.Kind} {step.From} -> {step.To}" + (step.Command is null ? string.Empty : $"  [{step.Command}]") + $"  {step.Edge}");
+            foreach (var step in Route) L($"  {step.Index}. {step.Kind} {WithName(step.From)} -> {WithName(step.To)}" + (step.Command is null ? string.Empty : $"  [{step.Command}]") + $"  {step.Edge}");
         }
 
         foreach (var e in StaticSteps)
         {
             L();
-            L($"static step {e.Index}{(e.Index == FailedStep ? " (FAILED STEP)" : string.Empty)}: {e.Kind} {e.From} -> {e.To}" + (e.Commands.Count > 0 ? $"  [{string.Join("+", e.Commands)}]" : string.Empty));
+            L($"static step {e.Index}{(e.Index == FailedStep ? " (FAILED STEP)" : string.Empty)}: {e.Kind} {WithName(e.From)} -> {WithName(e.To)}" + (e.Commands.Count > 0 ? $"  [{string.Join("+", e.Commands)}]" : string.Empty));
             L($"  controller: {e.ControllerId}" + (e.ControllerName is { Length: > 0 } n ? $" ({n})" : string.Empty) + $"  branch {e.BranchNumber}  confidence {e.Confidence}  rules {string.Join(",", e.EvidenceRules)}");
             if (e.ControllerSource is { } cs) L($"  source: {cs.File}:{cs.StartLine}" + (cs.EndLine != cs.StartLine ? $"-{cs.EndLine}" : string.Empty));
             Gate(e.ModelledRequirements, e.Unmodelled, e.TriggerAll, e.TriggerGroups, "  ");

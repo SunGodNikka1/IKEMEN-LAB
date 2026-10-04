@@ -11,9 +11,10 @@ public sealed class PlaybackTraceViewModel : ObservableObject
 {
     private TraceRow? _selected;
 
-    public PlaybackTraceViewModel(PlaybackOutcome outcome)
+    /// <param name="stateName">User names for P1 state numbers (the shared resolver); the raw number is always shown beside a name.</param>
+    public PlaybackTraceViewModel(PlaybackOutcome outcome, Func<int?, string?>? stateName = null)
     {
-        Rows = PlaybackInspector.Timeline(outcome.Log);
+        Rows = PlaybackInspector.Timeline(outcome.Log, stateName: stateName);
         var failure = outcome.Failure;
         FocusFrame = failure?.FocusFrame;
         _selected = FocusFrame is { } f ? Rows.FirstOrDefault(r => r.Frame == f) : null;

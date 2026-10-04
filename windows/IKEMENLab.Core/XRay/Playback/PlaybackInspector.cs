@@ -9,6 +9,12 @@ public sealed record TraceRow(
     double? P1X, double? P2X, double? Distance, string? DistanceSource, string Notes)
 {
     /// <summary>P1.x and P2.x are raw engine facts. Distance is not: it is either an engine trigger value or derived (see <see cref="DistanceSource"/>), and is shown with that label.</summary>
+    /// <summary>The user's name for P1's state on this tick (null when the state has no user name). Presentation only.</summary>
+    public string? P1StateName { get; init; }
+
+    /// <summary>"Revolver Shot (66345)" when the state has a user name, else the raw number.</summary>
+    public string P1StateText => P1State is not { } n ? string.Empty : P1StateName is { } name ? $"{name} ({n})" : n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
     public string DistanceText => Distance is not { } d ? string.Empty : $"{d:0.##}" + (DistanceSource is { Length: > 0 } ? $" ({Provenance(DistanceSource)})" : " (source not recorded)");
 
     public static string Provenance(string source) => source switch
@@ -27,7 +33,8 @@ public sealed record FailureInspection(
 public static class PlaybackInspector
 {
     /// <summary>The whole trace as rows; input and driver events are folded into the Notes of the tick they happened on.</summary>
-    public static IReadOnlyList<TraceRow> Timeline(TraceLog log, int cap = 6000)
+    /// <param name="stateName">Optional user-name lookup for P1 state numbers (e.g. <see cref="Names.SemanticNames.RenamedState"/>).</param>
+    public static IReadOnlyList<TraceRow> Timeline(TraceLog log, int cap = 6000, Func<int?, string?>? stateName = null)
     {
         var notesByFrame = new Dictionary<long, List<string>>();
         void Add(long frame, string text)
@@ -57,20 +64,20 @@ public static class PlaybackInspector
         {
             notesByFrame.TryGetValue(f.Frame, out var notes);
             rows.Add(new TraceRow(f.Frame, f.P1.State, f.P1.MoveType, f.P1.Ctrl, f.P1.MoveHit, f.P2.State, f.P2.MoveType, f.P2.Life, f.P1.PosX, f.P2.PosX, f.Distance, f.DistanceSource,
-                notes is null ? string.Empty : string.Join(" · ", notes)));
+                notes is null ? string.Empty : string.Join(" · ", notes)) { P1StateName = stateName?.Invoke(f.P1.State) });
         }
 
         return rows;
     }
 
     /// <summary>Explains a Failed or Inconclusive report in plain terms and cuts the trace to the frames around the failure. Verified reports return null.</summary>
-    public static FailureInspection? Inspect(VerificationReport report, TraceLog log, int radius = 20)
+    public static FailureInspection? Inspect(VerificationReport report, TraceLog log, int radius = 20, Func<int?, string?>? stateName = null)
     {
         if (report.Status == VerifyStatus.Verified) return null;
 
         var step = report.FailedStep is { } n ? report.Steps.FirstOrDefault(s => s.Index == n) : null;
         var focus = FocusFrame(report, step, log);
-        var all = Timeline(log);
+        var all = Timeline(log, stateName: stateName);
         var window = focus is { } f
             ? all.Where(r => r.Frame >= f - radius && r.Frame <= f + radius).ToList()
             : all.Take(radius * 2).ToList();

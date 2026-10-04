@@ -223,7 +223,12 @@
                 "type": "string"
               },
               "name": {
-                "type": "string"
+                "type": "string",
+                "description": "The target state's display name (the user's name when one applies)."
+              },
+              "defaultName": {
+                "type": "string",
+                "description": "X-Ray's own name, present only when name is a user name."
               },
               "commands": {
                 "type": "array",

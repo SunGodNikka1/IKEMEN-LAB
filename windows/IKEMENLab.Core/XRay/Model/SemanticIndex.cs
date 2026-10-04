@@ -1,3 +1,4 @@
+using IKEMENLab.Core.XRay.Names;
 using IKEMENLab.Core.XRay.Source;
 
 namespace IKEMENLab.Core.XRay.Model;
@@ -49,6 +50,23 @@ public sealed partial class SemanticIndex
 
     public SemanticObject? Get(string id) => _byId.TryGetValue(id, out var o) ? o : null;
 
+    private SemanticNames? _names;
+
+    /// <summary>
+    /// The display-name resolver (user names over X-Ray's own names). Empty until <see cref="UseNames"/> attaches a character's
+    /// saved names. Names are presentation only: they never change ids, relationships, evidence or confidence.
+    /// </summary>
+    public SemanticNames Names => _names ??= SemanticNames.Empty(this);
+
+    public void UseNames(SemanticNames names)
+    {
+        if (!ReferenceEquals(names.Index, this)) throw new ArgumentException("The names were resolved against another index.", nameof(names));
+        _names = names;
+    }
+
+    /// <summary>The label to show for <paramref name="id"/>: the user's name when one applies, else X-Ray's own name, else the id.</summary>
+    public string NameOf(string id) => Names.Display(id);
+
     public IEnumerable<SemanticObject> Of(ObjectKind kind) => Objects.Where(o => o.Kind == kind);
 
     public IReadOnlyList<Relationship> Outgoing(string id, params RelationKind[] kinds) =>
@@ -90,6 +108,7 @@ public sealed partial class SemanticIndex
         return Objects
             .Where(o => o.Id.Contains(q, StringComparison.OrdinalIgnoreCase) ||
                         o.Name.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                        (_names is not null && NameOf(o.Id).Contains(q, StringComparison.OrdinalIgnoreCase)) ||
                         o.Labels.Any(l => l.Text.Contains(q, StringComparison.OrdinalIgnoreCase)))
             .Take(limit)
             .ToList();

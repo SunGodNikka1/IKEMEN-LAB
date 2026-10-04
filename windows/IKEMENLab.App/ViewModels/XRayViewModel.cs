@@ -12,6 +12,7 @@ using IKEMENLab.Core.Settings;
 using IKEMENLab.Core.XRay.Playback;
 using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
+using IKEMENLab.Core.XRay.Names;
 using IKEMENLab.Core.XRay.Source;
 
 namespace IKEMENLab.App.ViewModels;
@@ -45,8 +46,10 @@ public sealed class XRayViewModel : ObservableObject
     private XRayLensKind _activeLens = XRayLensKind.Atlas;
     private IReadOnlyList<XRayRow> _searchResults = [];
 
-    public XRayViewModel(string root, CharacterEntry entry, string displayName, ISettingsStore? settings = null, ComboPlaybackService? playback = null)
+    public XRayViewModel(string root, CharacterEntry entry, string displayName, ISettingsStore? settings = null, ComboPlaybackService? playback = null,
+        NameOverlayStore? names = null)
     {
+        NameStore = names ?? NameOverlayStore.CreateDefault();
         _root = root;
         _entry = entry;
         Settings = settings ?? new JsonSettingsStore();
@@ -65,6 +68,14 @@ public sealed class XRayViewModel : ObservableObject
         BackCommand = new RelayCommand(Back, () => _history.Count > 1);
         OpenFileCommand = new RelayCommand(OpenFile, () => _sourceFile.Length > 0);
         OpenSpriteCommand = new RelayCommand(p => { if (p is string id) OpenSprite(id); });
+        RenameCommand = new RelayCommand(Rename, () => CanRenameSelected);
+        ResetNameCommand = new RelayCommand(ResetName, () => _selectedId is not null && CharacterNames?.Names.Records.ContainsKey(_selectedId) == true);
+        KeepNameCommand = new RelayCommand(p => { if (p is NameReviewRow r) ApplyNameChange(CharacterNames?.Confirm(r.Id)); });
+        DiscardNameCommand = new RelayCommand(p => { if (p is NameReviewRow r) ApplyNameChange(CharacterNames?.Clear(r.Id)); });
+        AttachNameCommand = new RelayCommand(p =>
+        {
+            if (p is NameReviewRow r && _selectedId is not null) ApplyNameChange(CharacterNames?.Reattach(r.Id, _selectedId));
+        });
         CopyIdCommand = new RelayCommand(() =>
         {
             try { if (_selectedId is not null) Clipboard.SetText(_selectedId); }
@@ -115,6 +126,85 @@ public sealed class XRayViewModel : ObservableObject
     public ICommand OpenFileCommand { get; }
     public ICommand OpenSpriteCommand { get; }
     public ICommand CopyIdCommand { get; }
+    public ICommand RenameCommand { get; }
+    public ICommand ResetNameCommand { get; }
+    public ICommand KeepNameCommand { get; }
+    public ICommand DiscardNameCommand { get; }
+    public ICommand AttachNameCommand { get; }
+
+    // ------------------------------------------------------------------ names
+
+    public NameOverlayStore NameStore { get; }
+
+    /// <summary>The character's saved names, attached to the index (null until loaded).</summary>
+    public CharacterNames? CharacterNames { get; private set; }
+
+    private string _renameText = string.Empty;
+    private string _nameInfo = string.Empty;
+    private string _nameError = string.Empty;
+    private IReadOnlyList<NameReviewRow> _nameReview = [];
+
+    /// <summary>The name being typed for the selected object.</summary>
+    public string RenameText { get => _renameText; set { if (SetProperty(ref _renameText, value)) NameError = string.Empty; } }
+
+    /// <summary>Where the selected object's label comes from.</summary>
+    public string NameInfo { get => _nameInfo; private set => SetProperty(ref _nameInfo, value); }
+
+    public string NameError { get => _nameError; private set { if (SetProperty(ref _nameError, value)) OnPropertyChanged(nameof(HasNameError)); } }
+    public bool HasNameError => _nameError.Length > 0;
+
+    public bool CanRenameSelected => _selectedId is not null && CharacterNames?.Names.CanRename(_selectedId) == true;
+
+    /// <summary>Saved names that are not shown because their object changed or no longer exists.</summary>
+    public IReadOnlyList<NameReviewRow> NameReview
+    {
+        get => _nameReview;
+        private set
+        {
+            if (!SetProperty(ref _nameReview, value)) return;
+            OnPropertyChanged(nameof(HasNameReview));
+            OnPropertyChanged(nameof(NameReviewHeader));
+        }
+    }
+
+    public bool HasNameReview => _nameReview.Count > 0;
+    public string NameReviewHeader => $"Names to review ({_nameReview.Count}): not shown until you decide";
+
+    private void Rename()
+    {
+        if (_selectedId is null || CharacterNames is null) return;
+        ApplyNameChange(CharacterNames.Rename(_selectedId, RenameText));
+    }
+
+    private void ResetName()
+    {
+        if (_selectedId is null || CharacterNames is null) return;
+        ApplyNameChange(CharacterNames.Clear(_selectedId));
+    }
+
+    /// <summary>After a saved change every lens is rebuilt so the new label shows everywhere at once.</summary>
+    private void ApplyNameChange(string? problem)
+    {
+        if (problem is not null)
+        {
+            NameError = problem;
+            return;
+        }
+
+        NameError = string.Empty;
+        if (_index is null) return;
+        foreach (var lens in Lenses) lens.RefreshNames(_index);
+        RefreshNameReview();
+        if (_selectedId is not null)
+        {
+            _navigating = true;
+            try { Select(_selectedId); }
+            finally { _navigating = false; }
+        }
+    }
+
+    private void RefreshNameReview() =>
+        NameReview = CharacterNames?.Names.Review().Select(r => new NameReviewRow(r)).ToList() ?? [];
 
     public bool IsLoading { get => _isLoading; private set => SetProperty(ref _isLoading, value); }
     public string Status { get => _status; private set => SetProperty(ref _status, value); }
@@ -137,7 +227,7 @@ public sealed class XRayViewModel : ObservableObject
             if (!SetProperty(ref _searchText, value)) return;
             SearchResults = _index is null || string.IsNullOrWhiteSpace(value)
                 ? []
-                : _index.Search(value, 12).Select(o => new XRayRow(o.Id, o.Name, o.Id, null)).ToList();
+                : _index.Search(value, 12).Select(o => new XRayRow(o.Id, _index.NameOf(o.Id), o.Id, null)).ToList();
         }
     }
 
@@ -152,12 +242,25 @@ public sealed class XRayViewModel : ObservableObject
         {
             var index = await Task.Run(() => CharacterSemanticIndexer.Build(_root, _entry));
             _index = index;
+            string? namesProblem = null;
+            try
+            {
+                CharacterNames = CharacterNames.Load(NameStore, index, Path.Combine(_root, _entry.FolderPath));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Names are presentation only: X-Ray keeps working with its own names if the store cannot be read.
+                namesProblem = "Your names could not be read: " + ex.Message;
+            }
+
+            RefreshNameReview();
             foreach (var lens in Lenses) lens.Build(index);
 
             var errors = index.Diagnostics.Count(d => d.Severity == DiagnosticSeverity.Error);
             var warnings = index.Diagnostics.Count(d => d.Severity == DiagnosticSeverity.Warning);
             Status = $"{index.Objects.Count:N0} objects · {index.Relationships.Count:N0} relationships · {index.Of(ObjectKind.Ability).Count()} abilities" +
-                     (warnings + errors > 0 ? $" · {warnings + errors} parse notes" : string.Empty);
+                     (warnings + errors > 0 ? $" · {warnings + errors} parse notes" : string.Empty) +
+                     (namesProblem is null ? string.Empty : " · " + namesProblem);
 
             var first = index.Of(ObjectKind.Ability).FirstOrDefault()?.Id
                         ?? index.Of(ObjectKind.State).FirstOrDefault(s => !s.IsStub)?.Id
@@ -251,9 +354,21 @@ public sealed class XRayViewModel : ObservableObject
     private void ShowDetails(SemanticIndex index, string id)
     {
         var obj = index.Get(id)!;
-        Title = obj.Name;
+        Title = index.NameOf(id);
         KindText = obj.Kind + (obj.IsStub ? " · referenced but not defined" : string.Empty);
-        IdText = obj.Id;
+        IdText = index.Names.IsRenamed(id) ? $"{obj.Id} · X-Ray name: {obj.Name}" : obj.Id;
+        var source = index.Names.SourceOf(id);
+        NameInfo = source switch
+        {
+            NameSource.User => "Your name",
+            NameSource.Linked => "Your name for the linked ability / entry state",
+            _ => index.Names.StatusOf(id) is { } st && st != NameStatus.Current
+                ? "Your saved name for this object is waiting for review (it changed): see Names to review"
+                : "X-Ray name"
+        };
+        _renameText = index.Names.Records.TryGetValue(id, out var rec) && index.Names.StatusOf(id) == NameStatus.Current ? rec.Label : string.Empty;
+        OnPropertyChanged(nameof(RenameText));
+        OnPropertyChanged(nameof(CanRenameSelected));
 
         Labels = obj.Labels.Select(l => new LabelChip(l.Text, l.Category, ConfidenceStyle.Glyph(l.Confidence),
             ConfidenceStyle.Brush(l.Confidence), $"{ConfidenceStyle.Label(l.Confidence)} · {l.RuleId} · {EvidenceRules.Get(l.RuleId).Description}")).ToList();
@@ -340,4 +455,26 @@ public sealed class XRayViewModel : ObservableObject
         };
         window.Show();
     }
+}
+
+/// <summary>One saved name that is not applied, for the review list.</summary>
+public sealed class NameReviewRow
+{
+    public NameReviewRow(NameReviewItem item)
+    {
+        Id = item.Id;
+        Label = item.Label;
+        Status = item.Status == NameStatus.Stale
+            ? $"{item.CurrentDefaultName ?? item.Id} changed since you named it"
+            : $"{item.DefaultNameAtRename} ({item.Id}) no longer exists";
+        Suggestions = item.Suggestions.Count == 0 ? string.Empty : "Unchanged match: " + string.Join(", ", item.Suggestions);
+        CanKeep = item.Status == NameStatus.Stale;
+    }
+
+    public string Id { get; }
+    public string Label { get; }
+    public string Status { get; }
+    public string Suggestions { get; }
+    public bool HasSuggestions => Suggestions.Length > 0;
+    public bool CanKeep { get; }
 }

@@ -575,6 +575,53 @@
                             <Button Content="Copy id" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,4,0,8"
                                     Command="{Binding CopyIdCommand}" AutomationProperties.Name="Copy object id"/>
 
+                            <!-- Your name for the selected object (stored by IKEMEN Lab, never in the character files) -->
+                            <StackPanel Margin="0,0,0,10" Visibility="{Binding CanRenameSelected, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="{Binding NameInfo}" FontSize="11" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
+                                <DockPanel Margin="0,4,0,0">
+                                    <Button DockPanel.Dock="Right" Content="Reset" Style="{StaticResource SecondaryButton}" Margin="6,0,0,0"
+                                            Command="{Binding ResetNameCommand}" AutomationProperties.Name="Reset to X-Ray name"
+                                            ToolTip="Remove your name; X-Ray's own name shows again"/>
+                                    <Button DockPanel.Dock="Right" Content="Rename" Style="{StaticResource SecondaryButton}" Margin="6,0,0,0"
+                                            Command="{Binding RenameCommand}" AutomationProperties.Name="Save name"/>
+                                    <TextBox Text="{Binding RenameText, UpdateSourceTrigger=PropertyChanged}" MaxLength="60" VerticalContentAlignment="Center"
+                                             AutomationProperties.Name="Name for the selected object" ToolTip="Your name for this state / ability / command (e.g. Revolver Shot)"/>
+                                </DockPanel>
+                                <TextBlock Text="{Binding NameError}" FontSize="11" Margin="0,2,0,0" Foreground="{DynamicResource WarningBrush}" TextWrapping="Wrap"
+                                           Visibility="{Binding HasNameError, Converter={StaticResource BoolToVis}}"/>
+                            </StackPanel>
+
+                            <!-- Saved names whose object changed or vanished: never applied until the user decides -->
+                            <Border Margin="0,0,0,10" Padding="8" CornerRadius="6" BorderThickness="1" BorderBrush="{DynamicResource WarningBrush}"
+                                    Visibility="{Binding HasNameReview, Converter={StaticResource BoolToVis}}">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding NameReviewHeader}" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"/>
+                                    <ItemsControl ItemsSource="{Binding NameReview}" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:NameReviewRow}">
+                                                <StackPanel Margin="0,6,0,0">
+                                                    <TextBlock FontSize="12" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap">
+                                                        <Run Text="“" /><Run Text="{Binding Label, Mode=OneWay}"/><Run Text="”  "/><Run Text="{Binding Status, Mode=OneWay}" Foreground="{DynamicResource TextSecondary}"/>
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding Suggestions}" FontSize="11" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                                               Visibility="{Binding HasSuggestions, Converter={StaticResource BoolToVis}}"/>
+                                                    <WrapPanel Margin="0,3,0,0">
+                                                        <Button Content="Keep on changed object" Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"
+                                                                Visibility="{Binding CanKeep, Converter={StaticResource BoolToVis}}"
+                                                                Command="{Binding DataContext.KeepNameCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                        <Button Content="Move to selected" Style="{StaticResource SecondaryButton}" Margin="0,0,6,0"
+                                                                ToolTip="Give this name to the object selected now"
+                                                                Command="{Binding DataContext.AttachNameCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                        <Button Content="Discard" Style="{StaticResource SecondaryButton}"
+                                                                Command="{Binding DataContext.DiscardNameCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                    </WrapPanel>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+
                             <ItemsControl ItemsSource="{Binding Sections}" Focusable="False">
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type vm:DetailSection}">

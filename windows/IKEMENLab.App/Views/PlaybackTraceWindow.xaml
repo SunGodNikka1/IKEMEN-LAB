@@ -23,7 +23,7 @@
                   AutomationProperties.Name="Trace frames">
             <DataGrid.Columns>
                 <DataGridTextColumn Header="Frame" Binding="{Binding Frame}" Width="64"/>
-                <DataGridTextColumn Header="P1 state" Binding="{Binding P1State}" Width="70"/>
+                <DataGridTextColumn Header="P1 state" Binding="{Binding P1StateText}" Width="140"/>
                 <DataGridTextColumn Header="P1 move" Binding="{Binding P1MoveType}" Width="64"/>
                 <DataGridTextColumn Header="P1 ctrl" Binding="{Binding P1Ctrl}" Width="60"/>
                 <DataGridTextColumn Header="P1 hit" Binding="{Binding P1MoveHit}" Width="56"/>

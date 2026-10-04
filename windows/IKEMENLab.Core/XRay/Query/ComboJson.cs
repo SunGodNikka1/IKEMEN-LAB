@@ -114,7 +114,8 @@ public static class ComboJson
                 w.WriteString("kind", s.Edge.Kind.ToString());
                 w.WriteString("from", s.Edge.From);
                 w.WriteString("to", s.Edge.To);
-                w.WriteString("name", s.Move.Name);
+                w.WriteString("name", g.Index.Get(s.Move.StateId) is null ? s.Move.Name : g.Index.NameOf(s.Move.StateId));
+                if (g.Index.Names.IsRenamed(s.Move.StateId)) w.WriteString("defaultName", s.Move.Name);
                 XRayJson.WriteStrings(w, "commands", s.Edge.Commands);
                 w.WriteString("contact", s.Edge.Contact.ToString());
                 w.WriteString("confidence", s.Edge.Confidence.ToString());

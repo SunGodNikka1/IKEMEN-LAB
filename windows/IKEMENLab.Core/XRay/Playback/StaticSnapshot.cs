@@ -6,6 +6,9 @@ using IKEMENLab.Core.XRay.Source;
 namespace IKEMENLab.Core.XRay.Playback;
 
 public sealed record SourceSpan(string File, int StartLine, int EndLine);
+
+/// <summary>A user name in effect when the attempt started (X-Ray's own name kept beside it).</summary>
+public sealed record SnapshotName(string Id, string Name, string DefaultName, string Source);
 public sealed record SnapshotFile(string Path, string Role, string ContentHash);
 public sealed record SnapshotTrigger(string Text, SourceSpan? Source);
 public sealed record SnapshotGroup(int Number, bool IsExpectedBranch, IReadOnlyList<SnapshotTrigger> Lines);
@@ -34,6 +37,9 @@ public sealed record StaticSnapshot(
     string CharacterId, string Schema, IReadOnlyList<SnapshotFile> Files, string RouteKey, IReadOnlyList<StepStaticSnapshot> Steps, IReadOnlyList<string> Limitations)
 {
     public const string SchemaVersion = "ikemenlab.xray.static-snapshot/1";
+
+    /// <summary>User names of the route's states at attempt start; empty when none applied. Frozen like the rest of the snapshot.</summary>
+    public IReadOnlyList<SnapshotName> Names { get; init; } = [];
     public const int MaxCompeting = 10;
 
     public static readonly IReadOnlyList<string> StandardLimitations =
@@ -51,7 +57,12 @@ public sealed record StaticSnapshot(
         var steps = new List<StepStaticSnapshot>();
         for (var i = 0; i < route.Steps.Count; i++)
             steps.Add(CaptureStep(graph, index, route.Steps[i].Edge, i + 1));
-        return new StaticSnapshot(index.CharacterId, SchemaVersion, files, route.Key, steps, StandardLimitations);
+        var names = steps.SelectMany(s => new[] { s.From, s.To }).Distinct(StringComparer.Ordinal)
+            .Where(id => index.Get(id) is not null && index.Names.IsRenamed(id))
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .Select(id => new SnapshotName(id, index.NameOf(id), index.Names.Default(id), index.Names.SourceOf(id) == IKEMENLab.Core.XRay.Names.NameSource.User ? "user" : "linked"))
+            .ToList();
+        return new StaticSnapshot(index.CharacterId, SchemaVersion, files, route.Key, steps, StandardLimitations) { Names = names };
     }
 
     private static StepStaticSnapshot CaptureStep(CandidateGraph graph, SemanticIndex index, CandidateEdge edge, int number)

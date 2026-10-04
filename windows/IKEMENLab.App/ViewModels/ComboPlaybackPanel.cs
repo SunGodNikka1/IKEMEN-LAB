@@ -219,7 +219,8 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private void ViewTrace()
     {
         if (!_session.HasResultFor(SelectedKey) || _session.Outcome is not { } outcome) return;
-        var vm = new PlaybackTraceViewModel(outcome);
+        var names = _owner.Index?.Names;
+        var vm = new PlaybackTraceViewModel(outcome, names is null ? null : names.RenamedState);
         new PlaybackTraceWindow(vm) { Owner = Application.Current?.MainWindow }.Show();
     }
 

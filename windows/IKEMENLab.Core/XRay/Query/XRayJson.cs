@@ -208,7 +208,15 @@ public static class XRayJson
         w.WriteStartObject();
         w.WriteString("id", o.Id);
         w.WriteString("kind", o.Kind.ToString());
-        w.WriteString("name", o.Name);
+        w.WriteString("name", index.NameOf(o.Id));
+        // Present only when the character has saved names, so output without names is unchanged.
+        if (index.Names.IsRenamed(o.Id))
+        {
+            w.WriteString("defaultName", o.Name);
+            w.WriteString("nameSource", index.Names.SourceOf(o.Id) == Names.NameSource.User ? "user" : "linked");
+        }
+
+        if (index.Names.StatusOf(o.Id) is { } st && st != Names.NameStatus.Current) w.WriteString("nameReview", st.ToString().ToLowerInvariant());
         if (o.ParentId is not null) w.WriteString("parent", o.ParentId);
         if (o.IsStub) w.WriteBoolean("unresolved", true);
         WriteSource(w, index, o.Source);
