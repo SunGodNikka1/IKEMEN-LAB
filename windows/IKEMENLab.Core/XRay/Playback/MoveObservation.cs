@@ -16,14 +16,16 @@ namespace IKEMENLab.Core.XRay.Playback;
 /// <param name="OpponentGuarded">P2 was in a common guard state (120–159).</param>
 /// <param name="OpponentAirborne">P2 had statetype A while in a hit state.</param>
 /// <param name="OpponentKnockedDown">P2 had statetype L (lying down).</param>
-/// <param name="FramesUntilControl">Samples from the start until P1 had control again; null when it never did inside the observation (or ctrl is unreadable).</param>
+/// <param name="FramesUntilControl">Samples from the start until P1 had control <em>again</em> after losing it; null when control never came back inside the
+/// observation, when it was never lost (<paramref name="KeptControl"/>), or when ctrl is unreadable.</param>
+/// <param name="KeptControl">P1 never lost control after the start (e.g. a forced state whose Statedef does not take control away). Null when ctrl is unreadable.</param>
 /// <param name="P1States">P1's states from the start in order of appearance (repeats of the same state collapsed).</param>
 public sealed record MoveObservation(
     long StartFrame, long ObservedThroughFrame, int ObservedFrames, bool ObservationComplete,
     string Connected, IReadOnlyList<string> ConnectedBy, long? ContactFrame,
     bool? OwnHit, bool? OwnGuarded, bool? OpponentHit, bool? OpponentGuarded, bool? OpponentAirborne, bool? OpponentKnockedDown, long? ReactionFrame,
     double? OpponentLifeBefore, double? OpponentLifeLowest, double? Damage,
-    long? ControlFrame, int? FramesUntilControl,
+    long? ControlFrame, int? FramesUntilControl, bool? KeptControl,
     IReadOnlyList<int> P1States, bool P1StatesTruncated, IReadOnlyList<string> Missing)
 {
     public const int MaxStates = 16;
@@ -80,7 +82,11 @@ public sealed record MoveObservation(
         double? lifeLowest = double.IsNaN(lowest) ? null : lowest;
         double? damage = lifeBefore is { } b && lifeLowest is { } l ? Math.Max(0, b - l) : null;
 
-        var control = window.Skip(1).FirstOrDefault(f => f.P1.Ctrl == true);
+        // "Back in control" only means control returning after the move took it away. A state that never took it away (a forced state whose
+        // Statedef sets no ctrl keeps the control P1 had in neutral) is reported as having kept control, not as recovering after one frame.
+        bool? kept = window.All(f => f.P1.Ctrl is null) ? null : !window.Any(f => f.P1.Ctrl == false);
+        var lost = window.FindIndex(f => f.P1.Ctrl == false);
+        var control = lost < 0 ? null : window.Skip(lost + 1).FirstOrDefault(f => f.P1.Ctrl == true);
         int? untilControl = control is null ? null : (int)(control.Frame - start.Frame);
 
         var states = new List<int>();
@@ -105,7 +111,7 @@ public sealed record MoveObservation(
 
         return new MoveObservation(start.Frame, window[^1].Frame, window.Count, complete, connected, by, contact,
             ownHit, ownGuard, oppHit, oppGuard, airborne, down, reaction, lifeBefore, lifeLowest, damage,
-            control?.Frame, untilControl, states, truncated, missing);
+            control?.Frame, untilControl, kept, states, truncated, missing);
     }
 
     /// <summary>Whether the trace shows the driver finished watching: a plan_complete driver event and an end event with reason planComplete.</summary>

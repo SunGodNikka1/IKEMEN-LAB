@@ -430,7 +430,8 @@ public sealed record PlaybackDiagnostic(
         L($"  connected: {o.Connected}" + (o.ConnectedBy.Count > 0 ? " — " + string.Join("; ", o.ConnectedBy) : string.Empty) + (o.ContactFrame is { } cf ? $" (first at frame {cf})" : string.Empty));
         L($"  own hit {F(o.OwnHit)}  own guarded {F(o.OwnGuarded)} | opponent hit {F(o.OpponentHit)}  guarded {F(o.OpponentGuarded)}  launched {F(o.OpponentAirborne)}  knocked down {F(o.OpponentKnockedDown)}  reaction frame {F(o.ReactionFrame)}");
         L($"  damage {F(o.Damage)} (opponent life {F(o.OpponentLifeBefore)} -> lowest {F(o.OpponentLifeLowest)})");
-        L(o.FramesUntilControl is { } c ? $"  back in control {c} frames after the start (frame {F(o.ControlFrame)})" : "  not back in control while watched");
+        L(o.KeptControl == true ? "  kept control throughout (control was never taken away)"
+            : o.FramesUntilControl is { } c ? $"  back in control {c} frames after the start (frame {F(o.ControlFrame)})" : "  not back in control while watched");
         L("  P1 states: " + string.Join(" -> ", o.P1States.Select(n => StateText("state:" + n.ToString(CultureInfo.InvariantCulture)))) + (o.P1StatesTruncated ? " -> ..." : string.Empty));
         L("  not readable: " + (o.Missing.Count == 0 ? "none" : string.Join(", ", o.Missing)));
         L("  these are measurements of this one run (this dummy, this spacing), not claims about the character");

@@ -91,7 +91,7 @@ A result is shown only against its own scope. Play Ability results never put mar
 | `AbilityPlayback.PlanOptionsFor` | The route plan with a longer watch after the step: entry animation length + 90 ticks, clamped to 120–480. |
 | `AbilityVerifier` | Reads the ability from the route verifier's report plus the samples after the move started; `ability.json` schema `ikemenlab.xray.ability/1`. |
 | `StatePreview` | `CanPreview`, `Plan` (a single `PlanStep.ForceKind` step with no input), `Read` (integrity checks, then observations); `preview.json` schema `ikemenlab.xray.preview/1`. |
-| `MoveObservation` | What followed a start: connected (yes / blocked / no / unknown), own hit or guard, opponent hit / guarded / launched / knocked down, damage, frames until control, P1 states, missing telemetry. |
+| `MoveObservation` | What followed a start: connected (yes / blocked / no / unknown), own hit or guard, opponent hit / guarded / launched / knocked down, damage, P1 states, missing telemetry. Control: *frames until control* counts only control returning after the move took it away; a state that never took it away is reported as *kept control throughout* (`keptControl`). |
 | `VerifyRunner.Execute` | The engine-run half of `VerifyRunner.Run`, factored out so a preview can reuse it. `Run` is unchanged in behaviour: same notes in the same order. |
 | `PlaybackSession` | `PlayAsync` (combo or ability) and `PreviewAsync` share one attempt core. `RunRouteKey` is the latest job's scope; `PreviewResult` holds a preview, `Outcome` a route or ability result; `ReplayAsync` replays the latest job, whatever it was. |
 | `StaticSnapshot` | Ability attempts also freeze the ability's own name; `CaptureState` freezes a preview's files and names. |
@@ -117,7 +117,7 @@ A combo's `meta.json` is unchanged and has no `mode`.
 ## QA verbs and CLI
 
 **QA verbs (`QaScriptRunner`).**
-- `xray-select ability:N`, then `ability-play` or `ability-preview` (fire-and-forget), then `ability-status` and `ability-diagnostic`.
+- `xray-select ability:N`, then `ability-play`, `ability-preview` or `ability-replay` (fire-and-forget, each invoking the Ability Lab's own button command), then `ability-status` and `ability-diagnostic`.
 - The shared session's `playback-wait` and `playback-cancel` apply.
 - `playback-wait verdict` throws on a preview (it never has a verdict); `playback-wait settled` accepts a verdict, a preview, or cancel/error.
 
@@ -129,7 +129,9 @@ A combo's `meta.json` is unchanged and has no `mode`.
 
 ## Tests
 
-- `XRayAbilityPlaybackTests` (23, Core):
+- `XRayAbilityPlaybackTests` (25, Core):
+  - the real kfm runs from the Windows acceptance pass (see below), re-read from their traces: provenance (the plan fingerprint the engine recorded), Performed, the forced super, and the forced follow-up state that kept control;
+  - a forced state that never takes control away is reported as keeping it;
   - path choice and refusals (only from other moves, AI-only, power warning);
   - plan shape;
   - route-plan Lua unchanged;
@@ -151,13 +153,37 @@ A combo's `meta.json` is unchanged and has no `mode`.
   - a press without an engine says it did not start, runs nothing, and its diagnostic can be copied;
   - one engine at a time across Play Combo and the Ability Lab.
 
-## Not yet established (needs a real Windows run)
+## Windows acceptance (2026-10-04)
 
-- Play Ability and Preview State have only run against the mock engine and scripted runners. Still to observe on the X-Ray engine build:
-  - one Performed and one Not-performed Play Ability, on a simple character (for example kfm or bangirasu);
-  - a preview of a cancel-only state (expected to show Forced);
-  - a preview of a state that changes on its first tick (expected to show ForcedNotSeen).
-- That calling `changeState` from the probe's `loop` hook behaves like the source suggests (the state is entered with its own animation and ctrl) is **inferred from the engine source**, not observed.
+**Setup.**
+- Engine: the installed IKEMEN build `D:\Games 3\Ikemen_GO-v1.0.0\Ikemen_GO.exe` (version `jg-simul8-v1 - ffa-build`, sha256 `F68DC970…23D0A1`). It carries the X-Ray input hook and is copied into a disposable sandbox; the install is never written, and its hash was unchanged afterwards.
+- Subject kfm, dummy kfm, stage `stages/ASI_FightIsland/ASI_FightIsland.def`, approach distance 40.
+- Runs 1–6 were made with `ikemenlab xray runtime-ability`; A–E through the real app with a QA script.
+
+| # | Run | Result | Engine evidence (from the trace) |
+|---|---|---|---|
+| 1 | Play Ability `ability:1000` (Kung Fu Palm, ↓↘→ x) | **Performed** | Inputs D (272), DF (275), F (278), x (280); P1 entered 1000 at 281. Own hit at 289; P2 went 5000 → airborne 5030/5035/5050 → lying 5100. 90 damage (3000 → 2910); control back at 329 (48 f). Only `runtime.transition-observed`. |
+| 2 | Play Ability `ability:3000` (Triple Kung Fu Palm, needs power ≥ 1000) | **Not performed / WrongState** | The full double quarter-circle + x was fed (272–288). P1 power stayed 0–118 and P1 entered 1000 (Kung Fu Palm, whose command is the input's tail) at 289; 3000 was never observed. Exit 4. |
+| 3, 5 | Preview `state:3000` | **Forced**, `proof: false` (identical twice) | Forced at 271 with power 0, sampled in 3000 (anim 3000) from 272 to 434. Three hits: 3000 → 2928 (316) → 2856 (346) → 2781 (376); the third launched P2, who lay down at 420. Control back at 435 (163 f). |
+| 4, 6 | Preview `state:1055` (Kung Fu Knee follow-up; Play Ability refuses it as "only entered from other moves") | **Forced**, `proof: false` | P1 ran 1055 (statetype A, anim 1055) → 1056 → 0. No contact. Its Statedef sets no ctrl, so P1 kept the control it had in neutral (see the defect below). |
+| A | App: Play Ability `ability:1000` | **Performed**, attempt 1 | Same figures as run 1. Record `…074416-fdc4ac` has plan, trace, report, ability, diagnostic and meta (`mode: ability`). |
+| B | App: Combos lens, the identical one-step route `cand:neutral>state:1000@state:-1/ctrl:8#0` selected | **No contamination** | Combo panel `hasResult=False`, `canReplay=False`, `canInspect=False`, `playback-diagnostic` (none), no step marks. |
+| C | App: Replay | **Performed**, attempt 2 | A new record `…074431-ef8509`. |
+| D | App: Cancel 2.5 s into a live run (attempt 3) | **Cancelled** | No record; sandbox removed; no engine process left. |
+| E | App: Preview `state:3000` | **Forced**, attempt 4, `PreviewProduced` | Banner kind Preview; record `…074450-37afc1` has `preview.json` and no `report.json`; `meta.json` and `diagnostic.json` have `"proof": false`. The diagnostic is headed "State Preview diagnostic — NOT PROOF" and says "not a verdict". |
+
+After every run: zero sandboxes in `runtime-sandboxes`, no engine processes. The record store's keep-25 rule pruned the three oldest records.
+
+**Defect found and fixed: recovery reading for a state that never takes control away.**
+- Run 4 reported "back in control after 1f" for state 1055. P1 never lost control: forcing skipped the move that normally takes it away, and 1055's Statedef sets no ctrl.
+- `MoveObservation` now counts control only when it returns after being lost, and reports `keptControl: true` ("kept control throughout") otherwise. A preview adds a note explaining why.
+- Run 6, on the fixed build, shows `keptControl: true`, `framesUntilControl: null` and the note. Runs 1–3 are unchanged.
+
+**What this establishes about `changeState` from the probe's loop hook.** It enters the state with its own animation: anim 3000 and 1055 were observed. Statedef `ctrl` applies when the state sets it (3000: ctrl 0). When the state doesn't set it, P1 keeps its current control (1055).
+
+**Not established.**
+- No picture of the engine window could be captured. The install's config runs the engine in exclusive fullscreen (`Fullscreen = 1`, copied into the sandbox): GDI copy and `PrintWindow` returned black frames, and Desktop Duplication lost access when the engine switched to fullscreen (`DXGI_ERROR_ACCESS_LOST`). The config was not changed for a screenshot. The visible execution above is the engine's own per-frame telemetry: state, animation, position, hit flags and the opponent's reaction.
+- ForcedNotSeen (a state that changes on its first tick) has been seen only in the mock engine.
 - The M4 acceptance items (verdicts, close timing, wall-clock linger) remain open as before.
 
 ## Not in Phase 2

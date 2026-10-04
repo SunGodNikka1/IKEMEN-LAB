@@ -244,6 +244,9 @@ case "ability-play":
 case "ability-preview":
     AbilityAction(p => p.PreviewStateCommand, "preview");
     break;
+case "ability-replay":
+    AbilityAction(p => p.ReplayCommand, "replay");
+    break;
 case "ability-status":
     AbilityStatusVerb();
     break;

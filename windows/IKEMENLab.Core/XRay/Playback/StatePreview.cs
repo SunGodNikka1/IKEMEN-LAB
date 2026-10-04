@@ -140,6 +140,8 @@ public static class StatePreview
         var startIndex = frames.IndexOf(seen ?? after[0]);
         var complete = MoveObservation.DriverFinished(log);
         var observed = MoveObservation.Read(frames, startIndex, complete);
+        if (observed.KeptControl == true)
+            notes.Add("P1 kept control in the forced state: its Statedef does not take control away, which the move that normally leads into it would. Forcing skipped that lead-in, one reason a preview is not proof.");
         if (RouteVerifier.InHitState(frames[Math.Max(0, startIndex - 1)].P2))
             notes.Add("The opponent was already in a hit state when the state was forced; its reaction below is not attributable to the preview.");
         if (seen is null)

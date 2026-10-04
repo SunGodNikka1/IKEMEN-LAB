@@ -1,0 +1,31 @@
+{
+  "schema": "ikemenlab.xray.plan/1",
+  "character": "char:kfm",
+  "route": "preview:state:1055",
+  "approachDistance": 40,
+  "neutralFrames": 20,
+  "tailFrames": 123,
+  "maxFrames": 1800,
+  "steps": [
+    {
+      "index": 1,
+      "edge": "preview:state:1055",
+      "kind": "Force",
+      "from": "neutral",
+      "to": "state:1055",
+      "fromState": null,
+      "toState": 1055,
+      "command": null,
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [],
+      "notes": [
+        "Forced with the engine's changeState: not a command path, not proof."
+      ]
+    }
+  ],
+  "warnings": [
+    "State Preview forces the state; nothing about this run is evidence that the move can be performed."
+  ]
+}

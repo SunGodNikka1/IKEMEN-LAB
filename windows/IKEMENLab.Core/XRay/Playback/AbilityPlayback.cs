@@ -307,6 +307,7 @@ public static class AbilityVerifier
         D(w, "damage", o.Damage);
         L(w, "controlFrame", o.ControlFrame);
         if (o.FramesUntilControl is { } c) w.WriteNumber("framesUntilControl", c); else w.WriteNull("framesUntilControl");
+        B(w, "keptControl", o.KeptControl);
         w.WritePropertyName("p1States");
         w.WriteStartArray();
         foreach (var s in o.P1States) w.WriteNumberValue(s);
@@ -351,7 +352,7 @@ public static class AbilityText
         if (o.OpponentKnockedDown == true) parts.Add("knocked down");
         else if (o.OpponentAirborne == true) parts.Add("launched");
         if (o.Damage is > 0 and var d) parts.Add($"{d:0.##} damage");
-        parts.Add(o.FramesUntilControl is { } c ? $"back in control after {c}f" : "control not regained while watched");
+        parts.Add(o.KeptControl == true ? "kept control throughout" : o.FramesUntilControl is { } c ? $"back in control after {c}f" : "control not regained while watched");
         return string.Join(" · ", parts);
     }
 
@@ -371,7 +372,9 @@ public static class AbilityText
             },
             $"Opponent: hit {YesNo(o.OpponentHit)} · launched {YesNo(o.OpponentAirborne)} · knocked down {YesNo(o.OpponentKnockedDown)}" +
             (o.Damage is not null ? $" · {F(o.Damage)} damage (life {F(o.OpponentLifeBefore)} → {F(o.OpponentLifeLowest)})" : " · damage unknown"),
-            o.FramesUntilControl is { } c
+            o.KeptControl == true
+                ? "Kept control throughout: this state never took control away"
+            : o.FramesUntilControl is { } c
                 ? $"Back in control {c} frames after the move started (frame {o.StartFrame} → {o.ControlFrame})"
                 : $"Not back in control within the {o.ObservedFrames} frames watched" + (o.Missing.Contains("p1.ctrl") ? " (control is not readable on this build)" : string.Empty),
             "States: " + string.Join(" → ", o.P1States.Select(s => StateLabel("state:" + s.ToString(CultureInfo.InvariantCulture), name))) + (o.P1StatesTruncated ? " → …" : string.Empty)

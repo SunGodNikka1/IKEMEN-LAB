@@ -197,6 +197,7 @@ public class XRayAbilityPlaybackTests : IDisposable
         Assert.Equal((true, true, 8L), (o.OwnHit, o.OpponentHit, o.ContactFrame!.Value));
         Assert.Equal(20, o.Damage);
         Assert.Equal((14, 20L), (o.FramesUntilControl!.Value, o.ControlFrame!.Value));
+        Assert.Equal(false, o.KeptControl);
         Assert.Equal([200, 0], o.P1States);
         Assert.Equal(false, o.OpponentKnockedDown);
         Assert.StartsWith("Performed · State 200 started via “x” · connected · 20 damage · back in control after 14f", AbilityText.Headline(r, null));
@@ -336,6 +337,68 @@ public class XRayAbilityPlaybackTests : IDisposable
         Assert.Contains("not proof", doc.RootElement.GetProperty("notProof").GetString());
         Assert.False(doc.RootElement.TryGetProperty("runtimeRules", out _));
         Assert.DoesNotContain("RuntimeVerified", StatePreview.ToJson(r));
+    }
+
+    [Fact]
+    public void AForcedStateThatNeverTakesControlAwayIsReportedAsKeepingItNotAsRecovering()
+    {
+        // Reproduced on the real engine: kfm's Statedef 1055 sets no ctrl, so forced from neutral P1 keeps control through 1055 → 1056 → 0.
+        var plan = PreviewPlan("state:1000");
+        var r = StatePreview.Read(plan, UpToForce().Frames(5, 1000, p1Ctrl: true).Frames(7, 1001, p1Ctrl: true).Frames(30, 0).Build(plan));
+        Assert.Equal(PreviewStatus.Forced, r.Status);
+        Assert.Equal(true, r.Observed!.KeptControl);
+        Assert.Null(r.Observed.FramesUntilControl);
+        Assert.Contains("kept control throughout", StatePreview.Headline(r, null));
+        Assert.Contains(AbilityText.Details(r.Observed, null), l => l.StartsWith("Kept control throughout"));
+        Assert.Contains(r.Notes, n => n.StartsWith("P1 kept control in the forced state"));
+        Assert.Contains("\"keptControl\": true", StatePreview.ToJson(r));
+    }
+
+    /// <summary>
+    /// Real runs of the installed IKEMEN build (engine sha256 F68DC970…) on kfm vs kfm, approach 40, recorded during the Phase 2 Windows acceptance
+    /// pass with <c>ikemenlab xray runtime-ability</c>. Each plan was regenerated with <c>ability-plan --approach 40</c>; its fingerprint must equal
+    /// the one the engine run recorded, so these traces really belong to these plans.
+    /// </summary>
+    [Fact]
+    public void RealKfmRunsOnTheInstalledEngineReadAsTheyWereObserved()
+    {
+        static InputPlan Plan(string name) => InputPlanner.FromJson(File.ReadAllText(Path.Combine(FixtureDir, name)));
+        static TraceLog Log(string name) => TraceReader.ReadFile(Path.Combine(FixtureDir, name));
+
+        // (1) Kung Fu Palm through its own command (↓↘→ x): Performed.
+        var ap = Plan("phase2_kfm_ability1000_real_plan.json");
+        var at = Log("phase2_kfm_ability1000_real_trace.jsonl");
+        Assert.Equal(at.Meta!.PlanFingerprint, InputPlanner.Fingerprint(ap));
+        Assert.Equal("F68DC97081E9C14A348FF95EEBE52A365D2EA67357AEAC8C94BFD3069123D0A1", at.Meta.EngineSha256);
+        var a = AbilityVerifier.Verify("ability:1000", ap, at);
+        Assert.Equal(AbilityStatus.Performed, a.Status);
+        Assert.Equal((272L, 281L), (a.InputFrame!.Value, a.EntryFrame!.Value));
+        Assert.Equal([AbilityVerifier.TransitionRule], a.RuntimeRules);
+        var o = a.Observed!;
+        Assert.Equal(("yes", 90.0, true, true), (o.Connected, o.Damage!.Value, o.OpponentAirborne!.Value, o.OpponentKnockedDown!.Value));
+        Assert.Equal((48, false), (o.FramesUntilControl!.Value, o.KeptControl!.Value));
+        Assert.Equal([1000, 0], o.P1States);
+
+        // (3) Triple Kung Fu Palm forced with power 0 (it needs 1000): it executes, three hits, never proof.
+        var sp = Plan("phase2_kfm_preview3000_real_plan.json");
+        var st = Log("phase2_kfm_preview3000_real_trace.jsonl");
+        Assert.Equal(st.Meta!.PlanFingerprint, InputPlanner.Fingerprint(sp));
+        var s = StatePreview.Read(sp, st);
+        Assert.Equal((PreviewStatus.Forced, 271L, 272L), (s.Status, s.ForceFrame!.Value, s.FirstSeenFrame!.Value));
+        Assert.False(s.Proof);
+        Assert.Equal((219.0, true, 163), (s.Observed!.Damage!.Value, s.Observed.OpponentKnockedDown!.Value, s.Observed.FramesUntilControl!.Value));
+        Assert.All(st.Frames.Where(f => f.Frame >= 272 && f.P1.State == 3000), f => Assert.Equal(0, f.P1.Power));   // the gate it bypassed
+
+        // (4) Follow-up-only state 1055 forced: it runs (1055 → 1056 → 0), but its Statedef never takes control away.
+        var fp = Plan("phase2_kfm_preview1055_real_plan.json");
+        var ft = Log("phase2_kfm_preview1055_real_trace.jsonl");
+        Assert.Equal(ft.Meta!.PlanFingerprint, InputPlanner.Fingerprint(fp));
+        var f = StatePreview.Read(fp, ft);
+        Assert.Equal(PreviewStatus.Forced, f.Status);
+        Assert.Equal([1055, 1056, 0], f.Observed!.P1States);
+        Assert.Equal(true, f.Observed.KeptControl);
+        Assert.Null(f.Observed.FramesUntilControl);                                  // was "back in control after 1f" before the fix
+        Assert.Equal("no", f.Observed.Connected);
     }
 
     [Fact]

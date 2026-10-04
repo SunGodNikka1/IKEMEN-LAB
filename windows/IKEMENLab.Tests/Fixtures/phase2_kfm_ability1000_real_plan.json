@@ -1,0 +1,59 @@
+{
+  "schema": "ikemenlab.xray.plan/1",
+  "character": "char:kfm",
+  "route": "cand:neutral>state:1000@state:-1/ctrl:8#0",
+  "approachDistance": 40,
+  "neutralFrames": 20,
+  "tailFrames": 123,
+  "maxFrames": 1800,
+  "steps": [
+    {
+      "index": 1,
+      "edge": "cand:neutral>state:1000@state:-1/ctrl:8#0",
+      "kind": "Start",
+      "from": "neutral",
+      "to": "state:1000",
+      "fromState": null,
+      "toState": 1000,
+      "command": "QCF_x",
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "D"
+        ],
+        [
+          "D"
+        ],
+        [],
+        [
+          "D",
+          "F"
+        ],
+        [
+          "D",
+          "F"
+        ],
+        [],
+        [
+          "F"
+        ],
+        [
+          "F"
+        ],
+        [
+          "x"
+        ],
+        [
+          "x"
+        ],
+        []
+      ],
+      "notes": []
+    }
+  ],
+  "warnings": [
+    "Step 1 (cand:neutral>state:1000@state:-1/ctrl:8#0) has 1 unmodelled condition(s); the script may not satisfy them."
+  ]
+}
