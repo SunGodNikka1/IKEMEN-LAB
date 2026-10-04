@@ -134,9 +134,18 @@ public sealed class ComboPlaybackService
         _sandboxBase = sandboxBase;
         _runner = runner ?? new ProcessEngineRunner();
         _storeRoot = storeRoot ?? Path.Combine(AppDataPaths.GetAppDataDirectory(), "xray-playback");
+        // A real engine takes the machine-wide one-engine lease; a test runner that launches nothing does not.
+        Broker = _runner is ProcessEngineRunner ? RuntimeBroker.Shared : null;
     }
 
     public string StoreRoot => _storeRoot;
+
+    /// <summary>
+    /// The one-engine broker a job owner (the app's <see cref="PlaybackSession"/>, a CLI command, the MCP job queue) takes a lease from for the whole
+    /// job before anything here launches. <see cref="RuntimeBroker.Shared"/> for the real engine runner; null (no lease) for test runners.
+    /// This service itself never takes the lease: an experiment's trials run under the lease of the job that started them.
+    /// </summary>
+    public RuntimeBroker? Broker { get; init; }
 
     /// <summary>
     /// The same engine runner, sandbox base and seams, writing to another store with its own record limit. Sequence experiments use this so their
@@ -144,7 +153,7 @@ public sealed class ComboPlaybackService
     /// </summary>
     public ComboPlaybackService WithStore(string storeRoot, int recordLimit)
     {
-        var child = new ComboPlaybackService(_runner, storeRoot, _sandboxBase) { RecordLimit = recordLimit, CommitSeam = CommitSeam, SandboxDeleter = SandboxDeleter };
+        var child = new ComboPlaybackService(_runner, storeRoot, _sandboxBase) { RecordLimit = recordLimit, CommitSeam = CommitSeam, SandboxDeleter = SandboxDeleter, Broker = Broker };
         child.CleanupFailed += (path, why) => CleanupFailed?.Invoke(path, why);
         return child;
     }

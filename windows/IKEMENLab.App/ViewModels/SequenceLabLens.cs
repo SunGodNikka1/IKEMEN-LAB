@@ -444,7 +444,7 @@ public sealed class SequenceLabLens : XRayLens
     {
         // Results always belong to an exact saved version: an unsaved or edited draft is saved first.
         var sequence = SavedKey is null ? Save(asNew: false) : Draft with { Version = _draftVersion };
-        if (sequence is null || Owner.Combos.Graph is not { } graph || _index is not { } index) return;
+        if (sequence is null || Owner.Combos.Graph is not { } graph || _index is null) return;
         var setup = Owner.Combos.Playback.CheckSetup(showIssuesAsSetup: false);
         var scope = sequence.ScopeKey;
         if (setup is null || !setup.Ready)
@@ -454,16 +454,10 @@ public sealed class SequenceLabLens : XRayLens
             return;
         }
 
-        var planned = SequencePlanner.Plan(graph, sequence, setup.ApproachDistance);
-        if (planned.Plan is null) { Status = "Cannot run: " + planned.Refused; return; }
-        var labels = planned.Steps.Select(s => s.Label).ToList();
-        var chain = SequenceLabels.Chain(sequence.Actions, index);
-        var request = new SequenceRunRequest(Owner.Root, Owner.SubjectFolder, Owner.SubjectDef, planned.Plan, labels, setup, chain);
-        var expScope = new ExperimentScope(index.CharacterId, ExperimentScope.HashOf(index), null, setup.Dummy, setup.Stage, setup.ApproachDistance, sequence.Id, sequence.Version,
-            sequence.Name, InputPlanner.Fingerprint(planned.Plan));
-        var job = new SequenceJob(sequence.Key, sequence.Name, setup, trials, chain);
+        var (prepared, planned) = SequenceExperimentRunner.Prepare(graph, sequence, Owner.Root, Owner.SubjectFolder, Owner.SubjectDef, setup, trials);
+        if (prepared is null) { Status = "Cannot run: " + planned.Refused; return; }
         Status = trials > 1 ? SequenceExperimentRunner.CostText(trials, LastMeasuredSeconds()) : string.Empty;
-        await _session.RunSequenceAsync(job, (gate, progress) => SequenceExperimentRunner.Run(Owner.PlaybackService, Owner.ExperimentStore, request, expScope, chain, trials, gate, progress));
+        await _session.RunSequenceAsync(prepared.Job, (gate, progress) => SequenceExperimentRunner.Run(Owner.PlaybackService, Owner.ExperimentStore, prepared, gate, progress));
     }
 
     private double? LastMeasuredSeconds() =>

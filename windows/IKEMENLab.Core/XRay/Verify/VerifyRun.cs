@@ -21,18 +21,37 @@ public interface ICancellableEngineRunner : IEngineRunner
 /// <summary>Launches the sandbox's own copy of the engine, working directory = the sandbox, killed when the timeout passes or the run is cancelled.</summary>
 public sealed class ProcessEngineRunner : ICancellableEngineRunner
 {
+    /// <summary>
+    /// How the engine is started. It never shares the caller's standard streams: under the MCP server they are the protocol pipes (an engine reading stdin
+    /// would swallow a client's request, anything it printed would corrupt the stream), and under the CLI stdout is the JSON result. It gets its own pipes.
+    /// </summary>
+    public static ProcessStartInfo StartInfo(string exePath, string workingDirectory, IEnumerable<string> arguments)
+    {
+        var psi = new ProcessStartInfo(exePath)
+        {
+            WorkingDirectory = workingDirectory, UseShellExecute = false,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+        };
+        foreach (var a in arguments) psi.ArgumentList.Add(a);
+        return psi;
+    }
+
     public EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout) => Run(sandbox, timeout, CancellationToken.None);
 
     public EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout, CancellationToken cancel)
     {
         cancel.ThrowIfCancellationRequested();
         if (!File.Exists(sandbox.ExePath)) return new EngineRunResult(null, false, $"The sandbox has no engine executable at {sandbox.ExePath}.");
-        var psi = new ProcessStartInfo(sandbox.ExePath) { WorkingDirectory = sandbox.Root, UseShellExecute = false };
-        foreach (var a in sandbox.Arguments) psi.ArgumentList.Add(a);
+        var psi = StartInfo(sandbox.ExePath, sandbox.Root, sandbox.Arguments);
         try
         {
             using var p = Process.Start(psi);
             if (p is null) return new EngineRunResult(null, false, "The engine process did not start.");
+            // Drain (and drop) whatever the engine prints so it can never block on a full pipe. Its stdin stays open and empty.
+            p.OutputDataReceived += (_, _) => { };
+            p.ErrorDataReceived += (_, _) => { };
+            p.BeginOutputReadLine();
+            p.BeginErrorReadLine();
             // Poll so a Cancel is honoured within a fraction of a second without a second thread owning the process.
             var deadline = DateTime.UtcNow + timeout;
             while (!p.WaitForExit(200))

@@ -51,15 +51,15 @@ internal static class SequenceCommands
 
         var store = new ExperimentStore(opts.Get("store"));
         var playback = new ComboPlaybackService(new ProcessEngineRunner(), Path.Combine(store.Root, "_unused-playback"), opts.Get("out"));
-        var labels = planned.Steps.Select(s => s.Label).ToList();
-        var request = new SequenceRunRequest(opts.Root, subjectFolder, located.Entry.DefPath["chars/".Length..], planned.Plan, labels, setup, SequenceLabels.Chain(actions, index));
-        var scope = new ExperimentScope(index!.CharacterId, ExperimentScope.HashOf(index), null, setup.Dummy, setup.Stage, setup.ApproachDistance, sequence.Id, sequence.Version,
-            sequence.Name, InputPlanner.Fingerprint(planned.Plan));
+        var (prepared, replanned) = SequenceExperimentRunner.Prepare(graph, sequence, opts.Root, subjectFolder, located.Entry.DefPath["chars/".Length..], setup, trials);
+        if (prepared is null) return CliApp.FailWith(output, error, 3, $"This sequence cannot be played: {replanned.Refused}");
+        using var lease = CliApp.EngineLease("runtime-sequence " + prepared.Chain, out var busy);
+        if (lease is null) return CliApp.FailWith(output, error, 3, busy!);
         error.WriteLine(SequenceExperimentRunner.CostText(trials, null));
         try
         {
-            var outcome = SequenceExperimentRunner.Run(playback, store, request, scope, request.Summary, trials, new PlaybackCancellation(),
-                p => { if (p.StartsWith("trial:", StringComparison.Ordinal)) error.WriteLine("  " + p); });
+            var outcome = SequenceExperimentRunner.Run(playback, store, prepared, new PlaybackCancellation(),
+                p => { if (p.StartsWith("trial:", StringComparison.Ordinal)) error.WriteLine("  " + p); }, ExperimentSummary.CliOrigin);
             using var doc = JsonDocument.Parse(ExperimentStore.ToJson(outcome.Summary));
             using var ms = new MemoryStream();
             using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))

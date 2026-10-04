@@ -74,6 +74,8 @@ internal static class AbilityCommands
             new SandboxRequest(located.Root, subjectFolder, located.Entry.DefPath["chars/".Length..], dummy, dummyLoc.Entry.DefPath["chars/".Length..], stage,
                 plan.MaxFrames, opts.Get("out"), AdapterPath: adapter, EngineExePath: opts.Get("engine"), EngineRuntimeDlls: opts.Get("engine-dlls")),
             TimeSpan.FromSeconds(seconds), opts.Flag("keep"));
+        using var lease = CliApp.EngineLease((preview ? "runtime-ability --preview " : "runtime-ability ") + (abilityId ?? plan.RouteKey), out var busy);
+        if (lease is null) return CliApp.FailWith(output, error, 3, busy!);
         try
         {
             var run = VerifyRunner.Execute(plan, request, new ProcessEngineRunner());

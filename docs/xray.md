@@ -19,7 +19,7 @@ DEF [Files] ─▶ CMD · CNS · ST · AIR · common1.cns · SFF
      WPF lenses     ikemenlab xray …        runtime traces (spike) attach by state number
 ```
 
-Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md); accepted in [xray-milestone-3-acceptance.md](xray-milestone-3-acceptance.md).** **Milestone 4 (Play / Verify Combo from the Combos lens) is in [xray-m4-play-combo.md](xray-m4-play-combo.md).** **Phase 2 (Play Ability and Preview State from the Ability Atlas, on the same playback stack) is in [xray-phase2-play-ability.md](xray-phase2-play-ability.md).** **Phase 3 (Sequence Lab: manual follow-up experimentation) is in [xray-phase3-sequence-lab.md](xray-phase3-sequence-lab.md).**
+Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md); accepted in [xray-milestone-3-acceptance.md](xray-milestone-3-acceptance.md).** **Milestone 4 (Play / Verify Combo from the Combos lens) is in [xray-m4-play-combo.md](xray-m4-play-combo.md).** **Phase 2 (Play Ability and Preview State from the Ability Atlas, on the same playback stack) is in [xray-phase2-play-ability.md](xray-phase2-play-ability.md).** **Phase 3 (Sequence Lab: manual follow-up experimentation) is in [xray-phase3-sequence-lab.md](xray-phase3-sequence-lab.md).** **Phase 4 (the Character X-Ray MCP server for IDE agents: Observe + Experiment tools) is in [xray-phase4-mcp.md](xray-phase4-mcp.md).**
 
 ## The model
 
@@ -94,6 +94,15 @@ walk, wait, chase-until-within, dash and jump, run the sequence ×1 / ×10 / ×5
 read **True Combo / Connected Sequence / Did Not Connect / Could Not Test** with a plain reason per step. A chase after a knockdown that connects is a
 *connected sequence*, not a combo. Experiments go to their own store and never touch the playback history. Details:
 [xray-phase3-sequence-lab.md](xray-phase3-sequence-lab.md).
+
+## MCP server for IDE agents (Phase 4)
+
+`ikemenlab-mcp.exe` (project `windows/IKEMENLab.Mcp`) is a local stdio MCP server, so Claude Code, Codex, Cursor and other MCP clients work with this
+model instead of the character files: 8 read-only Observe tools (inspect_character, list_abilities, inspect_ability, explain_state, get_source,
+list_experiments, get_experiment_results, get_runtime_trace) and 8 Experiment tools (play_ability, preview_state, test_sequence, create_experiment,
+run_experiment, compare_experiments, get_job, cancel_job). Answers use your names first, ids second; verdicts and evidence are exactly the ones above.
+Only one playback engine runs at a time across the app, the CLI and MCP (a machine-wide lease); a busy engine queues MCP jobs and refuses the app's or
+the CLI's press with who holds it. Setup and the tool list: [xray-phase4-mcp.md](xray-phase4-mcp.md).
 
 ## Evidence confidence
 

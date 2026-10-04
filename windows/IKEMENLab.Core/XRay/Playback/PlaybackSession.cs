@@ -1,3 +1,4 @@
+using IKEMENLab.Core.XRay.Runtime;
 using IKEMENLab.Core.XRay.Verify;
 
 namespace IKEMENLab.Core.XRay.Playback;
@@ -93,6 +94,9 @@ public sealed class PlaybackSession
     }
 
     public event Action? Changed;
+
+    /// <summary>Who this session is, as other clients see it while it holds the engine ("IKEMEN Lab app", "MCP · claude-code").</summary>
+    public string ClientName { get; init; } = "IKEMEN Lab app";
 
     public PlaybackState State { get; private set; } = PlaybackState.Idle;
     public string Phase { get; private set; } = string.Empty;
@@ -241,7 +245,15 @@ public sealed class PlaybackSession
         Raise();
         try
         {
-            var run = Task.Run(() => work(gate));
+            // The whole job runs under one lease on the machine-wide engine broker (when the service has one): a second client — another window,
+            // the CLI or an MCP session — is refused with a clear "busy" error instead of launching a conflicting engine.
+            var broker = _service.Broker;
+            var holder = RuntimeHolder.Now(ClientName, job.Summary);
+            var run = Task.Run(() =>
+            {
+                using var lease = broker?.Acquire(holder);
+                return work(gate);
+            });
             lock (_gate) _run = run;
             var result = await run.ConfigureAwait(false);
             // The service has already committed this result (it is on disk); a Cancel that arrived after that point does not undo it.

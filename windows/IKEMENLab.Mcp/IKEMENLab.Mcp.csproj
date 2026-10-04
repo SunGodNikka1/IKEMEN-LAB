@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>IKEMENLab.Mcp</RootNamespace>
+    <AssemblyName>ikemenlab-mcp</AssemblyName>
+    <Version>0.4.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\IKEMENLab.Core\IKEMENLab.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="IKEMENLab.Mcp.Tests" />
+  </ItemGroup>
+
+</Project>

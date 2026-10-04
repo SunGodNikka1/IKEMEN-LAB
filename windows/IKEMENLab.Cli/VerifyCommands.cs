@@ -80,6 +80,8 @@ internal static class VerifyCommands
             TimeSpan.FromSeconds(seconds), opts.Flag("keep"));
         try
         {
+            using var lease = CliApp.EngineLease("runtime-verify " + route.Key, out var busy);
+            if (lease is null) return CliApp.FailWith(output, error, 3, busy!);
             var result = VerifyRunner.Run(graph, route, request, new ProcessEngineRunner(), planOptions);
             output.WriteLine(RouteVerifier.ToJson(result.Report));
             if (result.SandboxPath is { } kept) error.WriteLine($"Sandbox kept at {kept} (runtime-clean deletes it). Trace: {result.TracePath}");

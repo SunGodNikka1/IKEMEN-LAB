@@ -39,6 +39,10 @@ public sealed record ExperimentSummary(
     public string Directory { get; init; } = string.Empty;
     public IReadOnlyList<string> Notes { get; init; } = [];
 
+    /// <summary>Who ran it: <see cref="AppOrigin"/> (the Sequence Lab; also every experiment saved before origins existed), <see cref="CliOrigin"/> or <see cref="McpOrigin"/>.</summary>
+    public string Origin { get; init; } = AppOrigin;
+    public const string AppOrigin = "app", CliOrigin = "cli", McpOrigin = "mcp";
+
     public int Successes => Trials.Count(t => t.Verdict is nameof(SequenceVerdict.TrueCombo) or nameof(SequenceVerdict.ConnectedSequence));
     public int TrueCombos => Trials.Count(t => t.Verdict == nameof(SequenceVerdict.TrueCombo));
     public int Untestable => Trials.Count(t => t.Verdict == nameof(SequenceVerdict.CouldNotTest));
@@ -68,6 +72,12 @@ public sealed record ExperimentSummary(
 
 /// <summary>The result the session publishes for a Sequence Lab run: the experiment summary and the latest trial in full.</summary>
 public sealed record ExperimentOutcome(ExperimentSummary Summary, SequenceOutcome? LastTrial);
+
+/// <summary>
+/// Everything one run of a saved sequence version needs, built by <see cref="SequenceExperimentRunner.Prepare"/>: the plan, the trial request, the exact
+/// scope its results belong to, and the session job. The Sequence Lab, the CLI and the MCP server all build their runs through it.
+/// </summary>
+public sealed record PreparedSequenceRun(Sequence Sequence, SequencePlanResult Planned, SequenceRunRequest Request, ExperimentScope Scope, SequenceJob Job, string Chain, int Trials);
 
 /// <summary>
 /// The isolated experiment store, <c>%LOCALAPPDATA%\IKEMEN Lab\xray-experiments\</c>: one folder per experiment (<c>experiment.json</c> and a
@@ -108,7 +118,7 @@ public sealed class ExperimentStore
     {
         var doc = new
         {
-            schema = ExperimentSummary.SchemaVersion, s.Id, s.CreatedUtc, s.Scope, s.Steps, s.Requested, s.Completed, s.Stopped, s.Trials, s.Notes,
+            schema = ExperimentSummary.SchemaVersion, s.Id, s.CreatedUtc, s.Origin, s.Scope, s.Steps, s.Requested, s.Completed, s.Stopped, s.Trials, s.Notes,
             stats = new
             {
                 s.Successes, s.TrueCombos, s.Untestable, s.AttacksTried, s.AttacksConnected, s.SuccessRate, s.TrueComboRate, s.ConnectionRate,
@@ -142,7 +152,8 @@ public sealed class ExperimentStore
                 list.Add(new ExperimentSummary(r.GetProperty("id").GetString()!, r.GetProperty("createdUtc").GetDateTime(), scope, r.GetProperty("steps").GetString() ?? string.Empty,
                     r.GetProperty("requested").GetInt32(), r.GetProperty("completed").GetInt32(), r.GetProperty("stopped").GetBoolean(), trials)
                 {
-                    Directory = dir, Notes = r.TryGetProperty("notes", out var n) ? n.Deserialize<List<string>>(Json) ?? [] : []
+                    Directory = dir, Notes = r.TryGetProperty("notes", out var n) ? n.Deserialize<List<string>>(Json) ?? [] : [],
+                    Origin = r.TryGetProperty("origin", out var o) && o.ValueKind == JsonValueKind.String && o.GetString() is { Length: > 0 } origin ? origin : ExperimentSummary.AppOrigin
                 });
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException or KeyNotFoundException or InvalidOperationException) { /* skip */ }
@@ -151,10 +162,13 @@ public sealed class ExperimentStore
         return list.OrderByDescending(e => e.CreatedUtc).ThenByDescending(e => e.Id, StringComparer.Ordinal).ToList();
     }
 
-    /// <summary>Keeps the newest <see cref="KeepExperiments"/> experiments in THIS store; nothing outside it is touched.</summary>
+    /// <summary>
+    /// Keeps the newest <see cref="KeepExperiments"/> experiments of EACH origin in THIS store; nothing outside it is touched. Experiments run by the
+    /// CLI or an MCP agent therefore never evict the user's own Sequence Lab experiments (and the reverse), and no retention is raised for anyone.
+    /// </summary>
     public void Prune()
     {
-        foreach (var old in List().Skip(KeepExperiments))
+        foreach (var old in List().GroupBy(e => e.Origin, StringComparer.Ordinal).SelectMany(g => g.Skip(KeepExperiments)))
         {
             try { System.IO.Directory.Delete(old.Directory, true); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
@@ -166,12 +180,36 @@ public sealed class ExperimentStore
 public static class SequenceExperimentRunner
 {
     /// <summary>
+    /// Plans <paramref name="sequence"/> (one plan for every trial) and builds its run against <paramref name="setup"/>. Returns no run, with the
+    /// planner's refusal in <c>Planned</c>, when the sequence cannot be played.
+    /// </summary>
+    public static (PreparedSequenceRun? Run, SequencePlanResult Planned) Prepare(Combo.CandidateGraph graph, Sequence sequence, string root, string subjectFolder,
+        string subjectDef, PlaybackSetup setup, int trials)
+    {
+        var index = graph.Index;
+        var planned = SequencePlanner.Plan(graph, sequence, setup.ApproachDistance);
+        if (planned.Plan is null) return (null, planned);
+        var labels = planned.Steps.Select(s => s.Label).ToList();
+        var chain = SequenceLabels.Chain(sequence.Actions, index);
+        var request = new SequenceRunRequest(root, subjectFolder, subjectDef, planned.Plan, labels, setup, chain);
+        var scope = new ExperimentScope(index.CharacterId, ExperimentScope.HashOf(index), null, setup.Dummy, setup.Stage, setup.ApproachDistance, sequence.Id, sequence.Version,
+            sequence.Name, InputPlanner.Fingerprint(planned.Plan));
+        var job = new SequenceJob(sequence.Key, sequence.Name, setup, trials, chain);
+        return (new PreparedSequenceRun(sequence, planned, request, scope, job, chain, trials), planned);
+    }
+
+    /// <summary>Runs a prepared sequence (see <see cref="Run(ComboPlaybackService, ExperimentStore, SequenceRunRequest, ExperimentScope, string, int, PlaybackCancellation, Action{string}?, string)"/>).</summary>
+    public static ExperimentOutcome Run(ComboPlaybackService playback, ExperimentStore store, PreparedSequenceRun run, PlaybackCancellation job, Action<string>? progress = null,
+        string origin = ExperimentSummary.AppOrigin) =>
+        Run(playback, store, run.Request, run.Scope, run.Chain, run.Trials, job, progress, origin);
+
+    /// <summary>
     /// Runs the trials. Each trial has its own commit/cancel decision linked to <paramref name="job"/>: a cancel stops the trial in progress (no
     /// record for it) and no further trials start; finished trials stay recorded and the summary says the experiment was stopped. With no finished
     /// trial a cancel is rethrown, so nothing is published.
     /// </summary>
     public static ExperimentOutcome Run(ComboPlaybackService playback, ExperimentStore store, SequenceRunRequest request, ExperimentScope scope, string steps, int trials,
-        PlaybackCancellation job, Action<string>? progress = null)
+        PlaybackCancellation job, Action<string>? progress = null, string origin = ExperimentSummary.AppOrigin)
     {
         if (trials < 1) throw new ArgumentOutOfRangeException(nameof(trials));
         var dir = store.NewExperimentDirectory(out var id);
@@ -181,7 +219,7 @@ public static class SequenceExperimentRunner
         SequenceOutcome? last = null;
         var stopped = false;
         var effective = scope;
-        ExperimentSummary Summary() => new(id, DateTime.UtcNow, effective, steps, trials, done.Count, stopped, done.ToList()) { Directory = dir, Notes = notes.ToList() };
+        ExperimentSummary Summary() => new(id, DateTime.UtcNow, effective, steps, trials, done.Count, stopped, done.ToList()) { Directory = dir, Notes = notes.ToList(), Origin = origin };
 
         try
         {

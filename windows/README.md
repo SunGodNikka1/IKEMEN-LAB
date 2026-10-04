@@ -7,6 +7,8 @@ C# / .NET 8 / WPF foundation for browsing and launching an existing IKEMEN GO in
 - `IKEMENLab.Core` — DEF parsing, read-only indexing, settings, launcher
 - `IKEMENLab.App` — WPF shell (Dashboard, Characters, Settings)
 - `IKEMENLab.Tests` — xUnit
+- `IKEMENLab.Cli` — `ikemenlab xray …` (JSON for tools and agents)
+- `IKEMENLab.Mcp` — `ikemenlab-mcp.exe`, the Character X-Ray MCP server (stdio); `IKEMENLab.Mcp.Tests` (+ its stand-in engine `IKEMENLab.Mcp.Tests.StdinEngine`)
 
 ## Safety
 
@@ -67,6 +69,8 @@ an evidence confidence (proven / inferred / unknown, drawn differently). The sam
 `ikemenlab xray …` command line. See [docs/xray.md](../docs/xray.md), [docs/xray-evidence-rules.md](../docs/xray-evidence-rules.md) and, for the
 static combo candidates (Milestone 2), [docs/xray-combo.md](../docs/xray-combo.md), and for the
 runtime telemetry spike, [docs/xray-runtime-spike.md](../docs/xray-runtime-spike.md) (`scripts\Run-XRaySpike.ps1`).
+IDE agents (Claude Code, Codex, Cursor) reach the same model and experiments through the local MCP server `IKEMENLab.Mcp` (`ikemenlab-mcp.exe`);
+see [docs/xray-phase4-mcp.md](../docs/xray-phase4-mcp.md).
 
 ## Build
 
