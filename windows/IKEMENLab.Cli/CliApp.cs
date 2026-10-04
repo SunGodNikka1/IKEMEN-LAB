@@ -50,6 +50,11 @@ public static class CliApp
                        Play Ability: Performed (exit 0) / NotPerformed (4) / Inconclusive (5), from the route verifier's step check on the one move,
                        plus what followed (contact, reaction, damage, recovery) as measurements. --preview forces the state instead: never a verdict,
                        "proof": false (exit 0 when it ran, 4 when the engine refused the state, 5 when it could not run)
+          sequence-plan   <character> "<steps>" [--approach N]   how a Sequence Lab sequence would be played, or why not. Steps: 1000 (ability),
+                       walk:N, back:N, wait:N, chase:D, chase:D! (stop if the opponent recovers), dash, jump — separated by ">"
+          runtime-sequence <character> "<steps>" --root R --dummy <folder> --stage <stages/x.def> [--engine <exe>] [--trials N (max 50)] [--store DIR]
+                       runs it N times (each trial replays the whole sequence); TrueCombo / ConnectedSequence / DidNotConnect / CouldNotTest per trial.
+                       Trials go to the isolated experiment store (never the playback history). Exit 0 all succeeded, 4 some did not connect, 5 untestable
           rank-subjects   --root R [--limit N]      ranks the installed characters as runtime-verification subjects
           runtime-clean   <sandbox dir>            deletes a sandbox (only folders carrying the sandbox marker)
 
@@ -73,6 +78,7 @@ public static class CliApp
             if (command == "rules") { output.WriteLine(XRayJson.Rules()); return 0; }
             if (VerifyCommands.Handles(command)) return VerifyCommands.Run(command, opts, output, error);
             if (AbilityCommands.Handles(command)) return AbilityCommands.Run(command, opts, output, error);
+            if (SequenceCommands.Handles(command)) return SequenceCommands.Run(command, opts, output, error);
             if (command.StartsWith("runtime-", StringComparison.Ordinal)) return RuntimeCommands.Run(command, opts, output, error);
 
             if (opts.Positional.Count < 3) { error.WriteLine(Usage); return 2; }

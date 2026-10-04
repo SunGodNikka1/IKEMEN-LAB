@@ -247,6 +247,18 @@ case "ability-preview":
 case "ability-replay":
     AbilityAction(p => p.ReplayCommand, "replay");
     break;
+case "seq-load":
+    SeqLoad(rest);
+    break;
+case "seq-save":
+    SeqSave(rest);
+    break;
+case "seq-run":
+    SeqRun(rest);
+    break;
+case "seq-status":
+    SeqStatus();
+    break;
 case "ability-status":
     AbilityStatusVerb();
     break;
@@ -976,6 +988,58 @@ case "xray-combos-find":
         var text = AbilityLab().DiagnosticText();
         if (text.Length == 0) { _log.Add("  ability-diagnostic: (none) - no attempt, or the latest attempt is not for the selected ability"); return; }
         foreach (var line in text.Split('\n')) _log.Add("  diag| " + line);
+    }
+
+    // ---------------------------------------------------------------- Sequence Lab (Phase 3)
+
+    private SequenceLabLens SeqLab() => XRayVm().SequenceLab;
+
+    /// <summary>seq-load &lt;steps&gt; - replaces the Sequence Lab draft (compact form: "1000 > chase:35 > 200") and logs how each step will be played.</summary>
+    private void SeqLoad(string spec)
+    {
+        var lab = SeqLab();
+        lab.LoadSpec(spec);
+        XRayVm().ActiveLens = XRayLensKind.Sequences;
+        _log.Add($"  seq-load: {lab.PlanText}");
+        foreach (var s in lab.Steps) _log.Add($"  seq.step {s.Number}: {s.Label} :: {s.How}" + (s.HasProblem ? " !! " + s.Problem : string.Empty));
+    }
+
+    private void SeqSave(string name)
+    {
+        var lab = SeqLab();
+        if (name.Length > 0) lab.Name = name;
+        lab.SaveCommand.Execute(null);
+        _log.Add($"  seq-save: key={lab.SavedKey} version={lab.VersionText} status={lab.Status}");
+    }
+
+    /// <summary>seq-run 1|10|50 - invokes the Sequence Lab's own Run button (×50 also ticks its confirmation, as a person would). Fire-and-forget; use playback-wait settled.</summary>
+    private void SeqRun(string rest)
+    {
+        var lab = SeqLab();
+        var n = int.TryParse(rest.Trim(), out var v) ? v : 1;
+        if (n == 50) lab.Confirm50 = true;
+        var command = n switch { 10 => lab.Run10Command, 50 => lab.Run50Command, _ => lab.Run1Command };
+        if (!command.CanExecute(null)) throw new InvalidOperationException($"seq-run {n} refused: {lab.PlanText} (busy={lab.IsBusy})");
+        var before = XRayVm().PlaybackSession.AttemptId;
+        command.Execute(null);
+        var session = XRayVm().PlaybackSession;
+        _log.Add($"  seq-run: ×{n} invoked; attemptId={session.AttemptId} (previous {before}) scope={session.AttemptRouteKey}");
+    }
+
+    private void SeqStatus()
+    {
+        var lab = SeqLab();
+        var session = XRayVm().PlaybackSession;
+        _log.Add($"  seq.key={lab.SavedKey}");
+        _log.Add($"  seq.plan={lab.PlanText}");
+        _log.Add($"  seq.attemptState={session.Attempt} scope={session.AttemptRouteKey}");
+        _log.Add($"  seq.resultKind={lab.ResultKind}");
+        _log.Add($"  seq.headline={lab.Headline}");
+        foreach (var l in lab.ResultLines) _log.Add("  seq.line=" + l);
+        foreach (var s in lab.Steps) _log.Add($"  seq.step {s.Number}: {s.Glyph} {s.Label} — {s.Result}");
+        if (session.ExperimentResult is { } x && session.IsFor("sequence:" + lab.SavedKey))
+            _log.Add($"  seq.experiment={x.Summary.Directory} trials={x.Summary.Completed}/{x.Summary.Requested} stopped={x.Summary.Stopped}");
+        foreach (var line in lab.DetailsText.Split('\n', StringSplitOptions.RemoveEmptyEntries)) _log.Add("  seq.detail| " + line);
     }
 
     private static bool VerdictSettled(ComboPlaybackPanel p)

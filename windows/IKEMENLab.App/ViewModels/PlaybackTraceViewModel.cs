@@ -25,6 +25,15 @@ public sealed class PlaybackTraceViewModel : ObservableObject
     {
     }
 
+    /// <summary>A Sequence Lab trial's trace, scrolled to where the failing step ended (or the first step), titled with its plain result.</summary>
+    public PlaybackTraceViewModel(SequenceOutcome outcome, Func<int?, string?>? stateName = null)
+        : this(outcome.Record, outcome.Log, stateName,
+            outcome.Report.FailedStep is { } f && outcome.Report.Steps.FirstOrDefault(s => s.Index == f) is { } step && (step.EndFrame ?? step.InputFrame ?? step.StartFrame) is { } frame
+                ? (frame, $"{outcome.Report.Summary} · focus frame {frame}") : null,
+            outcome.Report.Summary)
+    {
+    }
+
     private PlaybackTraceViewModel(PlaybackRecord record, Core.XRay.Runtime.TraceLog log, Func<int?, string?>? stateName, (long? Frame, string Text)? focus, string status)
     {
         Rows = PlaybackInspector.Timeline(log, stateName: stateName);

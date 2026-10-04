@@ -17,7 +17,9 @@ public enum PlaybackMode
     /// <summary>One ability from neutral through its own command (a one-step route); the verifier's step check says whether it was performed.</summary>
     Ability,
     /// <summary>A state forced with the engine's changeState for a look. Never proof, never a verdict.</summary>
-    Preview
+    Preview,
+    /// <summary>A Sequence Lab sequence (one or more trials, in the isolated experiment store).</summary>
+    Sequence
 }
 
 /// <summary>Anything the playback session can run. Every job has a scope: its result is only ever shown against that scope.</summary>
@@ -86,6 +88,23 @@ public sealed record PlaybackOutcome(PlaybackRecord Record, VerificationReport R
     public FailureInspection? Failure => Ability is { } a ? AbilityVerifier.Inspect(a, Report, Log) : PlaybackInspector.Inspect(Report, Log);
 }
 
+/// <summary>A Sequence Lab run (×N trials of one sequence version) as a session job. Its scope is the exact sequence version.</summary>
+public sealed record SequenceJob(string SequenceKey, string Label, PlaybackSetup Setup, int Trials, string Summary) : IPlaybackJob
+{
+    public StaticSnapshot? Snapshot { get; init; }
+    public PlaybackMode Mode => PlaybackMode.Sequence;
+    public string ScopeKey => Sequences.Sequence.ScopePrefix + SequenceKey;
+}
+
+/// <summary>One run of a sequence plan (Sequence Lab). The plan is built once per experiment by <see cref="Sequences.SequencePlanner"/>.</summary>
+public sealed record SequenceRunRequest(string Root, string SubjectFolder, string SubjectDef, InputPlan Plan, IReadOnlyList<string> Labels, PlaybackSetup Setup, string Summary);
+
+/// <summary>The saved result of one sequence trial: the sequence verdict, per-step results and the trace.</summary>
+public sealed record SequenceOutcome(PlaybackRecord Record, Sequences.SequenceReport Report, TraceLog Log)
+{
+    public InputPlan? Plan { get; init; }
+}
+
 /// <summary>The saved result of one State Preview. There is no verification report: a preview is never judged.</summary>
 public sealed record PreviewOutcome(PlaybackRecord Record, PreviewReport Report, TraceLog Log)
 {
@@ -103,6 +122,9 @@ public sealed class ComboPlaybackService
     public const int LingerFrames = 90;
     public const int KeepRecords = 25;
 
+    /// <summary>How many records this store keeps (newest first). The playback store keeps <see cref="KeepRecords"/>; an experiment's own trial store keeps all of its trials.</summary>
+    public int RecordLimit { get; init; } = KeepRecords;
+
     private readonly IEngineRunner _runner;
     private readonly string _storeRoot;
     private readonly string? _sandboxBase;
@@ -115,6 +137,17 @@ public sealed class ComboPlaybackService
     }
 
     public string StoreRoot => _storeRoot;
+
+    /// <summary>
+    /// The same engine runner, sandbox base and seams, writing to another store with its own record limit. Sequence experiments use this so their
+    /// trials live in the isolated experiment store and can never evict the Play Combo / Play Ability history. Cleanup failures are reported here too.
+    /// </summary>
+    public ComboPlaybackService WithStore(string storeRoot, int recordLimit)
+    {
+        var child = new ComboPlaybackService(_runner, storeRoot, _sandboxBase) { RecordLimit = recordLimit, CommitSeam = CommitSeam, SandboxDeleter = SandboxDeleter };
+        child.CleanupFailed += (path, why) => CleanupFailed?.Invoke(path, why);
+        return child;
+    }
 
     /// <summary>Plays the route and returns the saved outcome. Throws InvalidOperationException (route cannot be scripted / setup incomplete) or OperationCanceledException.</summary>
     public PlaybackOutcome Play(PlaybackRequest request, Action<string>? progress = null, CancellationToken cancel = default)
@@ -143,7 +176,7 @@ public sealed class ComboPlaybackService
         if (!setup.Ready) throw new InvalidOperationException("Playback is not set up: " + string.Join(" ", setup.Issues));
         var ability = request.Mode == PlaybackMode.Ability;
         if (ability && request.AbilityId is null) throw new InvalidOperationException("Play Ability needs the ability it plays.");
-        if (request.Mode == PlaybackMode.Preview) throw new InvalidOperationException("A preview is played with Preview(), never as a route.");
+        if (request.Mode is PlaybackMode.Preview or PlaybackMode.Sequence) throw new InvalidOperationException("A preview or a sequence is never played as a route.");
 
         var started = DateTime.UtcNow;
         var id = started.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..6];
@@ -318,13 +351,74 @@ public sealed class ComboPlaybackService
 
     private void Prune()
     {
-        foreach (var old in List().Skip(KeepRecords)) TryDelete(old.Directory);
+        foreach (var old in List().Skip(RecordLimit)) TryDelete(old.Directory);
     }
 
     private static void TryDelete(string dir)
     {
         try { if (Directory.Exists(dir)) Directory.Delete(dir, true); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* best effort */ }
+    }
+
+    /// <summary>
+    /// Plays one trial of a sequence plan in the same disposable sandbox, driver, probe and commit/cancel gate as a route, and judges it with the
+    /// <see cref="Sequences.SequenceVerifier"/>. The record goes to this service's store (the experiment store, for the Sequence Lab).
+    /// </summary>
+    public SequenceOutcome PlaySequence(SequenceRunRequest request, Action<string>? progress, PlaybackCancellation gate)
+    {
+        var cancel = gate.Token;
+        var setup = request.Setup;
+        if (!setup.Ready) throw new InvalidOperationException("Playback is not set up: " + string.Join(" ", setup.Issues));
+        var plan = request.Plan;
+        progress?.Invoke("planning");
+        cancel.ThrowIfCancellationRequested();
+
+        var started = DateTime.UtcNow;
+        var id = started.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..6];
+        var dir = Path.Combine(_storeRoot, id);
+        Directory.CreateDirectory(dir);
+        var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, plan.MaxFrames, _sandboxBase,
+            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames, Deleter = SandboxDeleter };
+        var run = new VerifyRunRequest(sandbox, TimeSpan.FromSeconds(Math.Max(180, plan.MaxFrames / 60 + 120)))
+        {
+            Progress = progress,
+            Cancel = cancel,
+            CleanupFailed = (path, why) => CleanupFailed?.Invoke(path, why),
+            Collect = a =>
+            {
+                File.WriteAllText(Path.Combine(dir, "plan.json"), InputPlanner.ToJson(a.Plan), new UTF8Encoding(false));
+                if (a.RawTrace is not null) File.WriteAllText(Path.Combine(dir, "trace.jsonl"), a.RawTrace, new UTF8Encoding(false));
+            }
+        };
+
+        EngineRun engineRun;
+        Sequences.SequenceReport report;
+        PlaybackRecord record;
+        var tmp = Path.Combine(dir, "meta.json.tmp");
+        try
+        {
+            engineRun = VerifyRunner.Execute(plan, run, _runner);
+            cancel.ThrowIfCancellationRequested();
+            report = Sequences.SequenceVerifier.Verify(plan, engineRun.Log, request.Labels);
+            report = report with { Notes = report.Notes.Concat(engineRun.Notes).ToList() };
+            File.WriteAllText(Path.Combine(dir, "sequence.json"), Sequences.SequenceVerifier.ToJson(report), new UTF8Encoding(false));
+            record = new PlaybackRecord(id, started, plan.Character, plan.RouteKey, request.Summary, report.Verdict.ToString(), report.Reason, report.FailedStep,
+                setup.Dummy, setup.Stage, report.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir)
+            {
+                ApproachDistance = plan.ApproachDistance, Mode = "sequence", TargetId = plan.RouteKey
+            };
+            Commit(dir, tmp, record, gate, cancel);
+        }
+        catch
+        {
+            TryDelete(dir);
+            throw;
+        }
+
+        CommitSeam?.Invoke("after-commit");
+        Prune();
+        var log = File.Exists(record.TracePath) ? TraceReader.ReadFile(record.TracePath) : engineRun.Log;
+        return new SequenceOutcome(record, report, log) { Plan = plan };
     }
 
     private static string MetaJson(PlaybackRecord r)

@@ -16,4 +16,10 @@
   <ItemGroup>
     <ProjectReference Include="..\IKEMENLab.App\IKEMENLab.App.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Sequence Lab UI tests replay the Core tests' mock-engine traces against the same ComboGuy fixture character -->
+    <Compile Include="..\IKEMENLab.Tests\XRayFixtures.cs" Link="Shared\XRayFixtures.cs" />
+    <Compile Include="..\IKEMENLab.Tests\SffTestBuilder.cs" Link="Shared\SffTestBuilder.cs" />
+    <None Include="..\IKEMENLab.Tests\Fixtures\xray_driver_mock_seq_*.jsonl" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

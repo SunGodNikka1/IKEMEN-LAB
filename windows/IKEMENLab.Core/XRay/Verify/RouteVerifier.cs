@@ -82,6 +82,8 @@ public static class RouteVerifier
         }
         if (plan.Steps.Count == 0 || !plan.Steps.Select(s => s.Index).SequenceEqual(Enumerable.Range(1, plan.Steps.Count)))
             return Result(VerifyStatus.Inconclusive, VerifyReason.PlanMismatch, null, pending, none, "Invalid or empty plan.");
+        if (plan.Steps.Any(s => s.IsAction))
+            return Result(VerifyStatus.Inconclusive, VerifyReason.PlanMismatch, null, pending, none, "A Sequence Lab plan has movement, wait or chase steps; it is judged by the sequence verifier, not here.");
         if (plan.Steps.Any(s => s.IsForce))
             return Result(VerifyStatus.Inconclusive, VerifyReason.PlanMismatch, null, pending, none, "A State Preview plan forces a state; it is never evidence that a route works and is not judged here.");
         if (log.Issues.Count > 0 || log.Events.Where(e => e is not TraceMeta).Zip(log.Events.Where(e => e is not TraceMeta).Skip(1))

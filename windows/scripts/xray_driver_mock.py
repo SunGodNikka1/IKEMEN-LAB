@@ -7,6 +7,11 @@ contact gating, key sequencing, release, timeouts, the no-injector path) — not
 usage: xray_driver_mock.py <plan.lua> <out.jsonl> --scenario verified|dropped|nocontact|wrongstate|noinject|stuck
                                                        |ability|preview|preview_refused|preview_leaves
 
+Phase 3 scenarios (Sequence Lab plans; the opponent is pushed back, recovers after a set time, and is only hit when within 70):
+seq_true (long hitstun: a cancel keeps it a true combo), seq_wait (same, with a wait before the cancel), seq_gap (short hitstun: the follow-up
+connects after the opponent recovered), seq_chase (pushback, then a chase closes the gap), seq_far (pushed far, the follow-up whiffs),
+seq_recover (the opponent recovers before the chase starts), seq_jump (a jump leaves the ground).
+
 Phase 2 scenarios: "ability" plays a one-step Play Ability plan (P2 recovers, P1 regains control); "preview" answers the driver's
 force with the mock's changeState; "preview_refused" makes changeState report no such state; "preview_leaves" leaves the forced
 state on its first tick.
@@ -71,6 +76,29 @@ end
 
 local function setState(n) P[1].state = n; P[1].ticks = 0; P[1].hit = 0 end
 
+-- Phase 3: per-scenario opponent behaviour (hitstun length after each hit, pushback per tick and for how many ticks)
+local SEQ = {
+  seq_true = { recover = 30, push = 0, pushTicks = 0 },
+  seq_wait = { recover = 30, push = 0, pushTicks = 0 },
+  seq_gap = { recover = 6, push = 0, pushTicks = 0 },
+  seq_chase = { recover = 12, push = 3, pushTicks = 15 },
+  seq_far = { recover = 12, push = 5, pushTicks = 20 },
+  seq_recover = { recover = 10, push = 6, pushTicks = 25 },
+  seq_jump = { recover = 12, push = 0, pushTicks = 0 },
+}
+local seq = SEQ[SCENARIO]
+P[1].air = 0
+P[2].pushLeft = 0
+P[2].recoverAt = nil
+
+-- the next plan step the mock character can perform: Sequence Lab action steps (walk, wait, chase, jump) are the driver's business, not moves
+local function nextMove()
+  for k = stepAt + 1, #plan.steps do
+    if not plan.steps[k].action then return k, plan.steps[k] end
+  end
+  return nil, nil
+end
+
 function _G.__mock_advance()
   tickCount = tickCount + 1
   local p1, p2 = P[1], P[2]
@@ -78,23 +106,43 @@ function _G.__mock_advance()
   local keys = _G.__mock_held or {}
   local hs = heldSet()
   if hs["F"] and p1.state == 0 then p1.x = p1.x + 4 end
+  if seq then
+    if hs["B"] and p1.state == 0 then p1.x = p1.x - 3 end
+    if hs["U"] and p1.state == 0 then p1.state = 40; p1.ticks = 0; p1.air = 30 end
+    if p1.air > 0 then
+      p1.air = p1.air - 1
+      if p1.state == 40 and p1.ticks >= 3 then p1.state = 50 end
+      if p1.air == 0 then setState(0) end
+    end
+    if p2.pushLeft > 0 then p2.x = p2.x + seq.push; p2.pushLeft = p2.pushLeft - 1 end
+    if p2.hit and p2.recoverAt and tickCount >= p2.recoverAt then p2.state = 0; p2.hit = false end
+  end
 
-  local nextStep = plan.steps[stepAt + 1]
+  local nextIndex, nextStep = nextMove()
   if nextStep then
     local fromOk = (nextStep.fromState == nil and p1.state == 0) or p1.state == nextStep.fromState
     if #nextStep.input > 0 then
       if fromOk and #keys > 0 and sameKeys(keys, lastKeys(nextStep)) and (nextStep.contact == nil or p1.hit > 0) then
         local target = nextStep.toState
         if SCENARIO == "wrongstate" and stepAt == 1 then target = 9999 end
-        setState(target); stepAt = stepAt + 1
+        setState(target); stepAt = nextIndex
       end
     elseif fromOk and p1.ticks >= 4 and not nextStep.force then  -- a forced step is only ever entered by the driver's changeState
-      setState(nextStep.toState); stepAt = stepAt + 1
+      setState(nextStep.toState); stepAt = nextIndex
     end
   end
 
+  -- Phase 3: every hit lands only within 70, deals 50, refreshes hitstun and starts the scenario's pushback
+  if seq and p1.state ~= 0 and p1.state ~= 40 and p1.state ~= 50 and p1.hit == 0 and p1.ticks == 3 and math.abs(p2.x - p1.x) < 70 then
+    p1.hit = 1
+    p2.hit = true; p2.state = 5000; p2.life = p2.life - 50; hitAt = tickCount
+    p2.recoverAt = tickCount + seq.recover
+    p2.pushLeft = seq.pushTicks
+  end
+  if seq and p1.state ~= 0 and p1.state ~= 40 and p1.state ~= 50 and p1.ticks >= 20 then setState(0) end
+
   -- the first move connects a few ticks in, unless the scenario says it whiffs
-  if p1.state ~= 0 and p1.hit == 0 and p1.ticks == 3 and SCENARIO ~= "nocontact" and (p1.x - 0) > -70 then
+  if not seq and p1.state ~= 0 and p1.hit == 0 and p1.ticks == 3 and SCENARIO ~= "nocontact" and (p1.x - 0) > -70 then
     p1.hit = 1
     if not p2.hit then p2.hit = true; p2.state = 5000; p2.life = p2.life - 50; hitAt = tickCount end
   end
@@ -121,7 +169,7 @@ end
 _G.player = function(n) current = n; return P[n] ~= nil end
 _G.stateNo = function() return P[current].state end
 _G.ctrl = function() if current == 1 then return P[1].state == 0 and 1 or 0 end return P[2].state == 0 and 1 or 0 end
-_G.stateType = function() return "S" end
+_G.stateType = function() if current == 1 and P[1].air > 0 then return "A" end return "S" end
 _G.moveType = function()
   if current == 1 then return P[1].state == 0 and "I" or "A" end
   return P[2].state ~= 0 and "H" or "I"

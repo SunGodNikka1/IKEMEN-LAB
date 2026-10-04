@@ -9,6 +9,11 @@
 -- tick while the plan runs. No adapter, or one that returns false/errors on the first call => "inject_unavailable" and the run
 -- ends; the verifier then reports Inconclusive, never Verified.
 --
+-- Sequence Lab (a step with action = "hold" | "release" | "chase" | "jump", never part of a route or ability plan): instead of a command
+-- the driver holds keys (walk F/B), holds nothing (wait), walks forward until within a distance (chase; with stopOnRecover the run stops as
+-- soon as the opponent has control again), or presses U and watches for P1 to be airborne (jump). waitCtrl = true makes the step start only
+-- once P1 can act. Each records step_ready / step_done (or step_timeout / chase_stopped) like any step; IKEMEN Lab judges the trace.
+--
 -- State Preview (a step with force = true, never part of a route): instead of feeding input, the driver asks io.force(1, toState) to
 -- change P1's state with the engine's own changeState once P1 is free and close enough, records "force_applied" or "force_failed",
 -- and then only watches (the tail). A forced state is never evidence that a move can be performed; IKEMEN Lab never judges it.
@@ -68,8 +73,12 @@ function M.new(plan, io)
 		counter = 0
 		inputPos = 0
 		if not step then phase = "tail"; note(frame, "tail_start"); return end
-		phase = "wait"
 		note(frame, "step_wait", step.edge)
+		if step.action then
+			if step.waitCtrl then phase = "act_wait" else phase = "act"; note(frame, "step_ready", step.edge) end
+			return
+		end
+		phase = "wait"
 	end
 
 	function d.tick(frame, obs)
@@ -177,6 +186,63 @@ function M.new(plan, io)
 				return "stepTimeout"
 			end
 			return nil
+		end
+
+		if phase == "act_wait" then
+			if not setKeys(frame, {}, "wait") then return "noInject" end
+			if p1.ctrl == true or (p1.ctrl == nil and state == 0) then
+				note(frame, "step_ready", step.edge)
+				phase = "act"
+				counter = 0
+				return nil
+			end
+			if counter > 180 then note(frame, "timeout", "precondition never met for " .. step.edge); return "waitTimeout" end
+			return nil
+		end
+
+		if phase == "act" then
+			local a = step.action
+			if a == "release" then
+				if not setKeys(frame, {}, "release") then return "noInject" end
+				if counter >= (step.frames or 0) then note(frame, "step_done", "release"); beginStep(frame) end
+				return nil
+			elseif a == "hold" then
+				if counter > (step.frames or 0) then
+					if not setKeys(frame, {}, "hold_end") then return "noInject" end
+					note(frame, "step_done", "hold")
+					beginStep(frame)
+					return nil
+				end
+				if not setKeys(frame, step.keys or {}, "hold") then return "noInject" end
+				return nil
+			elseif a == "chase" then
+				local dist = obs.distance
+				if dist ~= nil and math.abs(dist) <= (step.distance or 0) then
+					if not setKeys(frame, {}, "chase_end") then return "noInject" end
+					note(frame, "step_done", "reached " .. tostring(dist))
+					beginStep(frame)
+					return nil
+				end
+				if step.stopOnRecover and obs.p2 and obs.p2.ctrl == true then
+					if not setKeys(frame, {}, "chase_end") then return "noInject" end
+					note(frame, "chase_stopped", "the opponent regained control")
+					return "chaseStopped"
+				end
+				if counter > (step.frames or 240) then
+					if not setKeys(frame, {}, "chase_end") then return "noInject" end
+					note(frame, "step_timeout", "never came within " .. tostring(step.distance))
+					return "stepTimeout"
+				end
+				if not setKeys(frame, { "F" }, "chase") then return "noInject" end
+				return nil
+			elseif a == "jump" then
+				if not setKeys(frame, counter <= 3 and { "U" } or {}, counter <= 3 and "jump" or "jump_end") then return "noInject" end
+				if p1.stateType == "A" then note(frame, "step_done", "airborne"); beginStep(frame); return nil end
+				if counter > (step.frames or 45) then note(frame, "step_timeout", "never left the ground"); return "stepTimeout" end
+				return nil
+			end
+			note(frame, "driver_error", "unknown action " .. tostring(a))
+			return "driverError"
 		end
 
 		if phase == "tail" then

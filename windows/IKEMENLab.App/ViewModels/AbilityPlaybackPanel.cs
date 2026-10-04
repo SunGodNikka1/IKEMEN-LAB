@@ -35,6 +35,12 @@ public sealed class AbilityPlaybackPanel : ObservableObject
         InspectFailureCommand = new RelayCommand(InspectFailure, () => ShownScope is { } s && _session.CanInspectFor(s));
         ViewTraceCommand = new RelayCommand(ViewTrace, () => ShownScope is { } s && _session.HasResultFor(s));
         CopyDiagnosticCommand = new RelayCommand(CopyDiagnostic, () => AttemptScope is { } s && _session.DiagnosticFor(s) is not null);
+        TryFollowUpCommand = new RelayCommand(() =>
+        {
+            if (_abilityId is null) return;
+            _owner.SequenceLab.StartFrom(_abilityId);
+            _owner.ActiveLens = XRayLensKind.Sequences;
+        }, () => _abilityId is not null && Path?.Path is not null);
         OpenSetupCommand = new RelayCommand(() =>
         {
             _owner.Combos.Playback.ShowSetup = true;
@@ -50,6 +56,8 @@ public sealed class AbilityPlaybackPanel : ObservableObject
     public ICommand ViewTraceCommand { get; }
     public ICommand CopyDiagnosticCommand { get; }
     public ICommand OpenSetupCommand { get; }
+    /// <summary>Opens the Sequence Lab with a new sequence that starts with this ability.</summary>
+    public ICommand TryFollowUpCommand { get; }
 
     // ------------------------------------------------------------------ selection
 

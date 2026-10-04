@@ -308,6 +308,22 @@ public static class AbilityVerifier
         L(w, "controlFrame", o.ControlFrame);
         if (o.FramesUntilControl is { } c) w.WriteNumber("framesUntilControl", c); else w.WriteNull("framesUntilControl");
         B(w, "keptControl", o.KeptControl);
+        if (o.Situation is { } st)
+        {
+            w.WritePropertyName("situation");
+            w.WriteStartObject();
+            w.WriteNumber("frame", st.Frame);
+            w.WriteString("when", st.When);
+            D(w, "distance", st.Distance);
+            if (st.OpponentState is { } os) w.WriteNumber("opponentState", os); else w.WriteNull("opponentState");
+            w.WriteString("opponentPosture", st.OpponentPosture);
+            B(w, "opponentCanAct", st.OpponentCanAct);
+            B(w, "youCanAct", st.YouCanAct);
+            D(w, "yourPower", st.YourPower);
+            L(w, "opponentActsAt", st.OpponentActsAt);
+            if (st.FramesBeforeOpponent is { } fb) w.WriteNumber("framesBeforeOpponent", fb); else w.WriteNull("framesBeforeOpponent");
+            w.WriteEndObject();
+        }
         w.WritePropertyName("p1States");
         w.WriteStartArray();
         foreach (var s in o.P1States) w.WriteNumberValue(s);
@@ -379,6 +395,7 @@ public static class AbilityText
                 : $"Not back in control within the {o.ObservedFrames} frames watched" + (o.Missing.Contains("p1.ctrl") ? " (control is not readable on this build)" : string.Empty),
             "States: " + string.Join(" → ", o.P1States.Select(s => StateLabel("state:" + s.ToString(CultureInfo.InvariantCulture), name))) + (o.P1StatesTruncated ? " → …" : string.Empty)
         };
+        if (o.Situation is { } situation) lines.Insert(0, situation.Describe());
         if (!o.ObservationComplete) lines.Add("The watch after the move did not finish, so anything not seen above may simply not have been recorded.");
         if (o.Missing.Count > 0) lines.Add("Not readable on this build: " + string.Join(", ", o.Missing));
         return lines;

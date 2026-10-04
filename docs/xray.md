@@ -19,7 +19,7 @@ DEF [Files] ─▶ CMD · CNS · ST · AIR · common1.cns · SFF
      WPF lenses     ikemenlab xray …        runtime traces (spike) attach by state number
 ```
 
-Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md); accepted in [xray-milestone-3-acceptance.md](xray-milestone-3-acceptance.md).** **Milestone 4 (Play / Verify Combo from the Combos lens) is in [xray-m4-play-combo.md](xray-m4-play-combo.md).** **Phase 2 (Play Ability and Preview State from the Ability Atlas, on the same playback stack) is in [xray-phase2-play-ability.md](xray-phase2-play-ability.md).**
+Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md); accepted in [xray-milestone-3-acceptance.md](xray-milestone-3-acceptance.md).** **Milestone 4 (Play / Verify Combo from the Combos lens) is in [xray-m4-play-combo.md](xray-m4-play-combo.md).** **Phase 2 (Play Ability and Preview State from the Ability Atlas, on the same playback stack) is in [xray-phase2-play-ability.md](xray-phase2-play-ability.md).** **Phase 3 (Sequence Lab: manual follow-up experimentation) is in [xray-phase3-sequence-lab.md](xray-phase3-sequence-lab.md).**
 
 ## The model
 
@@ -86,6 +86,14 @@ The Ability Atlas has an **Ability Lab** bar for the selected ability. Details a
   `"proof": false` appears everywhere it is recorded.
 - One playback session per window: Play Combo, Play Ability and Preview State never run two engines at once, and each result is shown only
   against its own route, ability or previewed state.
+
+## Sequence Lab (Phase 3)
+
+After **Play Ability** the Ability Lab shows the resulting situation, and **Try Follow-Up** opens the **Sequence Lab** tab. There you chain abilities with
+walk, wait, chase-until-within, dash and jump, run the sequence ×1 / ×10 / ×50 (each trial replays it from neutral through the same playback stack), and
+read **True Combo / Connected Sequence / Did Not Connect / Could Not Test** with a plain reason per step. A chase after a knockdown that connects is a
+*connected sequence*, not a combo. Experiments go to their own store and never touch the playback history. Details:
+[xray-phase3-sequence-lab.md](xray-phase3-sequence-lab.md).
 
 ## Evidence confidence
 

@@ -30,6 +30,9 @@ public sealed record MoveObservation(
 {
     public const int MaxStates = 16;
 
+    /// <summary>The situation at the moment P1 could act again (or at the end of the watch): what a follow-up would start from.</summary>
+    public SituationSnapshot? Situation { get; init; }
+
     /// <summary>
     /// Reads the samples from <paramref name="startIndex"/> to the end. <paramref name="frames"/> must be the trace's ordered frame samples;
     /// <paramref name="complete"/> says whether the driver finished watching (see <see cref="ObservationComplete"/>).
@@ -111,10 +114,69 @@ public sealed record MoveObservation(
 
         return new MoveObservation(start.Frame, window[^1].Frame, window.Count, complete, connected, by, contact,
             ownHit, ownGuard, oppHit, oppGuard, airborne, down, reaction, lifeBefore, lifeLowest, damage,
-            control?.Frame, untilControl, kept, states, truncated, missing);
+            control?.Frame, untilControl, kept, states, truncated, missing) { Situation = SituationSnapshot.At(window, control, kept) };
     }
 
     /// <summary>Whether the trace shows the driver finished watching: a plan_complete driver event and an end event with reason planComplete.</summary>
     public static bool DriverFinished(TraceLog log) =>
         log.Events.OfType<DriverEvent>().Any(d => d.Kind == "plan_complete") && log.Events.OfType<EndEvent>().Any(e => e.Reason == "planComplete");
 }
+
+/// <summary>
+/// The situation a follow-up would start from: taken when P1 could act again (or, when P1 never lost control, right after the start; otherwise at the end of
+/// the watch). <see cref="FramesBeforeOpponent"/> is how many frames before the opponent P1 could act (negative: the opponent could act first); null
+/// when the opponent never lost control while watched, or regained it after the watch ended.
+/// </summary>
+public sealed record SituationSnapshot(
+    long Frame, string When, double? Distance, int? OpponentState, string OpponentPosture, bool? OpponentCanAct, bool? YouCanAct, double? YourPower,
+    long? OpponentActsAt, int? FramesBeforeOpponent)
+{
+    internal static SituationSnapshot? At(IReadOnlyList<FrameEvent> window, FrameEvent? control, bool? kept)
+    {
+        if (window.Count == 0) return null;
+        var (at, when) = control is not null ? (control, "when you could act again")
+            : kept == true ? (window.Count > 1 ? window[1] : window[0], "right after it started (you kept control)")
+            : (window[^1], "at the end of the watch");
+        var lost = window.ToList().FindIndex(f => f.P2.Ctrl == false);
+        var regained = lost < 0 ? null : window.Skip(lost + 1).FirstOrDefault(f => f.P2.Ctrl == true);
+        int? before = regained is null ? null : (int)(regained.Frame - at.Frame);
+        return new SituationSnapshot(at.Frame, when, at.Distance is { } d ? Math.Abs(d) : null, at.P2.State, Situation.Posture(at.P2), at.P2.Ctrl, at.P1.Ctrl, at.P1.Power,
+            regained?.Frame, before);
+    }
+
+    /// <summary>One plain sentence.</summary>
+    public string Describe()
+    {
+        var parts = new List<string> { $"Situation {When} (frame {Frame}): the opponent is {OpponentPosture}" + (Distance is { } d ? $", {d:0.##} away" : string.Empty) };
+        parts.Add(FramesBeforeOpponent switch
+        {
+            { } n when n > 0 => $"you can act {n} frame(s) before they can",
+            { } n when n < 0 => $"they could act {-n} frame(s) before you",
+            { } => "you both can act on the same frame",
+            null when OpponentCanAct == true => "they can act too",
+            _ => "when they can act again was not seen"
+        });
+        if (YourPower is { } p) parts.Add($"you have {p:0} meter");
+        return string.Join("; ", parts) + ".";
+    }
+}
+
+/// <summary>Plain words for what a player sample shows.</summary>
+public static class Situation
+{
+    public static string Posture(PlayerSample p)
+    {
+        var hit = RouteVerifier.InHitState(p);
+        var type = p.StateType?.ToUpperInvariant();
+        var text = type switch
+        {
+            "L" => "lying down",
+            "A" => hit ? "launched (in the air, in hitstun)" : "in the air",
+            "C" => hit ? "crouching, in hitstun" : "crouching",
+            "S" => hit ? "standing, in hitstun" : "standing",
+            _ => hit ? "in hitstun" : "in an unknown posture"
+        };
+        return p.Ctrl == true ? text + ", able to act" : text;
+    }
+}
+

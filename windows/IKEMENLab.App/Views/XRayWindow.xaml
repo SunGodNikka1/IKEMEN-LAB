@@ -104,6 +104,35 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <!-- Sequence Lab banner: a true combo is green; a connected sequence is NOT drawn like a combo (green outline only) -->
+        <Style x:Key="SequenceBanner" TargetType="Border">
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding SequenceLab.ResultKind}" Value="TrueCombo">
+                    <Setter Property="Background" Value="{DynamicResource PositiveBackgroundBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding SequenceLab.ResultKind}" Value="Connected">
+                    <Setter Property="BorderBrush" Value="{DynamicResource PositiveBrush}"/>
+                    <Setter Property="BorderThickness" Value="1"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding SequenceLab.ResultKind}" Value="Failed">
+                    <Setter Property="Background" Value="{DynamicResource NegativeBackgroundBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding SequenceLab.ResultKind}" Value="Inconclusive">
+                    <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <Style x:Key="LensSequences" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Sequences">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="LensCombos" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding ActiveLens}" Value="Combos">
@@ -160,6 +189,8 @@
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Timeline}"/>
                     <RadioButton GroupName="XRayLens" Content="Combos" Style="{StaticResource SegmentedItem}"
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Combos}"/>
+                    <RadioButton GroupName="XRayLens" Content="Sequence Lab" Style="{StaticResource SegmentedItem}"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Sequences}"/>
                 </StackPanel>
             </Border>
         </DockPanel>
@@ -225,6 +256,8 @@
                                                 Visibility="{Binding Atlas.Lab.HasResult, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="View the ability run's trace"/>
                                         <Button Content="Copy Full Diagnostic" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.CopyDiagnosticCommand}"
                                                 AutomationProperties.Name="Copy the full diagnostic for the last ability attempt"/>
+                                        <Button Content="Try Follow-Up &#x2192;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.TryFollowUpCommand}"
+                                                AutomationProperties.Name="Try a follow-up in the Sequence Lab" ToolTip="Opens the Sequence Lab with a new sequence that starts with this ability."/>
                                         <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Atlas.Lab.OpenSetupCommand}"
                                                 AutomationProperties.Name="Open playback setup in the Combos lens" ToolTip="The engine, dummy, stage and approach distance are shared with Play Combo."/>
                                     </WrapPanel>
@@ -619,6 +652,173 @@
                                          ItemTemplate="{StaticResource RowTemplate}" AutomationProperties.Name="Route steps"/>
                             </DockPanel>
                         </Grid>
+                    </Grid>
+
+                    <!-- 8. Sequence Lab (Phase 3): build a sequence of abilities and movement, run it, see whether it works -->
+                    <Grid x:Name="LensSequencesPanel" Style="{StaticResource LensSequences}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="290"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <!-- left: saved variants and compare -->
+                        <Border BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BorderSubtle}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="14,12,14,12">
+                                    <TextBlock Text="Saved sequences" Style="{StaticResource SectionLabel}"/>
+                                    <ListBox ItemsSource="{Binding SequenceLab.Saved}" SelectedItem="{Binding SequenceLab.SelectedSaved, Mode=TwoWay}" MinHeight="90" MaxHeight="220"
+                                             Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}" AutomationProperties.Name="Saved sequences">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="8,4">
+                                                    <TextBlock Text="{Binding Title}" FontSize="12" Foreground="{DynamicResource TextPrimary}"/>
+                                                    <TextBlock Text="{Binding Steps}" FontSize="10" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextTertiary}"/>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <WrapPanel Margin="0,6,0,0">
+                                        <Button Content="New" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6" Command="{Binding SequenceLab.NewCommand}" AutomationProperties.Name="New sequence"/>
+                                        <Button Content="Save" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6" Command="{Binding SequenceLab.SaveCommand}" AutomationProperties.Name="Save sequence"/>
+                                        <Button Content="Save as new" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6" Command="{Binding SequenceLab.SaveAsNewCommand}" AutomationProperties.Name="Save as a new variant"/>
+                                        <Button Content="Delete" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding SequenceLab.DeleteSavedCommand}" AutomationProperties.Name="Delete saved sequence"/>
+                                    </WrapPanel>
+                                    <TextBlock Text="Compare two variants" Style="{StaticResource SectionLabel}" Margin="0,14,0,2"/>
+                                    <ComboBox ItemsSource="{Binding SequenceLab.Saved}" SelectedItem="{Binding SequenceLab.CompareA}" DisplayMemberPath="Title" Margin="0,2" AutomationProperties.Name="Compare variant A"/>
+                                    <ComboBox ItemsSource="{Binding SequenceLab.Saved}" SelectedItem="{Binding SequenceLab.CompareB}" DisplayMemberPath="Title" Margin="0,2" AutomationProperties.Name="Compare variant B"/>
+                                    <Button Content="Compare" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,4,0,6" Command="{Binding SequenceLab.CompareCommand}" AutomationProperties.Name="Compare variants"/>
+                                    <TextBlock Text="{Binding SequenceLab.CompareWarning}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                                               Visibility="{Binding SequenceLab.HasCompareWarning, Converter={StaticResource BoolToVis}}"/>
+                                    <ItemsControl ItemsSource="{Binding SequenceLab.CompareRows}" Focusable="False" Visibility="{Binding SequenceLab.HasCompare, Converter={StaticResource BoolToVis}}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="90"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Text="{Binding Metric}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextTertiary}"/>
+                                                    <TextBlock Grid.Column="1" Text="{Binding A}" FontSize="11" TextWrapping="Wrap" Margin="4,0" Foreground="{DynamicResource TextPrimary}"/>
+                                                    <TextBlock Grid.Column="2" Text="{Binding B}" FontSize="11" TextWrapping="Wrap" Margin="4,0" Foreground="{DynamicResource TextPrimary}"/>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                        <!-- right: the sequence, the palette, the run bar and the result -->
+                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="14,12,14,12">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding SequenceLab.VersionText}" FontSize="11" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                    <TextBox Style="{StaticResource FieldBox}" Text="{Binding SequenceLab.Name, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Sequence name"/>
+                                </DockPanel>
+                                <TextBlock Text="{Binding SequenceLab.PlanText}" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}" AutomationProperties.Name="Sequence plan"/>
+                                <TextBlock Text="{Binding SequenceLab.Warnings}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                                           Visibility="{Binding SequenceLab.HasWarnings, Converter={StaticResource BoolToVis}}"/>
+                                <ItemsControl ItemsSource="{Binding SequenceLab.Steps}" Margin="0,8,0,0" Focusable="False" AutomationProperties.Name="Sequence steps">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type vm:SequenceStepRow}">
+                                            <StackPanel>
+                                                <TextBlock Text="&#x2193;" FontSize="14" HorizontalAlignment="Center" Foreground="{DynamicResource TextTertiary}" Margin="0,2"
+                                                           Visibility="{Binding ShowArrow, Converter={StaticResource BoolToVis}}"/>
+                                                <Border Style="{StaticResource Card}" Padding="10,8" CornerRadius="8">
+                                                    <StackPanel>
+                                                        <DockPanel>
+                                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                                                <Button Content="&#x25B2;" Style="{StaticResource SecondaryButton}" Padding="6,2" Margin="2,0" ToolTip="Move up" AutomationProperties.Name="Move step up"
+                                                                        Command="{Binding DataContext.SequenceLab.MoveUpCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                                <Button Content="&#x25BC;" Style="{StaticResource SecondaryButton}" Padding="6,2" Margin="2,0" ToolTip="Move down" AutomationProperties.Name="Move step down"
+                                                                        Command="{Binding DataContext.SequenceLab.MoveDownCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                                <Button Content="&#x2715;" Style="{StaticResource SecondaryButton}" Padding="6,2" Margin="2,0" ToolTip="Remove this step" AutomationProperties.Name="Remove step"
+                                                                        Command="{Binding DataContext.SequenceLab.RemoveStepCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                            </StackPanel>
+                                                            <TextBlock FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap">
+                                                                <Run Text="{Binding Glyph, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding Label, Mode=OneWay}"/>
+                                                            </TextBlock>
+                                                        </DockPanel>
+                                                        <TextBlock Text="{Binding How}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/>
+                                                        <ComboBox Margin="0,4,0,0" HorizontalAlignment="Left" MinWidth="220" Visibility="{Binding IsAbility, Converter={StaticResource BoolToVis}}"
+                                                                  ItemsSource="{Binding DataContext.SequenceLab.Abilities, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                                  DisplayMemberPath="Name" SelectedValuePath="Id" SelectedValue="{Binding AbilityId, Mode=TwoWay}" AutomationProperties.Name="Step ability"/>
+                                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="{Binding HasFrames, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="Frames" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextSecondary}"/>
+                                                            <TextBox Style="{StaticResource FieldBox}" Width="70" Text="{Binding FramesText, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Step frames"/>
+                                                        </StackPanel>
+                                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="{Binding IsChase, Converter={StaticResource BoolToVis}}">
+                                                            <TextBlock Text="Within" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextSecondary}"/>
+                                                            <TextBox Style="{StaticResource FieldBox}" Width="70" Text="{Binding DistanceText, UpdateSourceTrigger=LostFocus}" AutomationProperties.Name="Step distance"/>
+                                                            <CheckBox Content="stop if the opponent recovers first" IsChecked="{Binding StopIfOpponentRecovers}" Margin="10,0,0,0" VerticalAlignment="Center"
+                                                                      Foreground="{DynamicResource TextSecondary}"/>
+                                                        </StackPanel>
+                                                        <TextBlock Text="{Binding Problem}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                                                                   Visibility="{Binding HasProblem, Converter={StaticResource BoolToVis}}"/>
+                                                        <TextBlock Text="{Binding Result}" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"
+                                                                   Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- add a step -->
+                                <TextBlock Text="Add a step" Style="{StaticResource SectionLabel}" Margin="0,12,0,4"/>
+                                <WrapPanel>
+                                    <ComboBox ItemsSource="{Binding SequenceLab.Abilities}" SelectedItem="{Binding SequenceLab.AbilityToAdd}" DisplayMemberPath="Name" MinWidth="200" Margin="0,0,6,6"
+                                              AutomationProperties.Name="Ability to add"/>
+                                    <Button Content="+ Ability" Style="{StaticResource SecondaryButton}" Margin="0,0,14,6" Command="{Binding SequenceLab.AddAbilityCommand}" AutomationProperties.Name="Add ability step"/>
+                                    <TextBlock Text="Frames" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,6" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBox Style="{StaticResource FieldBox}" Width="54" Text="{Binding SequenceLab.FramesToAdd}" Margin="0,0,6,6" AutomationProperties.Name="Frames to add"/>
+                                    <Button Content="+ Walk &#x2192;" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6" Command="{Binding SequenceLab.AddWalkForwardCommand}" AutomationProperties.Name="Add walk forward"/>
+                                    <Button Content="+ Walk &#x2190;" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6" Command="{Binding SequenceLab.AddWalkBackCommand}" AutomationProperties.Name="Add walk back"/>
+                                    <Button Content="+ Wait" Style="{StaticResource SecondaryButton}" Margin="0,0,14,6" Command="{Binding SequenceLab.AddWaitCommand}" AutomationProperties.Name="Add wait"/>
+                                    <TextBlock Text="Within" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,6" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBox Style="{StaticResource FieldBox}" Width="54" Text="{Binding SequenceLab.DistanceToAdd}" Margin="0,0,6,6" AutomationProperties.Name="Distance to add"/>
+                                    <CheckBox Content="stop if they recover" IsChecked="{Binding SequenceLab.StopToAdd}" VerticalAlignment="Center" Margin="0,0,6,6" Foreground="{DynamicResource TextSecondary}"/>
+                                    <Button Content="+ Chase" Style="{StaticResource SecondaryButton}" Margin="0,0,14,6" Command="{Binding SequenceLab.AddChaseCommand}" AutomationProperties.Name="Add chase"/>
+                                    <Button Content="+ Dash" Style="{StaticResource SecondaryButton}" Margin="0,0,6,6" Command="{Binding SequenceLab.AddDashCommand}" AutomationProperties.Name="Add dash"/>
+                                    <Button Content="+ Jump" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding SequenceLab.AddJumpCommand}" AutomationProperties.Name="Add jump"/>
+                                </WrapPanel>
+
+                                <!-- run -->
+                                <WrapPanel Margin="0,10,0,0">
+                                    <Button Content="&#x25B6; Run &#x00D7;1" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.Run1Command}" AutomationProperties.Name="Run the sequence once"
+                                            ToolTip="Plays the whole sequence once in a disposable sandbox match (results go to the experiment store, never your playback history)."/>
+                                    <Button Content="Run &#x00D7;10" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.Run10Command}" AutomationProperties.Name="Run the sequence ten times"/>
+                                    <CheckBox Content="I understand &#x00D7;50 takes a while" IsChecked="{Binding SequenceLab.Confirm50}" VerticalAlignment="Center" Margin="0,0,6,6"
+                                              Foreground="{DynamicResource TextSecondary}" AutomationProperties.Name="Confirm fifty runs"/>
+                                    <Button Content="Run &#x00D7;50" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.Run50Command}" AutomationProperties.Name="Run the sequence fifty times"/>
+                                    <Button Content="Cancel" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.CancelCommand}"
+                                            Visibility="{Binding SequenceLab.IsBusy, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Cancel the sequence run"/>
+                                    <Button Content="View Trace" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.ViewTraceCommand}" AutomationProperties.Name="View the last trial's trace"/>
+                                    <Button Content="Open experiment folder" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.OpenFolderCommand}" AutomationProperties.Name="Open the experiment folder"/>
+                                    <Button Content="Details" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.ToggleDetailsCommand}" AutomationProperties.Name="Show technical details"/>
+                                    <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Atlas.Lab.OpenSetupCommand}" AutomationProperties.Name="Open playback setup from the Sequence Lab"/>
+                                </WrapPanel>
+                                <TextBlock Text="{Binding SequenceLab.CostText}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextTertiary}" AutomationProperties.Name="Run cost"/>
+                                <TextBlock Text="{Binding SequenceLab.Status}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}"
+                                           Visibility="{Binding SequenceLab.HasStatusText, Converter={StaticResource BoolToVis}}"/>
+                                <Border Style="{StaticResource SequenceBanner}" Margin="0,8,0,6" Visibility="{Binding SequenceLab.HasHeadline, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Sequence result">
+                                            <Run Text="{Binding SequenceLab.ResultGlyph, Mode=OneWay}" FontWeight="Bold"/><Run Text="  "/><Run Text="{Binding SequenceLab.Headline, Mode=OneWay}"/>
+                                        </TextBlock>
+                                        <ItemsControl ItemsSource="{Binding SequenceLab.ResultLines}" Focusable="False" Margin="0,4,0,0"
+                                                      Visibility="{Binding SequenceLab.HasResultLines, Converter={StaticResource BoolToVis}}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding}" FontSize="11" TextWrapping="Wrap" Margin="0,1,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+                                <TextBox Text="{Binding SequenceLab.DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" MaxHeight="320"
+                                         VerticalScrollBarVisibility="Auto" Visibility="{Binding SequenceLab.ShowDetails, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Sequence technical details"/>
+                            </StackPanel>
+                        </ScrollViewer>
                     </Grid>
                 </Grid>
             </Border>

@@ -12,6 +12,22 @@ namespace IKEMENLab.Core.XRay.Verify;
 public sealed record InputFrame(IReadOnlyList<string> Keys);
 
 /// <summary>
+/// A Sequence Lab step that is not a move: the driver holds or releases keys instead of feeding a command and expecting a state.
+/// <list type="bullet">
+/// <item><c>hold</c>: hold <see cref="Keys"/> (F = walk forward, B = walk back) for <see cref="Frames"/> ticks.</item>
+/// <item><c>release</c>: hold nothing for <see cref="Frames"/> ticks (Wait).</item>
+/// <item><c>chase</c>: hold F until the players are within <see cref="Distance"/>, or <see cref="Frames"/> ticks pass; with
+/// <see cref="StopIfOpponentRecovers"/> the run stops as soon as the opponent has control again.</item>
+/// <item><c>jump</c>: press U and expect P1 to be airborne within <see cref="Frames"/> ticks.</item>
+/// </list>
+/// With <see cref="WaitForControl"/> the step starts only once P1 can act. Route and ability plans never contain one.
+/// </summary>
+public sealed record StepAction(string Kind, int? Frames = null, int? Distance = null, bool StopIfOpponentRecovers = false, IReadOnlyList<string>? Keys = null, bool WaitForControl = true)
+{
+    public const string Hold = "hold", Release = "release", Chase = "chase", Jump = "jump";
+}
+
+/// <summary>
 /// One route step as the driver will run it. The driver waits until <see cref="WaitState"/> (and contact / tick) hold, feeds
 /// <see cref="Input"/>, then expects P1 to be in <see cref="ExpectState"/> within <see cref="TimeoutFrames"/>.
 /// </summary>
@@ -25,6 +41,13 @@ public sealed record PlanStep(
     /// </summary>
     public const string ForceKind = "Force";
     public bool IsForce => Kind == ForceKind;
+
+    /// <summary>Sequence Lab only: a movement / wait / chase / jump step (no command, no expected state). Null for every move step.</summary>
+    public StepAction? Action { get; init; }
+    public bool IsAction => Action is not null;
+
+    /// <summary>Sequence Lab only: this move is one of the sequence's attacks (its contact is judged). False (and not serialised) everywhere else.</summary>
+    public bool Attack { get; init; }
 }
 
 public sealed record InputPlan(
@@ -219,6 +242,24 @@ public static class InputPlanner
                 w.WriteStartArray();
                 foreach (var n in s.Notes) w.WriteStringValue(n);
                 w.WriteEndArray();
+                // Only Sequence Lab steps carry these, so every route / ability / preview plan's JSON (and fingerprint) is unchanged.
+                if (s.Attack) w.WriteBoolean("attack", true);
+                if (s.Action is { } a)
+                {
+                    w.WritePropertyName("action");
+                    w.WriteStartObject();
+                    w.WriteString("kind", a.Kind);
+                    if (a.Frames is { } fr) w.WriteNumber("frames", fr); else w.WriteNull("frames");
+                    if (a.Distance is { } d) w.WriteNumber("distance", d); else w.WriteNull("distance");
+                    w.WriteBoolean("stopIfOpponentRecovers", a.StopIfOpponentRecovers);
+                    w.WriteBoolean("waitForControl", a.WaitForControl);
+                    w.WritePropertyName("keys");
+                    w.WriteStartArray();
+                    foreach (var k in a.Keys ?? []) w.WriteStringValue(k);
+                    w.WriteEndArray();
+                    w.WriteEndObject();
+                }
+
                 w.WriteEndObject();
             }
 
@@ -257,10 +298,15 @@ public static class InputPlanner
             foreach (var s in r.GetProperty("steps").EnumerateArray())
             {
                 var input = s.GetProperty("input").EnumerateArray().Select(f => new InputFrame(f.EnumerateArray().Select(k => k.GetString()!).ToList())).ToList();
+                StepAction? action = null;
+                if (s.TryGetProperty("action", out var a) && a.ValueKind == JsonValueKind.Object)
+                    action = new StepAction(a.GetProperty("kind").GetString()!, OptInt(a, "frames"), OptInt(a, "distance"), a.GetProperty("stopIfOpponentRecovers").GetBoolean(),
+                        a.GetProperty("keys").EnumerateArray().Select(k => k.GetString()!).ToList(), a.GetProperty("waitForControl").GetBoolean());
                 steps.Add(new PlanStep(s.GetProperty("index").GetInt32(), s.GetProperty("edge").GetString()!, s.GetProperty("kind").GetString()!,
                     s.GetProperty("from").GetString()!, s.GetProperty("to").GetString()!, OptInt(s, "fromState"), s.GetProperty("toState").GetInt32(),
                     OptStr(s, "command"), input, OptStr(s, "contact"), OptInt(s, "earliestTick"), s.GetProperty("timeoutFrames").GetInt32(),
-                    s.GetProperty("notes").EnumerateArray().Select(n => n.GetString()!).ToList()));
+                    s.GetProperty("notes").EnumerateArray().Select(n => n.GetString()!).ToList())
+                    { Action = action, Attack = s.TryGetProperty("attack", out var atk) && atk.ValueKind == JsonValueKind.True });
             }
 
             return new InputPlan(r.GetProperty("character").GetString()!, r.GetProperty("route").GetString()!, steps, r.GetProperty("approachDistance").GetInt32(),
@@ -288,7 +334,11 @@ public static class InputPlanner
             sb.Append($"    {{ index = {s.Index}, edge = {Q(s.EdgeId)}, kind = {Q(s.Kind)}, fromState = {N(s.FromState)}, toState = {s.ToState}, ");
             sb.Append($"contact = {(s.Contact is null ? "nil" : Q(s.Contact))}, earliestTick = {N(s.EarliestTick)}, timeout = {s.TimeoutFrames},");
             // Only a preview step carries the flag, so every route plan's Lua is exactly what it was before previews existed.
-            sb.Append(s.IsForce ? " force = true,\n" : "\n");
+            sb.Append(s.IsForce ? " force = true," : string.Empty);
+            if (s.Action is { } act)
+                sb.Append($" action = {Q(act.Kind)}, frames = {N(act.Frames)}, distance = {N(act.Distance)}, stopOnRecover = {(act.StopIfOpponentRecovers ? "true" : "false")}, " +
+                          $"waitCtrl = {(act.WaitForControl ? "true" : "false")}, keys = {{{string.Join(",", (act.Keys ?? []).Select(Q))}}},");
+            sb.Append('\n');
             sb.Append("      input = {");
             sb.Append(string.Join(", ", s.Input.Select(f => "{" + string.Join(",", f.Keys.Select(Q)) + "}")));
             sb.Append("} },\n");

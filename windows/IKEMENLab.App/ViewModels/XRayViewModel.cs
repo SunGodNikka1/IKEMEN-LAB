@@ -13,11 +13,12 @@ using IKEMENLab.Core.XRay.Playback;
 using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
 using IKEMENLab.Core.XRay.Names;
+using IKEMENLab.Core.XRay.Sequences;
 using IKEMENLab.Core.XRay.Source;
 
 namespace IKEMENLab.App.ViewModels;
 
-public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos }
+public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, Sequences }
 
 /// <summary>
 /// Character X-Ray workspace: one <see cref="SemanticIndex"/>, one selection, six lenses. Selecting anything in any lens
@@ -47,9 +48,11 @@ public sealed class XRayViewModel : ObservableObject
     private IReadOnlyList<XRayRow> _searchResults = [];
 
     public XRayViewModel(string root, CharacterEntry entry, string displayName, ISettingsStore? settings = null, ComboPlaybackService? playback = null,
-        NameOverlayStore? names = null)
+        NameOverlayStore? names = null, SequenceStore? sequences = null, ExperimentStore? experiments = null)
     {
         NameStore = names ?? NameOverlayStore.CreateDefault();
+        SequenceStore = sequences ?? SequenceStore.CreateDefault();
+        ExperimentStore = experiments ?? new ExperimentStore();
         _root = root;
         _entry = entry;
         Settings = settings ?? new JsonSettingsStore();
@@ -66,7 +69,8 @@ public sealed class XRayViewModel : ObservableObject
         Helpers = new HelperTreeLens(this);
         Timeline = new AnimationTimelineLens(this);
         Combos = new ComboLens(this);
-        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos];
+        SequenceLab = new SequenceLabLens(this);
+        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, SequenceLab];
 
         SelectCommand = new RelayCommand(p => { if (p is string id) Select(id); });
         BackCommand = new RelayCommand(Back, () => _history.Count > 1);
@@ -129,6 +133,12 @@ public sealed class XRayViewModel : ObservableObject
     public HelperTreeLens Helpers { get; }
     public AnimationTimelineLens Timeline { get; }
     public ComboLens Combos { get; }
+    /// <summary>Sequence Lab (Phase 3). Built after the Combos lens, whose candidate graph it plans against.</summary>
+    public SequenceLabLens SequenceLab { get; }
+    /// <summary>Saved sequences (app data, per character).</summary>
+    public SequenceStore SequenceStore { get; }
+    /// <summary>The isolated experiment store: Sequence Lab trials never go to the playback history.</summary>
+    public ExperimentStore ExperimentStore { get; }
     public IReadOnlyList<XRayLens> Lenses { get; }
 
     public ICommand SelectCommand { get; }
