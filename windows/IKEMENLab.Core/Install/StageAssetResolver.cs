@@ -2,7 +2,7 @@ using IKEMENLab.Core.Parsing;
 
 namespace IKEMENLab.Core.Install;
 
-/// <summary>A file a stage DEF references that lives outside the stage's own folder in the source.</summary>
+/// <summary>A referenced file that needs an additional destination beyond the ordinary stage-folder copy.</summary>
 /// <param name="SourcePath">The file in the extracted archive / dropped folder.</param>
 /// <param name="Destination">Where it installs, relative to the IKEMEN root, '/'-separated.</param>
 /// <param name="Reference">The DEF value that named it, as written.</param>
@@ -60,6 +60,20 @@ public static class StageAssetResolver
             if (found is { } hit)
             {
                 AddMirrored(companions, warnings, hit.Path, hit.Sub, rel, reference, stageDestination, ikemenFull);
+                continue;
+            }
+
+            // Some archives flatten an IKEMEN-root layout: e.g. X Factor.mp3 beside the DEF,
+            // but bgmusic still says sound/X Factor.mp3. Keep the authored reference and install
+            // that exact bundled path at its declared root location. Never search arbitrary basenames.
+            var loose = FindFlattenedReference(defDirFull, scanFull, rel);
+            if (loose is not null)
+            {
+                var ordinaryDestination = stageDestination + "/" +
+                    Path.GetRelativePath(defDirFull, loose).Replace('\\', '/');
+                // Flat stages already put stages/X.sff in the right place; do not plan it twice.
+                if (!string.Equals(ordinaryDestination, rel, StringComparison.OrdinalIgnoreCase))
+                    AddMirrored(companions, warnings, loose, "", rel, reference, stageDestination, ikemenFull);
                 continue;
             }
 
@@ -126,6 +140,19 @@ public static class StageAssetResolver
         }
 
         return null;
+    }
+
+    /// <summary>Recognizes only a known root prefix omitted from the bundled folder layout.</summary>
+    private static string? FindFlattenedReference(string defDir, string scanRoot, string rel)
+    {
+        var slash = rel.IndexOf('/');
+        if (slash <= 0 || !RootSubfolders.Any(sub => sub.Length > 0 &&
+            sub.Equals(rel[..slash], StringComparison.OrdinalIgnoreCase))) return null;
+        var remainder = rel[(slash + 1)..];
+        if (remainder.Length == 0 || remainder.Split('/').Contains("..")) return null;
+        var candidate = Path.GetFullPath(Path.Combine(defDir, remainder.Replace('/', Path.DirectorySeparatorChar)));
+        return File.Exists(candidate) && IsUnder(defDir, candidate) && IsUnder(scanRoot, candidate)
+            ? candidate : null;
     }
 
     /// <summary>A '..' reference: keep the exact relative position to the stage folder.</summary>

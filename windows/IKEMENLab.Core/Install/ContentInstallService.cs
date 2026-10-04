@@ -195,7 +195,7 @@ public sealed class ContentInstallService : IContentInstallService
                  string.Equals(Path.TrimEndingDirectorySeparator(package.PackageRoot), Path.TrimEndingDirectorySeparator(scanRoot), StringComparison.OrdinalIgnoreCase))
             stageWarnings.Add($"The archive has no stage folder, so it installs as stages/{package.SuggestedFolderName}/ (named after the archive).");
         foreach (var companion in assets.Companions)
-            stageWarnings.Add($"Also installs {companion.Destination} (referenced as {companion.Reference}; it sits outside the stage folder in the archive).");
+            stageWarnings.Add($"Also installs {companion.Destination} (referenced as {companion.Reference}).");
         stageWarnings.AddRange(assets.Warnings);
 
         var stagePackage = new DetectedPackage

@@ -80,11 +80,126 @@ public class StageLayoutTests : IDisposable
     }
 
     [Fact]
+    public void FlatArchive_WithRootPrefixedReferences_InstallsReferencedMusic()
+    {
+        // X_Factor.rar has these three loose files, while the DEF retains IKEMEN-root prefixes.
+        var def = StageDef("sound/X Factor.mp3", "stages/X Factor.sff");
+        var (item, inspect) = Plan(Zip("X_Factor", def, "X Factor.def", "X Factor.sff", "X Factor.mp3"));
+        Assert.True(item.Package.IsFlatStage);
+        Assert.Empty(item.Package.MissingAssets);
+        Assert.Equal("sound/X Factor.mp3", Assert.Single(item.Package.Companions).Destination);
+        File.WriteAllText(Path.Combine(_root, "sound", "unrelated.mp3"), "keep music");
+        File.WriteAllText(Path.Combine(_root, "stages", "unrelated.def"), "keep stage");
+
+        Assert.Equal(1, _installer.Execute(inspect.Items, _root).InstalledCount);
+        Assert.Equal(def, File.ReadAllText(Path.Combine(_root, "stages", "X Factor.def")));
+        Assert.Equal("bytes:X Factor.mp3", File.ReadAllText(Path.Combine(_root, "sound", "X Factor.mp3")));
+        Assert.True(Has("stages/X Factor.sff"));
+        Assert.Equal("keep music", File.ReadAllText(Path.Combine(_root, "sound", "unrelated.mp3")));
+        Assert.Equal("keep stage", File.ReadAllText(Path.Combine(_root, "stages", "unrelated.def")));
+        Assert.Equal("; roster\n", File.ReadAllText(Path.Combine(_root, "data", "select.def")));
+        Assert.Equal("[Config]\nMotif = data/system.def\n", File.ReadAllText(Path.Combine(_root, "save", "config.ini")));
+    }
+
+    [Theory]
+    [InlineData("sound", "ogg")]
+    [InlineData("sound", "wav")]
+    [InlineData("data", "bin")]
+    [InlineData("stages", "sff")]
+    public void FlattenedRootReference_UsesTheDeclaredDestination(string prefix, string extension)
+    {
+        var reference = $"{prefix}/theme.{extension}";
+        var (item, inspect) = Plan(Zip(prefix + extension, StageDef(reference),
+            "stage.def", "stage.sff", $"theme.{extension}"));
+        Assert.Empty(item.Package.MissingAssets);
+        Assert.Equal(1, _installer.Execute(inspect.Items, _root).InstalledCount);
+        Assert.Equal($"bytes:theme.{extension}", File.ReadAllText(Path.Combine(_root, prefix, $"theme.{extension}")));
+    }
+
+    [Fact]
+    public void FlattenedRootReference_PreservesRemainingSubdirectories()
+    {
+        var (item, inspect) = Plan(Zip("nested", StageDef("sound/music/theme.mp3"),
+            "stage.def", "stage.sff", "music/theme.mp3"));
+        Assert.Empty(item.Package.MissingAssets);
+        Assert.Equal(1, _installer.Execute(inspect.Items, _root).InstalledCount);
+        Assert.Equal("bytes:music/theme.mp3", File.ReadAllText(Path.Combine(_root, "sound", "music", "theme.mp3")));
+    }
+
+    [Theory]
+    [InlineData("custom/theme.mp3")]
+    [InlineData("sound/../../theme.mp3")]
+    public void FlattenedRootReference_DoesNotGuessOrTraverse(string reference)
+    {
+        var (item, _) = Plan(Zip("unsafe", StageDef(reference), "stage.def", "stage.sff", "theme.mp3"));
+        Assert.Contains(reference, item.Package.MissingAssets);
+        Assert.Empty(item.Package.Companions);
+    }
+
+    [Fact]
+    public void FlattenedRootReference_DoesNotOverrideAnExactArchiveMatch()
+    {
+        var (item, inspect) = Plan(Zip("exact", StageDef("sound/theme.mp3"),
+            "stage.def", "stage.sff", "theme.mp3", "sound/theme.mp3"));
+        Assert.Empty(item.Package.Companions);
+        Assert.Empty(item.Package.MissingAssets);
+        Assert.Equal(1, _installer.Execute(inspect.Items, _root).InstalledCount);
+        Assert.Equal("bytes:sound/theme.mp3", File.ReadAllText(Path.Combine(item.TargetDirectory, "sound", "theme.mp3")));
+    }
+
+    [Fact]
+    public void FlattenedRootReference_DoesNotOverwriteDifferentInstalledMusic()
+    {
+        File.WriteAllText(Path.Combine(_root, "sound", "theme.mp3"), "someone else's music");
+        var (item, inspect) = Plan(Zip("clashflat", StageDef("sound/theme.mp3"),
+            "stage.def", "stage.sff", "theme.mp3"));
+        Assert.Contains(item.Package.Warnings, w => w.Contains("already exists and is different"));
+        Assert.Equal(1, _installer.Execute(inspect.Items, _root).InstalledCount);
+        Assert.Equal("someone else's music", File.ReadAllText(Path.Combine(_root, "sound", "theme.mp3")));
+        Assert.Equal("bytes:theme.mp3", File.ReadAllText(Path.Combine(_root, "stages", "sound", "theme.mp3")));
+    }
+
+    [Fact]
+    public void FlattenedRootReference_IdenticalInstalledMusicNeedsNoCompanion()
+    {
+        File.WriteAllText(Path.Combine(_root, "sound", "theme.mp3"), "bytes:theme.mp3");
+        var (item, inspect) = Plan(Zip("sameflat", StageDef("sound/theme.mp3"),
+            "stage.def", "stage.sff", "theme.mp3"));
+        Assert.Empty(item.Package.Companions);
+        Assert.Empty(item.Package.MissingAssets);
+        Assert.Equal(1, _installer.Execute(inspect.Items, _root).InstalledCount);
+    }
+
+    [Fact]
     public void WrapperArchive_UsesTheRealStageFolder()
     {
         Assert.Equal("My Stage", Install(Zip("w", StageDef("music.mp3"), "Release v1/My Stage/stage.def", "Release v1/My Stage/stage.sff", "Release v1/My Stage/music.mp3")));
         Assert.True(Has("stages/My Stage/music.mp3"));
         Assert.False(Directory.Exists(Path.Combine(_root, "stages", "Release v1")));
+    }
+
+    [Fact]
+    public void FlattenedRootReference_FailedMusicWriteRollsBackLooseFiles()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "sound", "theme.mp3"));
+        var (_, inspect) = Plan(Zip("rollbackflat", StageDef("sound/theme.mp3"),
+            "stage.def", "stage.sff", "theme.mp3"));
+        Assert.Equal(0, _installer.Execute(inspect.Items, _root).InstalledCount);
+        Assert.False(Has("stages/stage.def"));
+        Assert.False(Has("stages/stage.sff"));
+        Assert.False(Has("stages/theme.mp3"));
+        Assert.True(Directory.Exists(Path.Combine(_root, "sound", "theme.mp3")));
+    }
+
+    [Fact]
+    public void FlattenedRootReference_DryRunWritesNothing()
+    {
+        var (_, inspect) = Plan(Zip("dryflat", StageDef("sound/theme.mp3"),
+            "stage.def", "stage.sff", "theme.mp3"));
+        Assert.Equal(1, _installer.Execute(inspect.Items, _root, dryRun: true).InstalledCount);
+        Assert.False(Has("stages/stage.def"));
+        Assert.False(Has("stages/theme.mp3"));
+        Assert.False(Has("sound/theme.mp3"));
     }
 
     [Fact]
