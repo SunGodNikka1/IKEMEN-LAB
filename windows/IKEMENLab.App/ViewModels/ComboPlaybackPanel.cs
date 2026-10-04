@@ -22,7 +22,6 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private readonly XRayViewModel _owner;
     private readonly ComboLens _lens;
     private readonly PlaybackSession _session;
-    private readonly UiDispatcher _ui = new();
     private string _enginePath = string.Empty;
     private string _dummy = string.Empty;
     private string _stage = string.Empty;
@@ -37,9 +36,9 @@ public sealed class ComboPlaybackPanel : ObservableObject
     {
         _owner = owner;
         _lens = lens;
-        // Notifications are posted to the UI thread, never invoked synchronously: the UI thread may be waiting on this worker (closing),
-        // and a worker that blocks on the UI thread would deadlock it. A post queued before a close is dropped when it runs.
-        _session = new PlaybackSession(owner.PlaybackService, a => _ui.Post(a));
+        // The window's one session (shared with Play Ability / Preview State). Its notifications are posted to the UI thread, never invoked
+        // synchronously; a post queued before a close is dropped when it runs.
+        _session = owner.PlaybackSession;
         _session.Changed += OnSessionChanged;
 
         var saved = SafeLoad();
@@ -197,7 +196,7 @@ public sealed class ComboPlaybackPanel : ObservableObject
         if (!_session.CanReplayFor(SelectedKey) || _session.Last is not { } last) return;
         if (setup is null || !setup.Ready)
         {
-            _session.RefuseAttempt(last.Route.Key, setup is null ? SetupSummary : string.Join(" ", setup.Issues), setup);
+            _session.RefuseAttempt(last.ScopeKey, setup is null ? SetupSummary : string.Join(" ", setup.Issues), setup);
             return;
         }
 
@@ -263,6 +262,9 @@ public sealed class ComboPlaybackPanel : ObservableObject
     private static string FolderUnderChars(string folderPath) =>
         folderPath.StartsWith("chars/", StringComparison.OrdinalIgnoreCase) ? folderPath["chars/".Length..] : folderPath;
 
+    /// <summary>Resolves the playback setup the way Play does (Play Ability uses it too, so both lenses share one setup).</summary>
+    public PlaybackSetup? CheckSetup(bool showIssuesAsSetup) => RefreshSetup(showIssuesAsSetup);
+
     private PlaybackSetup? RefreshSetup(bool showIssuesAsSetup)
     {
         PlaybackSetup setup;
@@ -312,7 +314,8 @@ public sealed class ComboPlaybackPanel : ObservableObject
         if (_session.IsClosed) return;   // the window is gone: never touch it
         RaiseScoped();
         OnPropertyChanged(nameof(CanInspect));
-        _lens.ApplyVerdicts(_session.State == PlaybackState.Finished ? _session.Outcome?.Report : null);
+        // Step marks only ever come from a combo run; a Play Ability run's one-step report is not a verdict about any listed route.
+        _lens.ApplyVerdicts(_session.State == PlaybackState.Finished && _session.RunMode == PlaybackMode.Combo ? _session.Outcome?.Report : null);
         CommandManager.InvalidateRequerySuggested();
     }
 }

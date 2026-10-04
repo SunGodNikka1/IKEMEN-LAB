@@ -15,7 +15,7 @@
 if rawget(_G, "__ikemenlab_xray") then return end
 _G.__ikemenlab_xray = true
 
-local PROBE_VERSION = "0.2-m3-audit"
+local PROBE_VERSION = "0.3-phase2-force"
 local cfg = { trace = "xray_trace.jsonl", maxFrames = 900, hooks = { "loop" }, character = "" }
 do
 	local ok, c = pcall(dofile, "external/mods/xray_config.lua")
@@ -91,6 +91,17 @@ local function loadDriver(emitFn, OFn)
 	driver = mod.new(plan, {
 		inject = type(inject) == "function" and inject or nil,
 		emit = function(kind, frame, ...) emitFn(OFn("type", kind, "frame", frame, ...)) end,
+		-- State Preview only: the engine's own changeState, redirected to the player with player(n). True only when the engine reports that
+		-- an existing state was entered. Never used by a route plan.
+		force = function(playerNo, stateNo)
+			local sel, change = rawget(_G, "player"), rawget(_G, "changeState")
+			if type(sel) ~= "function" or type(change) ~= "function" then return false end
+			local okSel, selected = pcall(sel, playerNo)
+			if not okSel or not selected then return false end
+			local ok, entered = pcall(change, stateNo)
+			pcall(sel, 1)
+			return ok and entered == true
+		end,
 	})
 end
 

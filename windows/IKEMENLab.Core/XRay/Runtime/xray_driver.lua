@@ -8,6 +8,10 @@
 -- keys is the COMPLETE set of logical keys P1 holds this tick: U D F B a b c x y z s  (F/B relative to facing). It is called every
 -- tick while the plan runs. No adapter, or one that returns false/errors on the first call => "inject_unavailable" and the run
 -- ends; the verifier then reports Inconclusive, never Verified.
+--
+-- State Preview (a step with force = true, never part of a route): instead of feeding input, the driver asks io.force(1, toState) to
+-- change P1's state with the engine's own changeState once P1 is free and close enough, records "force_applied" or "force_failed",
+-- and then only watches (the tail). A forced state is never evidence that a move can be performed; IKEMEN Lab never judges it.
 
 local M = {}
 
@@ -118,11 +122,23 @@ function M.new(plan, io)
 		if phase == "wait" then
 			local inSource = step.fromState == nil and (p1.ctrl == true or (p1.ctrl == nil and state == 0)) or state == step.fromState
 			local ready = inSource and contactOk(p1) and stateTicks >= (step.earliestTick or 0)
-			if state == step.toState and #step.input == 0 then ready = true end
+			if state == step.toState and #step.input == 0 and not step.force then ready = true end
 			if not setKeys(frame, {}, "wait") then return "noInject" end
 			if ready then
 				note(frame, "step_ready", step.edge)
 				counter = 0
+				if step.force then
+					local forceFn = io.force or function() return false end
+					local okF, res = pcall(forceFn, 1, step.toState)
+					if not okF or res ~= true then
+						note(frame, "force_failed", tostring(step.toState) .. (okF and "" or (": " .. tostring(res))))
+						return "forceFailed"
+					end
+					note(frame, "force_applied", tostring(step.toState))
+					-- Whatever the state does next is only watched: the tail starts now, whether or not P1 stays in the forced state.
+					beginStep(frame)
+					return nil
+				end
 				if #step.input == 0 then phase = "watch" else phase = "input"; inputPos = 0 end
 				return nil
 			end

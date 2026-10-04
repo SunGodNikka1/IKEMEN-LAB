@@ -77,6 +77,9 @@ public sealed record VerifyRunResult(VerificationReport Report, string? SandboxP
     public TraceLog? Log { get; init; }
 }
 
+/// <summary>One engine run of a prepared plan, before anything is judged: the trace as read, and the run's own notes (sandbox, trace hash, engine problems).</summary>
+public sealed record EngineRun(InputPlan Plan, TraceLog Log, EngineRunResult Engine, IReadOnlyList<string> Notes, string? SandboxPath, string? TracePath);
+
 /// <summary>Route → plan → disposable sandbox → engine → trace → verdict. The one path that can produce a RuntimeVerified route.</summary>
 public static class VerifyRunner
 {
@@ -87,8 +90,22 @@ public static class VerifyRunner
         var planned = InputPlanner.Plan(graph, route, planOptions);
         if (planned.Plan is null) throw new InvalidOperationException(planned.RefusedReason);
 
+        var run = Execute(planned.Plan, request, runner);
+        var report = RouteVerifier.Verify(planned.Plan, run.Log);
+        report = report with { Notes = report.Notes.Concat(run.Notes).ToList() };
+        request.Cancel.ThrowIfCancellationRequested();
+        return new VerifyRunResult(report, run.SandboxPath, run.TracePath, run.Engine) { Plan = planned.Plan, Log = run.Log };
+    }
+
+    /// <summary>
+    /// Plays an already-built plan in a disposable sandbox and reads the trace back; it judges nothing. <see cref="Run"/> judges the result with
+    /// <see cref="RouteVerifier"/>; a state preview reads it with its own non-verdict reader. The sandbox is removed (and a failed removal reported)
+    /// unless the request keeps it.
+    /// </summary>
+    public static EngineRun Execute(InputPlan plan, VerifyRunRequest request, IEngineRunner runner)
+    {
         request.Progress?.Invoke("preparing");
-        var sandboxRequest = request.Sandbox with { Plan = planned.Plan, Cancel = request.Cancel, CleanupFailed = request.Sandbox.CleanupFailed ?? request.CleanupFailed };
+        var sandboxRequest = request.Sandbox with { Plan = plan, Cancel = request.Cancel, CleanupFailed = request.Sandbox.CleanupFailed ?? request.CleanupFailed };
         var sandbox = RuntimeSandbox.Create(sandboxRequest);
         var keep = request.KeepSandbox;
         try
@@ -104,18 +121,15 @@ public static class VerifyRunner
             request.Progress?.Invoke("judging");
             request.Cancel.ThrowIfCancellationRequested();
             var raw = File.Exists(sandbox.TracePath) ? File.ReadAllText(sandbox.TracePath) : null;
-            request.Collect?.Invoke(new VerifyArtifacts(planned.Plan, sandbox.Root, sandbox.TracePath, raw));
+            request.Collect?.Invoke(new VerifyArtifacts(plan, sandbox.Root, sandbox.TracePath, raw));
             var log = raw is null ? new TraceLog { Events = [], Issues = [] } : TraceReader.ReadFile(sandbox.TracePath);
-            var report = RouteVerifier.Verify(planned.Plan, log);
-            var notes = report.Notes.ToList();
-            notes.AddRange(sandbox.Notes);
+            var notes = new List<string>(sandbox.Notes);
             if (File.Exists(sandbox.TracePath)) notes.Add("Trace sha256: " + Convert.ToHexString(
                 System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sandbox.TracePath))));
             if (engine.Error is not null) notes.Add("Engine: " + engine.Error);
             if (engine.TimedOut) notes.Add("The engine was stopped after the timeout.");
-            report = report with { Notes = notes };
             request.Cancel.ThrowIfCancellationRequested();
-            return new VerifyRunResult(report, keep ? sandbox.Root : null, keep ? sandbox.TracePath : null, engine) { Plan = planned.Plan, Log = log };
+            return new EngineRun(plan, log, engine, notes, keep ? sandbox.Root : null, keep ? sandbox.TracePath : null);
         }
         finally
         {

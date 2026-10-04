@@ -238,6 +238,18 @@ case "playback-setup":
 case "playback-trace":
     PlaybackAction(p => p.ViewTraceCommand, "ViewTrace");
     break;
+case "ability-play":
+    AbilityAction(p => p.PlayAbilityCommand, "play");
+    break;
+case "ability-preview":
+    AbilityAction(p => p.PreviewStateCommand, "preview");
+    break;
+case "ability-status":
+    AbilityStatusVerb();
+    break;
+case "ability-diagnostic":
+    AbilityDiagnosticVerb();
+    break;
 case "xray-combos-find":
                 ComboFind();
                 break;
@@ -910,6 +922,59 @@ case "xray-combos-find":
         _log.Add($"  status.hasApproachDistanceError={p.HasApproachDistanceError}");
     }
 
+    // ---------------------------------------------------------------- Ability Lab (Phase 2: Play Ability + Preview State)
+
+    private AbilityPlaybackPanel AbilityLab() => XRayVm().Atlas.Lab;
+
+    /// <summary>ability-play / ability-preview - invoke the real Ability Lab command for the ability selected in the Atlas (select it first with xray-select ability:N).
+    /// Fire-and-forget like playback-play; the shared session's playback-wait / playback-cancel apply.</summary>
+    private void AbilityAction(Func<AbilityPlaybackPanel, System.Windows.Input.ICommand> pick, string name)
+    {
+        var lab = AbilityLab();
+        if (lab.AbilityId is null) throw new InvalidOperationException($"ability-{name} needs a selected ability; use xray-select ability:N first");
+        var command = pick(lab);
+        if (!command.CanExecute(null))
+            throw new InvalidOperationException($"ability-{name} refused for {lab.AbilityId}: {lab.PathText} (busy={lab.IsBusy})");
+        var before = XRayVm().PlaybackSession.AttemptId;
+        command.Execute(null);
+        var session = XRayVm().PlaybackSession;
+        _log.Add($"  ability-{name}: invoked for {lab.AbilityId}; attemptId={session.AttemptId} (previous {before}) attemptState={session.Attempt} scope={session.AttemptRouteKey}" +
+                 (session.Attempt == AttemptState.PreflightRefused ? $" — refused before any engine launch: {session.AttemptIssue}" : string.Empty));
+    }
+
+    /// <summary>ability-status - the Ability Lab's view of the shared session, as key=value lines. Result fields print only when the result is current and belongs to the selected ability.</summary>
+    private void AbilityStatusVerb()
+    {
+        var lab = AbilityLab();
+        var session = XRayVm().PlaybackSession;
+        var cur = session.ResultIsCurrent && lab.ShownScope is not null;
+        _log.Add($"  ability.selected={lab.AbilityId ?? string.Empty}");
+        _log.Add($"  ability.path={lab.PathText}");
+        _log.Add($"  ability.warnings={lab.PathWarnings.Replace('\n', ' ')}");
+        _log.Add($"  ability.canPlay={lab.CanPlayAbility}");
+        _log.Add($"  ability.canPreview={lab.CanPreviewState}");
+        _log.Add($"  ability.attemptId={session.AttemptId}");
+        _log.Add($"  ability.attemptState={session.Attempt}");
+        _log.Add($"  ability.attemptScope={session.AttemptRouteKey ?? string.Empty}");
+        _log.Add($"  ability.shownScope={lab.ShownScope ?? string.Empty}");
+        _log.Add($"  ability.resultIsCurrent={cur}");
+        _log.Add($"  ability.resultKind={lab.ResultKind}");
+        _log.Add($"  ability.headline={lab.Headline}");
+        _log.Add($"  ability.mode={(cur ? session.RunMode?.ToString() : null) ?? string.Empty}");
+        _log.Add($"  ability.status={(cur ? session.Outcome?.Ability?.Status.ToString() ?? session.PreviewResult?.Report.Status.ToString() : null) ?? string.Empty}");
+        _log.Add($"  ability.reason={(cur ? session.Outcome?.Ability?.Reason ?? session.PreviewResult?.Report.Reason : null) ?? string.Empty}");
+        _log.Add($"  ability.proof={(cur && session.PreviewResult is not null ? "false (preview)" : string.Empty)}");
+        _log.Add($"  ability.recordDirectory={(cur ? session.Outcome?.Record.Directory ?? session.PreviewResult?.Record.Directory : null) ?? string.Empty}");
+        foreach (var line in lab.ResultLines) _log.Add("  ability.line=" + line);
+    }
+
+    private void AbilityDiagnosticVerb()
+    {
+        var text = AbilityLab().DiagnosticText();
+        if (text.Length == 0) { _log.Add("  ability-diagnostic: (none) - no attempt, or the latest attempt is not for the selected ability"); return; }
+        foreach (var line in text.Split('\n')) _log.Add("  diag| " + line);
+    }
+
     private static bool VerdictSettled(ComboPlaybackPanel p)
     {
         var v = p.VerdictForLatestAttempt();
@@ -921,7 +986,18 @@ case "xray-combos-find":
         };
     }
 
-    /// <summary>playback-wait &lt;running|verdict|idle|phase=NAME&gt; [timeoutMs] - bounded; always resolves or throws.</summary>
+    private static bool Settled(ComboPlaybackPanel p)
+    {
+        var v = p.VerdictForLatestAttempt();
+        return v.Kind switch
+        {
+            VerdictWaitKind.Verdict or VerdictWaitKind.Preview or VerdictWaitKind.EndedWithoutVerdict => true,
+            VerdictWaitKind.Pending => false,
+            _ => throw new InvalidOperationException(v.Message)
+        };
+    }
+
+    /// <summary>playback-wait &lt;running|verdict|settled|idle|phase=NAME&gt; [timeoutMs] - bounded; always resolves or throws. "verdict" refuses a preview (it never has one); "settled" accepts it.</summary>
     private async Task PlaybackWait(string rest)
     {
         var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -938,6 +1014,8 @@ case "xray-combos-find":
                 // A verdict is waited for on the LATEST attempt only: an older run's committed result never satisfies it, and an attempt that was refused
                 // during preflight has no runtime verdict at all, so that is reported as such rather than answered with a previous result.
                 "verdict" => VerdictSettled(p),
+                // Any end of the latest attempt that left a record or ended it: a verdict, a State Preview (never a verdict), or cancel/error.
+                "settled" => Settled(p),
                 var s when s.StartsWith("phase=", StringComparison.OrdinalIgnoreCase) =>
                     p.SessionPhase.Contains(s["phase=".Length..], StringComparison.OrdinalIgnoreCase),
                 _ => throw new InvalidOperationException($"unknown playback-wait condition '{what}'")

@@ -50,20 +50,45 @@ public sealed record StaticSnapshot(
         "Observing a destination state does not establish which controller produced it."
     ];
 
-    public static StaticSnapshot Capture(CandidateGraph graph, ComboRoute route)
+    /// <summary>The route's static evidence and the names in effect now. <paramref name="alsoName"/> adds one more object to the frozen names (Play Ability passes its ability).</summary>
+    public static StaticSnapshot Capture(CandidateGraph graph, ComboRoute route, string? alsoName = null)
     {
         var index = graph.Index;
-        var files = index.Files.Select(f => new SnapshotFile(f.RelPath, f.Role.ToString(), f.Hash)).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
         var steps = new List<StepStaticSnapshot>();
         for (var i = 0; i < route.Steps.Count; i++)
             steps.Add(CaptureStep(graph, index, route.Steps[i].Edge, i + 1));
-        var names = steps.SelectMany(s => new[] { s.From, s.To }).Distinct(StringComparer.Ordinal)
+        var ids = steps.SelectMany(s => new[] { s.From, s.To });
+        if (alsoName is not null) ids = ids.Append(alsoName);
+        return new StaticSnapshot(index.CharacterId, SchemaVersion, FilesOf(index), route.Key, steps, StandardLimitations) { Names = NamesOf(index, ids) };
+    }
+
+    public static readonly IReadOnlyList<string> PreviewLimitations =
+    [
+        "PREVIEW, NOT PROOF: the state was forced with the engine's changeState. Its command, its triggers and every prerequisite were skipped, so nothing here shows the move can be performed normally.",
+        "No route, edge or controller was exercised; there are no static steps to compare against.",
+        "What followed the force is a measurement of this one run against this dummy at this spacing, and is never counted as a result."
+    ];
+
+    /// <summary>The files and the names in effect for a State Preview of <paramref name="stateId"/> (and the abilities it belongs to).</summary>
+    public static StaticSnapshot CaptureState(SemanticIndex index, string stateId)
+    {
+        var ids = new List<string> { stateId };
+        ids.AddRange(index.Outgoing(stateId, RelationKind.PartOf).Select(r => r.To));
+        return new StaticSnapshot(index.CharacterId, SchemaVersion, FilesOf(index), StatePreview.ScopeKey(stateId), [], PreviewLimitations) { Names = NamesOf(index, ids) };
+    }
+
+    private static IReadOnlyList<SnapshotFile> FilesOf(SemanticIndex index) =>
+        index.Files.Select(f => new SnapshotFile(f.RelPath, f.Role.ToString(), f.Hash)).OrderBy(f => f.Path, StringComparer.Ordinal).ToList();
+
+    private static IReadOnlyList<SnapshotName> NamesOf(SemanticIndex index, IEnumerable<string> ids) =>
+        ids.Distinct(StringComparer.Ordinal)
             .Where(id => index.Get(id) is not null && index.Names.IsRenamed(id))
             .OrderBy(id => id, StringComparer.Ordinal)
             .Select(id => new SnapshotName(id, index.NameOf(id), index.Names.Default(id), index.Names.SourceOf(id) == IKEMENLab.Core.XRay.Names.NameSource.User ? "user" : "linked"))
             .ToList();
-        return new StaticSnapshot(index.CharacterId, SchemaVersion, files, route.Key, steps, StandardLimitations) { Names = names };
-    }
+
+    /// <summary>The frozen name of <paramref name="id"/>, or null when it had none at attempt start.</summary>
+    public string? NameOf(string id) => Names.FirstOrDefault(n => n.Id == id)?.Name;
 
     private static StepStaticSnapshot CaptureStep(CandidateGraph graph, SemanticIndex index, CandidateEdge edge, int number)
     {

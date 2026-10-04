@@ -17,7 +17,15 @@ public sealed record InputFrame(IReadOnlyList<string> Keys);
 /// </summary>
 public sealed record PlanStep(
     int Index, string EdgeId, string Kind, string FromId, string ToId, int? FromState, int ToState,
-    string? Command, IReadOnlyList<InputFrame> Input, string? Contact, int? EarliestTick, int TimeoutFrames, IReadOnlyList<string> Notes);
+    string? Command, IReadOnlyList<InputFrame> Input, string? Contact, int? EarliestTick, int TimeoutFrames, IReadOnlyList<string> Notes)
+{
+    /// <summary>
+    /// The kind of a State Preview step: no input at all, the driver forces <see cref="ToState"/> with the engine's own <c>changeState</c>. Only
+    /// <see cref="Playback.StatePreview"/> builds such a step; the route planner never does, and the route verifier refuses to judge one.
+    /// </summary>
+    public const string ForceKind = "Force";
+    public bool IsForce => Kind == ForceKind;
+}
 
 public sealed record InputPlan(
     string Character, string RouteKey, IReadOnlyList<PlanStep> Steps, int ApproachDistance, int NeutralFrames, int TailFrames,
@@ -278,7 +286,9 @@ public static class InputPlanner
         foreach (var s in plan.Steps)
         {
             sb.Append($"    {{ index = {s.Index}, edge = {Q(s.EdgeId)}, kind = {Q(s.Kind)}, fromState = {N(s.FromState)}, toState = {s.ToState}, ");
-            sb.Append($"contact = {(s.Contact is null ? "nil" : Q(s.Contact))}, earliestTick = {N(s.EarliestTick)}, timeout = {s.TimeoutFrames},\n");
+            sb.Append($"contact = {(s.Contact is null ? "nil" : Q(s.Contact))}, earliestTick = {N(s.EarliestTick)}, timeout = {s.TimeoutFrames},");
+            // Only a preview step carries the flag, so every route plan's Lua is exactly what it was before previews existed.
+            sb.Append(s.IsForce ? " force = true,\n" : "\n");
             sb.Append("      input = {");
             sb.Append(string.Join(", ", s.Input.Select(f => "{" + string.Join(",", f.Keys.Select(Q)) + "}")));
             sb.Append("} },\n");

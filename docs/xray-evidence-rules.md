@@ -2,7 +2,7 @@
 
 Every relationship and label in the Character Semantic Index cites one of these rule ids, and the rule dictates its confidence — a heuristic cannot be recorded as StaticProven by accident (`IndexBuilder.Relate` takes the confidence from the rule).
 
-`RuntimeVerified` means a fact was **observed in a real match**. Only the three `runtime.*` rules below carry it, and they are cited only by a runtime-verification report (`ikemenlab.xray.verify/1`) built from a real trace. The static index, the candidate graph and every route from the search never emit it, and tests assert that.
+`RuntimeVerified` means a fact was **observed in a real match**. Only the three `runtime.*` rules below carry it, and they are cited only by a runtime-verification report (`ikemenlab.xray.verify/1`) built from a real trace. A Play Ability report (`ikemenlab.xray.ability/1`) repeats exactly `runtime.transition-observed`, copied from that report's own step-1 verdict on the ability's one-step plan, and nothing else. A State Preview (`ikemenlab.xray.preview/1`) cites no rule at all: it is never proof. The static index, the candidate graph and every route from the search never emit it, and tests assert that.
 
 This file is checked against the registry in `EvidenceRules.cs` by a test; regenerate it with `ikemenlab xray rules`.
 

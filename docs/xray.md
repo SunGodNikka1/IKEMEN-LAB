@@ -19,7 +19,7 @@ DEF [Files] ─▶ CMD · CNS · ST · AIR · common1.cns · SFF
      WPF lenses     ikemenlab xray …        runtime traces (spike) attach by state number
 ```
 
-Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md); accepted in [xray-milestone-3-acceptance.md](xray-milestone-3-acceptance.md).** **Milestone 4 (Play / Verify Combo from the Combos lens) is in [xray-m4-play-combo.md](xray-m4-play-combo.md).**
+Milestone 1 is static only: the index and its lenses. **Milestone 2 (static combo candidates) is described in [xray-combo.md](xray-combo.md)**. **Milestone 3 (runtime combo verification: a candidate route played in a disposable match and judged from the trace) is described in [xray-runtime-verifier.md](xray-runtime-verifier.md); accepted in [xray-milestone-3-acceptance.md](xray-milestone-3-acceptance.md).** **Milestone 4 (Play / Verify Combo from the Combos lens) is in [xray-m4-play-combo.md](xray-m4-play-combo.md).** **Phase 2 (Play Ability and Preview State from the Ability Atlas, on the same playback stack) is in [xray-phase2-play-ability.md](xray-phase2-play-ability.md).**
 
 ## The model
 
@@ -73,6 +73,19 @@ X-Ray's own name and the id stay as technical metadata; ids, relationships, evid
 - **CLI.** Every `ikemenlab xray` command shows names (`"name"` = your name, `"defaultName"` = X-Ray's, `"nameSource"`; a stale saved name adds
   `"nameReview"`). `--no-names` turns them off. `ikemenlab xray names <character> [list|review|set <id> <name>|clear <id>|keep <id>|attach <old> <new>]`
   manages them (`200` means `state:200`). `--names-store DIR` uses another store (tools/tests).
+
+## Play Ability and Preview State (Phase 2)
+
+The Ability Atlas has an **Ability Lab** bar for the selected ability. Details are in [xray-phase2-play-ability.md](xray-phase2-play-ability.md).
+
+- **▶ Play Ability** performs the ability from neutral through its own command: a one-step route on the M3/M4 pipeline. The result is
+  **Performed / Not performed / Could not be tested**, from the route verifier's step check. Performed cites only `runtime.transition-observed`;
+  the verifier's combo continuity check is not used. Contact, reaction, damage and recovery are shown as measurements of that run.
+- AI-only and cancel-only abilities are refused with the reason, never given a guessed lead-in.
+- **Preview State (not proof)** forces the entry state with the engine's `changeState`. It is never a verdict and cites no evidence;
+  `"proof": false` appears everywhere it is recorded.
+- One playback session per window: Play Combo, Play Ability and Preview State never run two engines at once, and each result is shown only
+  against its own route, ability or previewed state.
 
 ## Evidence confidence
 

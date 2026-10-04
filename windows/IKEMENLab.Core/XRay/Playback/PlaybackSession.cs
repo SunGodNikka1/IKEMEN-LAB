@@ -19,8 +19,10 @@ public enum AttemptState
     PreflightRefused,
     /// <summary>The sandbox is built and the engine is (about to be) running.</summary>
     RuntimeStarted,
-    /// <summary>The run finished and committed a verdict (Verified, Failed or runtime Inconclusive). The verdict belongs to this attempt.</summary>
+    /// <summary>The run finished and committed a verdict (Verified, Failed or runtime Inconclusive; for Play Ability, Performed / NotPerformed / Inconclusive). The verdict belongs to this attempt.</summary>
     VerdictProduced,
+    /// <summary>A State Preview finished and committed its record. A preview is never a verdict.</summary>
+    PreviewProduced,
     Cancelled,
     /// <summary>The attempt failed for a reason other than a preflight refusal (e.g. the route cannot be scripted).</summary>
     Error
@@ -37,7 +39,9 @@ public enum VerdictWaitKind
     /// <summary>The latest attempt was refused before any engine launch: there is no runtime verdict, whatever an earlier run left behind.</summary>
     RefusedPreflight,
     /// <summary>The latest attempt ended without a verdict (cancelled, or failed for another reason).</summary>
-    EndedWithoutVerdict
+    EndedWithoutVerdict,
+    /// <summary>The latest attempt was a State Preview and produced its record: there is no runtime verdict, by design.</summary>
+    Preview
 }
 
 public sealed record VerdictWait(VerdictWaitKind Kind, string Message);
@@ -45,8 +49,9 @@ public sealed record VerdictWait(VerdictWaitKind Kind, string Message);
 public enum PlaybackState { Idle, Preparing, Running, Judging, Finished, Cancelled, Error }
 
 /// <summary>
-/// The state machine behind the Combo Lens's Play button, kept out of the UI so it can be tested: one run at a time, a phase text for
-/// the status line, a Cancel that stops the engine, and the last request kept so Replay plays exactly the same route again.
+/// The state machine behind the Play buttons (Play Combo in the Combos lens; Play Ability and Preview State in the Ability Atlas), kept out of the UI so it
+/// can be tested: one run at a time across all of them, a phase text for the status line, a Cancel that stops the engine, and the last job kept so Replay
+/// runs exactly the same thing again. Every result is scoped to its job's <see cref="IPlaybackJob.ScopeKey"/>.
 /// <b>Delivery contract:</b> no subscriber begins after the session is closed — not a later queued notification, and not the remaining subscribers of the notification that
 /// was being delivered when a subscriber closed it. A subscriber already running on another thread when the close is requested finishes first (the close waits for it);
 /// a subscriber that itself closes the session completes normally. <see cref="Changed"/> is delivered through the <c>post</c> scheduler the owner supplies (the UI passes an asynchronous dispatcher
@@ -65,8 +70,10 @@ public sealed class PlaybackSession
     private readonly List<string> _leftovers = [];
     private Task<ShutdownResult>? _shutdown;
     private int _delivered, _dropped;
-    private PlaybackRequest? _attemptRequest;
+    private IPlaybackJob? _attemptJob;
     private PlaybackSetup? _attemptSetup;
+    private IPlaybackJob? _lastJob;
+    private string? _resultScope;
 
     /// <summary>Notifications that reached <see cref="Changed"/> listeners / that were queued but dropped because the session had closed by the time they ran. Direct signals for tests: unlike the state getters, these cannot change legitimately after a close.</summary>
     public int DeliveredNotifications => Volatile.Read(ref _delivered);
@@ -90,11 +97,18 @@ public sealed class PlaybackSession
     public PlaybackState State { get; private set; } = PlaybackState.Idle;
     public string Phase { get; private set; } = string.Empty;
     public string? Error { get; private set; }
-    public PlaybackRequest? Last { get; private set; }
+    /// <summary>The latest job when it was a route or Play Ability run (null after a preview).</summary>
+    public PlaybackRequest? Last => _lastJob as PlaybackRequest;
+    /// <summary>The latest job, whatever it was.</summary>
+    public IPlaybackJob? LastJob => _lastJob;
+    /// <summary>The stored route or Play Ability result.</summary>
     public PlaybackOutcome? Outcome { get; private set; }
+    /// <summary>The stored State Preview result (never a verdict).</summary>
+    public PreviewOutcome? PreviewResult { get; private set; }
 
-    /// <summary>The route this run (or last result) belongs to. Results and result actions are only ever shown against this route.</summary>
-    public string? RunRouteKey => Last?.Route.Key;
+    /// <summary>The scope this run (or last result) belongs to: a combo's route key, or a Play Ability / preview scope. Results are only shown against it.</summary>
+    public string? RunRouteKey => _lastJob?.ScopeKey;
+    public PlaybackMode? RunMode => _lastJob?.Mode;
     public bool IsFor(string? routeKey) => routeKey is not null && RunRouteKey == routeKey;
     public bool IsClosed => _closed;
 
@@ -112,10 +126,10 @@ public sealed class PlaybackSession
     public string? AttemptRouteKey { get; private set; }
     /// <summary>The attempt that produced the stored <see cref="Outcome"/>; null when there is none.</summary>
     public int? ResultAttemptId { get; private set; }
-    public string? ResultRunId => Outcome?.Record.Id;
-    public string? ResultRouteKey => Outcome?.Report.RouteKey;
+    public string? ResultRunId => Outcome?.Record.Id ?? PreviewResult?.Record.Id;
+    public string? ResultRouteKey => _resultScope;
     /// <summary>True only when the stored result was produced by the latest attempt. A result left over from an earlier attempt is never current.</summary>
-    public bool ResultIsCurrent => Outcome is not null && ResultAttemptId == AttemptId;
+    public bool ResultIsCurrent => (Outcome is not null || PreviewResult is not null) && ResultAttemptId == AttemptId;
 
     /// <summary>
     /// What "wait for a verdict" means right now: always about the LATEST attempt. A result stored by an earlier attempt never satisfies it, and a
@@ -130,6 +144,7 @@ public sealed class PlaybackSession
                 AttemptState.None => new(VerdictWaitKind.NoAttempt, "no runtime verdict: no Play attempt has been made"),
                 AttemptState.PreflightRefused => new(VerdictWaitKind.RefusedPreflight, $"no runtime verdict: attempt {AttemptId} refused during preflight: {AttemptIssue}"),
                 AttemptState.VerdictProduced when ResultIsCurrent => new(VerdictWaitKind.Verdict, $"attempt {AttemptId} produced a runtime verdict (run {ResultRunId})"),
+                AttemptState.PreviewProduced when ResultIsCurrent => new(VerdictWaitKind.Preview, $"no runtime verdict: attempt {AttemptId} was a State Preview (run {ResultRunId}); a preview is never a verdict"),
                 AttemptState.Cancelled or AttemptState.Error => new(VerdictWaitKind.EndedWithoutVerdict, $"attempt {AttemptId} ended without a verdict ({Attempt})" + (AttemptIssue is null ? string.Empty : ": " + AttemptIssue)),
                 _ => new(VerdictWaitKind.Pending, $"attempt {AttemptId} is {Attempt}")
             };
@@ -137,9 +152,10 @@ public sealed class PlaybackSession
     }
 
     public bool IsBusy => State is PlaybackState.Preparing or PlaybackState.Running or PlaybackState.Judging;
-    public bool HasResult => Outcome is not null && State == PlaybackState.Finished;
-    public bool CanInspect => HasResult && Outcome!.Report.Status != VerifyStatus.Verified;
-    public bool CanReplay => !IsBusy && Last is not null;
+    public bool HasResult => (Outcome is not null || PreviewResult is not null) && State == PlaybackState.Finished;
+    /// <summary>A route that was not Verified, or an ability that was not performed. A preview has nothing to inspect: it is never a verdict.</summary>
+    public bool CanInspect => HasResult && Outcome is { } o && (o.Ability is { } a ? a.Status != AbilityStatus.Performed : o.Report.Status != VerifyStatus.Verified);
+    public bool CanReplay => !IsBusy && _lastJob is not null;
 
     /// <summary>One line for the result banner.</summary>
     public string Headline
@@ -151,6 +167,10 @@ public sealed class PlaybackSession
                 case PlaybackState.Idle: return string.Empty;
                 case PlaybackState.Cancelled: return "Playback cancelled.";
                 case PlaybackState.Error: return "Could not play: " + Error;
+                case PlaybackState.Finished when PreviewResult is { } p:
+                    return StatePreview.Headline(p.Report, _lastJob?.Snapshot is { } ps ? ps.NameOf : null);
+                case PlaybackState.Finished when Outcome is { Ability: { } ability }:
+                    return AbilityText.Headline(ability, _lastJob?.Snapshot is { } s ? s.NameOf : null);
                 case PlaybackState.Finished when Outcome is { } o:
                     if (o.Report.Status == VerifyStatus.Verified)
                     {
@@ -165,11 +185,23 @@ public sealed class PlaybackSession
         }
     }
 
-    /// <summary>Plays the request. Never throws: failures become <see cref="PlaybackState.Error"/>, Cancel becomes <see cref="PlaybackState.Cancelled"/>.</summary>
-    public async Task PlayAsync(PlaybackRequest request)
+    /// <summary>Plays the request (a combo route, or Play Ability). Never throws: failures become <see cref="PlaybackState.Error"/>, Cancel becomes <see cref="PlaybackState.Cancelled"/>.</summary>
+    public Task PlayAsync(PlaybackRequest request)
     {
         // The static evidence is captured once, now, from the graph this attempt was given; the diagnostic reads this copy, never the live files.
-        if (request.Snapshot is null) request = request with { Snapshot = StaticSnapshot.Capture(request.Graph, request.Route) };
+        if (request.Snapshot is null) request = request with { Snapshot = StaticSnapshot.Capture(request.Graph, request.Route, request.AbilityId) };
+        return RunAsync(request, gate => _service.Play(request, OnPhase, gate));
+    }
+
+    /// <summary>Runs a State Preview (not proof) through the same one-run-at-a-time session. Never throws.</summary>
+    public Task PreviewAsync(PreviewRequest request)
+    {
+        if (request.Snapshot is null) request = request with { Snapshot = StaticSnapshot.CaptureState(request.Index, request.StateId) };
+        return RunAsync(request, gate => _service.Preview(request, OnPhase, gate));
+    }
+
+    private async Task RunAsync(IPlaybackJob job, Func<PlaybackCancellation, object> work)
+    {
         PlaybackCancellation gate;
         int myAttempt;
         lock (_gate)
@@ -178,17 +210,19 @@ public sealed class PlaybackSession
             _cancel?.Dispose();
             _cancel = new PlaybackCancellation();
             gate = _cancel;
-            Last = request;
-            _attemptRequest = request;
-            _attemptSetup = request.Setup;
+            _lastJob = job;
+            _attemptJob = job;
+            _attemptSetup = job.Setup;
             Outcome = null;
+            PreviewResult = null;
             ResultAttemptId = null;
+            _resultScope = null;
             Error = null;
             AttemptId++;
             myAttempt = AttemptId;   // this call's own identity; nothing below reads the session's 'latest attempt' to describe it
             Attempt = AttemptState.Started;
             AttemptIssue = null;
-            AttemptRouteKey = request.Route.Key;
+            AttemptRouteKey = job.ScopeKey;
             State = PlaybackState.Preparing;
             Phase = "Preparing the sandbox…";
         }
@@ -196,16 +230,20 @@ public sealed class PlaybackSession
         Raise();
         try
         {
-            var run = Task.Run(() => _service.Play(request, OnPhase, gate));
+            var run = Task.Run(() => work(gate));
             lock (_gate) _run = run;
-            var outcome = await run.ConfigureAwait(false);
+            var result = await run.ConfigureAwait(false);
             // The service has already committed this result (it is on disk); a Cancel that arrived after that point does not undo it.
             PlaybackDiagnostic.Source completed;
             lock (_gate)
             {
-                Outcome = outcome; ResultAttemptId = myAttempt; Attempt = AttemptState.VerdictProduced; State = PlaybackState.Finished; Phase = string.Empty;
-                // One immutable completed-attempt context, built in the same step that publishes the result: this attempt's identity, request, snapshot and outcome.
-                completed = new PlaybackDiagnostic.Source(myAttempt, AttemptState.VerdictProduced, null, request.Route.Key, request.Setup, request, request.Snapshot, outcome, myAttempt);
+                var state = result is PreviewOutcome ? AttemptState.PreviewProduced : AttemptState.VerdictProduced;
+                Outcome = result as PlaybackOutcome;
+                PreviewResult = result as PreviewOutcome;
+                ResultAttemptId = myAttempt; _resultScope = job.ScopeKey; Attempt = state; State = PlaybackState.Finished; Phase = string.Empty;
+                // One immutable completed-attempt context, built in the same step that publishes the result: this attempt's identity, job, snapshot and outcome.
+                completed = new PlaybackDiagnostic.Source(myAttempt, state, null, job.ScopeKey, job.Setup, job as PlaybackRequest, job.Snapshot, Outcome, myAttempt)
+                    { PreviewRequest = job as PreviewRequest, Preview = PreviewResult };
             }
 
             SaveDiagnostic(completed);
@@ -219,7 +257,7 @@ public sealed class PlaybackSession
             lock (_gate)
             {
                 // An incomplete setup is a preflight refusal, not a failed run.
-                Attempt = request.Setup.Ready ? AttemptState.Error : AttemptState.PreflightRefused;
+                Attempt = job.Setup.Ready ? AttemptState.Error : AttemptState.PreflightRefused;
                 AttemptIssue = ex.Message;
                 Error = ex.Message; State = PlaybackState.Error; Phase = string.Empty;
             }
@@ -237,7 +275,7 @@ public sealed class PlaybackSession
         lock (_gate)
         {
             if (IsBusy || _closed) return;
-            _attemptRequest = null;
+            _attemptJob = null;
             _attemptSetup = setup;
             AttemptId++;
             Attempt = AttemptState.PreflightRefused;
@@ -258,7 +296,8 @@ public sealed class PlaybackSession
         lock (_gate)
         {
             if (AttemptId == 0) return null;
-            src = new PlaybackDiagnostic.Source(AttemptId, Attempt, AttemptIssue, AttemptRouteKey, _attemptSetup, _attemptRequest, _attemptRequest?.Snapshot, Outcome, ResultAttemptId);
+            src = new PlaybackDiagnostic.Source(AttemptId, Attempt, AttemptIssue, AttemptRouteKey, _attemptSetup, _attemptJob as PlaybackRequest, _attemptJob?.Snapshot, Outcome, ResultAttemptId)
+                { PreviewRequest = _attemptJob as PreviewRequest, Preview = PreviewResult };
         }
 
         return PlaybackDiagnostic.Build(src);
@@ -276,14 +315,19 @@ public sealed class PlaybackSession
         SaveSeam?.Invoke("before-diagnostic-save");
         try
         {
-            var outcome = completed.Outcome!;
-            if (!Directory.Exists(outcome.Record.Directory)) return;
-            File.WriteAllText(outcome.Record.DiagnosticPath, PlaybackDiagnostic.Build(completed).ToJson(), new System.Text.UTF8Encoding(false));
+            var record = completed.Outcome?.Record ?? completed.Preview?.Record;
+            if (record is null || !Directory.Exists(record.Directory)) return;
+            File.WriteAllText(record.DiagnosticPath, PlaybackDiagnostic.Build(completed).ToJson(), new System.Text.UTF8Encoding(false));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* the diagnostic can still be built on demand */ }
     }
 
-    public Task ReplayAsync() => Last is { } r ? PlayAsync(r) : Task.CompletedTask;
+    public Task ReplayAsync() => _lastJob switch
+    {
+        PlaybackRequest r => PlayAsync(r),
+        PreviewRequest p => PreviewAsync(p),
+        _ => Task.CompletedTask
+    };
 
     /// <summary>Asks the run to stop. Returns false when it is too late (the result was already committed) or nothing is running; the UI then does not claim to be stopping.</summary>
     public bool Cancel()
@@ -359,7 +403,12 @@ public sealed class PlaybackSession
     private (PlaybackState, string) Running()
     {
         Attempt = AttemptState.RuntimeStarted;
-        return (PlaybackState.Running, "Playing the combo in IKEMEN — watch the engine window…");
+        return (PlaybackState.Running, _lastJob?.Mode switch
+        {
+            PlaybackMode.Ability => "Playing the ability in IKEMEN — watch the engine window…",
+            PlaybackMode.Preview => "Previewing the state in IKEMEN (forced, not proof) — watch the engine window…",
+            _ => "Playing the combo in IKEMEN — watch the engine window…"
+        });
     }
 
     private void OnPhase(string phase)

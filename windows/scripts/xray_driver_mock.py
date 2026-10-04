@@ -5,6 +5,11 @@ the JSONL trace. The mock character is built from the plan itself, so this check
 contact gating, key sequencing, release, timeouts, the no-injector path) — not any real engine or character.
 
 usage: xray_driver_mock.py <plan.lua> <out.jsonl> --scenario verified|dropped|nocontact|wrongstate|noinject|stuck
+                                                       |ability|preview|preview_refused|preview_leaves
+
+Phase 2 scenarios: "ability" plays a one-step Play Ability plan (P2 recovers, P1 regains control); "preview" answers the driver's
+force with the mock's changeState; "preview_refused" makes changeState report no such state; "preview_leaves" leaves the forced
+state on its first tick.
 """
 import os, sys, tempfile, shutil, json
 from lupa import LuaRuntime
@@ -83,7 +88,7 @@ function _G.__mock_advance()
         if SCENARIO == "wrongstate" and stepAt == 1 then target = 9999 end
         setState(target); stepAt = stepAt + 1
       end
-    elseif fromOk and p1.ticks >= 4 then
+    elseif fromOk and p1.ticks >= 4 and not nextStep.force then  -- a forced step is only ever entered by the driver's changeState
       setState(nextStep.toState); stepAt = stepAt + 1
     end
   end
@@ -97,6 +102,20 @@ function _G.__mock_advance()
   if SCENARIO == "dropped" and p2.hit and stepAt >= 2 and p1.ticks >= 2 and p2.state ~= 0 then
     p2.state = 0; p2.hit = false
   end
+  -- Phase 2: one move, then everybody recovers (P2 after 10 ticks of hitstun, P1 back to neutral with control after 20 ticks)
+  if SCENARIO == "ability" or SCENARIO == "preview" or SCENARIO == "preview_leaves" then
+    if p2.hit and hitAt and tickCount - hitAt >= 10 then p2.state = 0; p2.hit = false end
+    if p1.state ~= 0 and p1.ticks >= 20 then setState(0) end
+  end
+  if SCENARIO == "preview_leaves" and p1.state == 1000 and p1.ticks >= 1 then setState(1001) end
+end
+
+-- State Preview: the engine's changeState, redirected by player(n). Refuses an unknown state like the engine does.
+_G.changeState = function(n)
+  if current ~= 1 then return false end
+  if SCENARIO == "preview_refused" then return false end
+  setState(n); stepAt = #plan.steps
+  return true
 end
 
 _G.player = function(n) current = n; return P[n] ~= nil end

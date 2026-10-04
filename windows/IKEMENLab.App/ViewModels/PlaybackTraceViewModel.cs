@@ -13,17 +13,27 @@ public sealed class PlaybackTraceViewModel : ObservableObject
 
     /// <param name="stateName">User names for P1 state numbers (the shared resolver); the raw number is always shown beside a name.</param>
     public PlaybackTraceViewModel(PlaybackOutcome outcome, Func<int?, string?>? stateName = null)
+        : this(outcome.Record, outcome.Log, stateName, outcome.Failure is { } failure ? (failure.FocusFrame, $"{failure.Headline} · focus frame {failure.FocusFrame}") : null,
+            (outcome.Ability?.Status.ToString() ?? outcome.Report.Status.ToString()) + (outcome.Ability?.EntryFrame is { } e ? $" · move started at frame {e}" : string.Empty))
     {
-        Rows = PlaybackInspector.Timeline(outcome.Log, stateName: stateName);
-        var failure = outcome.Failure;
-        FocusFrame = failure?.FocusFrame;
+    }
+
+    /// <summary>A State Preview's trace, scrolled to the frame the state was forced. The title says it is not proof.</summary>
+    public PlaybackTraceViewModel(PreviewOutcome outcome, Func<int?, string?>? stateName = null)
+        : this(outcome.Record, outcome.Log, stateName, outcome.Report.ForceFrame is { } f ? (f, $"Preview (not proof) · {outcome.Report.Status} · forced at frame {f}") : null,
+            $"Preview (not proof) · {outcome.Report.Status}")
+    {
+    }
+
+    private PlaybackTraceViewModel(PlaybackRecord record, Core.XRay.Runtime.TraceLog log, Func<int?, string?>? stateName, (long? Frame, string Text)? focus, string status)
+    {
+        Rows = PlaybackInspector.Timeline(log, stateName: stateName);
+        FocusFrame = focus?.Frame;
         _selected = FocusFrame is { } f ? Rows.FirstOrDefault(r => r.Frame == f) : null;
-        Folder = outcome.Record.Directory;
-        TracePath = outcome.Record.TracePath;
-        Title = $"Trace · {outcome.Record.RouteSummary}";
-        Subtitle = failure is null
-            ? $"{outcome.Report.Status} · {Rows.Count} frames recorded"
-            : $"{failure.Headline} · focus frame {FocusFrame}";
+        Folder = record.Directory;
+        TracePath = record.TracePath;
+        Title = $"Trace · {record.RouteSummary}";
+        Subtitle = focus is { } x ? x.Text : $"{status} · {Rows.Count} frames recorded";
         var sources = Rows.Select(r => r.DistanceSource).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => TraceRow.Provenance(x!)).ToList();
         Provenance = "P1 x / P2 x are raw engine facts. Distance is " + (sources.Count == 0
             ? "of unrecorded source in this trace."

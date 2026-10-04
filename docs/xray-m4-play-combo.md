@@ -85,11 +85,20 @@ attempt was refused; `Pending` while it runs; `EndedWithoutVerdict` for cancel/e
 **Preflight refusal ≠ runtime Inconclusive.** Preflight refusal: the engine/setup is rejected before launch (e.g. the engine does not appear to contain the X-Ray input hook) — attempt `PreflightRefused`, no
 verdict, no run. Runtime Inconclusive: the engine launched and the verifier returned `Inconclusive / InputInjectionUnavailable` — attempt `VerdictProduced`, a record exists. They are never converted into each other.
 
+## Phase 2: one session per window
+
+Since Phase 2 ([xray-phase2-play-ability.md](xray-phase2-play-ability.md)) the `PlaybackSession` belongs to the X-Ray window, not to the Combos lens.
+Play Combo, Play Ability and Preview State share it: one engine at a time, one attempt counter, one Cancel, one close.
+
+- `RunRouteKey` is the latest job's **scope**: a route key for Play Combo (unchanged), `ability-play:…` or `preview:…` otherwise.
+- The Combos lens only ever shows results whose scope is the selected route, and only combo runs mark route steps.
+- A preview produces `AttemptState.PreviewProduced` / `VerdictWaitKind.Preview`, never a verdict.
+
 ## QA verbs (`QaScriptRunner`)
 
 `playback-play | -cancel | -replay | -status | -wait | -inspect | -trace` drive the real `ComboPlaybackPanel → PlaybackSession → M3/M4 pipeline`; `playback-play` is asynchronous.
 `playback-status` prints identity first (`selectedRouteKey`, `attemptId`, `attemptState`, `attemptIssue`, `attemptRouteKey`, `runRouteKey`, `resultAttemptId`, `resultRunId`, `resultRouteKey`, `resultIsCurrent`);
 verdict/reason/record/engine-hash/dummy/stage fields are printed **only when the result is current**, so a stale verdict can never sit beside a newer setup.
-`playback-wait verdict` is attempt-bound as above and throws on a preflight-refused attempt.
+`playback-wait verdict` is attempt-bound as above and throws on a preflight-refused attempt (and on a State Preview, which has no verdict); `playback-wait settled` also accepts a preview.
 Route selection: `xray-combo-route-index N` (1-based, as `--route N`), `xray-combo-route-key <exact key>` (ordinal, exact); the historical `xray-combo-route <substring>` now **errors when the substring matches more than one route** (listing them) instead of taking the first.
 Every selection logs `selected route #N of M by …; key=…; title=…` and re-checks that the lens really selected it.

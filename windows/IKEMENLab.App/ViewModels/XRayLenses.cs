@@ -27,6 +27,7 @@ public sealed class AbilityAtlasLens : XRayLens
 
     public AbilityAtlasLens(XRayViewModel owner) : base(owner)
     {
+        Lab = new AbilityPlaybackPanel(owner, owner.PlaybackSession);
         View = CollectionViewSource.GetDefaultView(_rows);
         View.GroupDescriptions.Add(new PropertyGroupDescription(nameof(XRayRow.Group)));
         View.SortDescriptions.Add(new SortDescription(nameof(XRayRow.GroupOrder), ListSortDirection.Ascending));
@@ -36,13 +37,41 @@ public sealed class AbilityAtlasLens : XRayLens
     public ICollectionView View { get; }
     public string Summary { get => _summary; private set => SetProperty(ref _summary, value); }
 
+    /// <summary>Play Ability / Preview State for the selected ability.</summary>
+    public AbilityPlaybackPanel Lab { get; }
+
     public XRayRow? SelectedRow
     {
         get => _selected;
-        set { if (SetProperty(ref _selected, value) && !_suppress && value is not null) Owner.Select(value.Id); }
+        set
+        {
+            if (!SetProperty(ref _selected, value)) return;
+            if (value is not null || !_rebuilding) Lab.OnAbilityChanged(value?.Id);
+            if (!_suppress && value is not null) Owner.Select(value.Id);
+        }
     }
 
+    private bool _rebuilding;
+
     public override void Build(SemanticIndex index)
+    {
+        var keep = _selected?.Id;
+        _rebuilding = true;
+        try { BuildRows(index); }
+        finally { _rebuilding = false; }
+
+        // A rebuild (after a rename, for instance) keeps the selected ability, so the Ability Lab does not lose its result scope.
+        if (keep is not null && _byId.TryGetValue(keep, out var again))
+        {
+            _suppress = true;
+            SelectedRow = again;
+            _suppress = false;
+        }
+
+        Lab.OnAbilityChanged(_selected?.Id);
+    }
+
+    private void BuildRows(SemanticIndex index)
     {
         _rows.Clear();
         _byId.Clear();

@@ -82,6 +82,28 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <!-- Ability Lab banner: performed = green, not performed = red, could not test = amber, preview = neutral with an amber outline (never a pass) -->
+        <Style x:Key="AbilityBanner" TargetType="Border">
+            <Setter Property="CornerRadius" Value="8"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="{DynamicResource HoverBackgroundBrush}"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding Atlas.Lab.ResultKind}" Value="Verified">
+                    <Setter Property="Background" Value="{DynamicResource PositiveBackgroundBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Atlas.Lab.ResultKind}" Value="Failed">
+                    <Setter Property="Background" Value="{DynamicResource NegativeBackgroundBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Atlas.Lab.ResultKind}" Value="Inconclusive">
+                    <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Atlas.Lab.ResultKind}" Value="Preview">
+                    <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+                    <Setter Property="BorderThickness" Value="1"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="LensCombos" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding ActiveLens}" Value="Combos">
@@ -157,6 +179,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Margin="14,12,14,4" Text="{Binding Atlas.Summary}" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
                         <ListBox Grid.Row="1" Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}"
@@ -175,6 +198,61 @@
                                 </GroupStyle>
                             </ListBox.GroupStyle>
                         </ListBox>
+
+                        <!-- Phase 2: Ability Lab. Play Ability performs the selected ability through its own command; Preview State forces its entry state (never proof). -->
+                        <Border Grid.Row="2" x:Name="AbilityLabBar" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource BorderSubtle}" Padding="14,10,14,10">
+                            <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Atlas.Lab.AbilityTitle}" FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding Atlas.Lab.PathText}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"
+                                               AutomationProperties.Name="Play Ability path"/>
+                                    <TextBlock Text="{Binding Atlas.Lab.PathWarnings}" FontSize="11" Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                                               Visibility="{Binding Atlas.Lab.HasPathWarnings, Converter={StaticResource BoolToVis}}"/>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Button Content="▶ Play Ability" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.PlayAbilityCommand}"
+                                                AutomationProperties.Name="Play the selected ability in IKEMEN"
+                                                ToolTip="Performs the ability from neutral through its own command in a disposable sandbox match, and reports whether it started and what followed."/>
+                                        <Button Content="Preview State (not proof)" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.PreviewStateCommand}"
+                                                AutomationProperties.Name="Preview the entry state (not proof)"
+                                                ToolTip="Forces the ability's entry state with the engine's changeState for a look. It skips the command and every condition, so it never shows the move can be performed and is never counted as a result."/>
+                                        <Button Content="Cancel" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.CancelCommand}"
+                                                Visibility="{Binding Atlas.Lab.IsBusy, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Cancel ability playback"/>
+                                        <Button Content="Replay" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.ReplayCommand}"
+                                                AutomationProperties.Name="Replay the last ability run"/>
+                                        <Button Content="Inspect Failure" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.InspectFailureCommand}"
+                                                Visibility="{Binding Atlas.Lab.CanInspect, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Inspect why the ability was not performed"/>
+                                        <Button Content="View Trace" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.ViewTraceCommand}"
+                                                Visibility="{Binding Atlas.Lab.HasResult, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="View the ability run's trace"/>
+                                        <Button Content="Copy Full Diagnostic" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.CopyDiagnosticCommand}"
+                                                AutomationProperties.Name="Copy the full diagnostic for the last ability attempt"/>
+                                        <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Atlas.Lab.OpenSetupCommand}"
+                                                AutomationProperties.Name="Open playback setup in the Combos lens" ToolTip="The engine, dummy, stage and approach distance are shared with Play Combo."/>
+                                    </WrapPanel>
+                                    <Border Style="{StaticResource AbilityBanner}" Margin="0,0,0,6" Visibility="{Binding Atlas.Lab.HasStatus, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel>
+                                            <TextBlock FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Ability playback result">
+                                                <Run Text="{Binding Atlas.Lab.ResultGlyph, Mode=OneWay}" FontWeight="Bold"/><Run Text="  "/><Run Text="{Binding Atlas.Lab.Headline, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <ItemsControl ItemsSource="{Binding Atlas.Lab.ResultLines}" Focusable="False" Margin="0,4,0,0"
+                                                          Visibility="{Binding Atlas.Lab.HasResultLines, Converter={StaticResource BoolToVis}}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding}" FontSize="11" TextWrapping="Wrap" Margin="0,1,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Style="{StaticResource AbilityBanner}" Margin="0,0,0,6" Visibility="{Binding Atlas.Lab.ShowFailure, Converter={StaticResource BoolToVis}}">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Atlas.Lab.FailureWhy}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                                            <TextBlock Text="{Binding Atlas.Lab.FailureHints}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Text="{Binding Atlas.Lab.SetupSummary}" FontSize="10" TextWrapping="Wrap" Foreground="{DynamicResource TextTertiary}"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
                     </Grid>
 
                     <!-- 2. Trigger Explorer -->

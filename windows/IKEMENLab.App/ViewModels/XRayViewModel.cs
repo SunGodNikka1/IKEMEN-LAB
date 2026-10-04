@@ -54,6 +54,10 @@ public sealed class XRayViewModel : ObservableObject
         _entry = entry;
         Settings = settings ?? new JsonSettingsStore();
         PlaybackService = playback ?? new ComboPlaybackService();
+        // One session for the whole window: Play Combo, Play Ability and Preview State share it, so only one engine runs at a time.
+        // Notifications are posted to the UI thread, never invoked synchronously (a worker that blocks on the UI thread could deadlock a close).
+        var ui = new UiDispatcher();
+        PlaybackSession = new PlaybackSession(PlaybackService, a => ui.Post(a));
         CharacterName = displayName;
         Atlas = new AbilityAtlasLens(this);
         Triggers = new TriggerExplorerLens(this);
@@ -108,6 +112,12 @@ public sealed class XRayViewModel : ObservableObject
         }, TaskScheduler.Default);
     }
     public ComboPlaybackService PlaybackService { get; }
+    /// <summary>The one playback session of this window (Play Combo, Play Ability, Preview State).</summary>
+    public PlaybackSession PlaybackSession { get; }
+
+    /// <summary>The character's folder under chars/ and its DEF relative to chars/, as the sandbox wants them.</summary>
+    public string SubjectFolder => _entry.FolderPath.StartsWith("chars/", StringComparison.OrdinalIgnoreCase) ? _entry.FolderPath["chars/".Length..] : _entry.FolderPath;
+    public string SubjectDef => _entry.DefPath.StartsWith("chars/", StringComparison.OrdinalIgnoreCase) ? _entry.DefPath["chars/".Length..] : _entry.DefPath;
     public XRayLensKind ActiveLens { get => _activeLens; set => SetProperty(ref _activeLens, value); }
     public string Legend => ConfidenceStyle.Legend;
     public SemanticIndex? Index => _index;

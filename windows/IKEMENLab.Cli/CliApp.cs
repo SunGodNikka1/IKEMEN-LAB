@@ -44,6 +44,12 @@ public static class CliApp
           verify-trace    <character> [combo options] [--route N] --trace <file.jsonl>   judges a recorded trace against that route
           runtime-verify  <character> --root R --dummy <folder> --stage <stages/x.def> [--route N] [--adapter <lua>] [--engine <exe>] [--timeout S] [--keep]
                        plays the route in a disposable match and reports Verified / Failed / Inconclusive (needs an input adapter for the engine build)
+          ability-plan    <character> <ability:N|N> [--approach N]   which command path Play Ability presses (or why it cannot), and its plan
+          ability-plan    <character> <ability:N|state:N> --preview  the State Preview plan (forces the state; NOT proof)
+          runtime-ability <character> <ability:N|N> --root R --dummy <folder> --stage <stages/x.def> [--engine <exe>] [--preview] [--approach N] [--keep]
+                       Play Ability: Performed (exit 0) / NotPerformed (4) / Inconclusive (5), from the route verifier's step check on the one move,
+                       plus what followed (contact, reaction, damage, recovery) as measurements. --preview forces the state instead: never a verdict,
+                       "proof": false (exit 0 when it ran, 4 when the engine refused the state, 5 when it could not run)
           rank-subjects   --root R [--limit N]      ranks the installed characters as runtime-verification subjects
           runtime-clean   <sandbox dir>            deletes a sandbox (only folders carrying the sandbox marker)
 
@@ -66,6 +72,7 @@ public static class CliApp
             var command = opts.Positional[1].ToLowerInvariant();
             if (command == "rules") { output.WriteLine(XRayJson.Rules()); return 0; }
             if (VerifyCommands.Handles(command)) return VerifyCommands.Run(command, opts, output, error);
+            if (AbilityCommands.Handles(command)) return AbilityCommands.Run(command, opts, output, error);
             if (command.StartsWith("runtime-", StringComparison.Ordinal)) return RuntimeCommands.Run(command, opts, output, error);
 
             if (opts.Positional.Count < 3) { error.WriteLine(Usage); return 2; }
@@ -331,7 +338,7 @@ public static class CliApp
                     case "--root" when i + 1 < args.Length: root = args[++i]; break;
                     case "--text": text = true; break;
                     case "--no-common": noCommon = true; break;
-                    case "--all-cancels" or "--no-chains" or "--allow-links" or "--keep" or "--lua" or "--no-names": flags.Add(args[i][2..]); break;
+                    case "--all-cancels" or "--no-chains" or "--allow-links" or "--keep" or "--lua" or "--no-names" or "--preview": flags.Add(args[i][2..]); break;
                     case var a when a.StartsWith("--", StringComparison.Ordinal) && i + 1 < args.Length:
                         named[a[2..]] = args[++i];
                         break;
