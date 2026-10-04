@@ -219,7 +219,8 @@ public class XRaySequenceLabTests : IDisposable
         var whiff = r.Steps[2];
         Assert.Equal(SequenceStepOutcome.Done, whiff.Outcome);                      // the move did start
         Assert.False(whiff.Connected);
-        Assert.Contains("did not touch the opponent; they were", whiff.Why);
+        Assert.Contains("did not touch the opponent: when it started they were standing", whiff.Why);
+        Assert.Contains("away", whiff.Why);
         Assert.True(whiff.DistanceAtStart > 70);
         Assert.False(r.Succeeded);
     }
@@ -333,7 +334,7 @@ public class XRaySequenceLabTests : IDisposable
         var r = SequenceVerifier.Verify(plan, wrong.Build(plan));
         Assert.Equal((SequenceVerdict.DidNotConnect, VerifyReason.WrongState, 2), (r.Verdict, r.Reason, r.FailedStep));
         Assert.Equal(SequenceStepOutcome.Failed, r.Steps[1].Outcome);
-        Assert.Contains("did not happen: the character went into a different move", r.Steps[1].Why);
+        Assert.Contains("did not happen: you went into State 220", r.Steps[1].Why);
         Assert.NotNull(r.Steps[1].Evidence);                                         // the route verifier's structured evidence comes along
     }
 
@@ -522,6 +523,54 @@ public class XRaySequenceLabTests : IDisposable
         Assert.Null(session.DiagnosticFor("sequence:seq-test@v1"));                    // the Sequence Lab has its own details view
         Assert.False(session.CanInspect);
         Assert.Equal(VerdictWaitKind.Verdict, session.VerdictForLatestAttempt().Kind);
+    }
+
+    /// <summary>
+    /// Real runs on the installed IKEMEN build (kfm vs kfm, approach 40) from the Phase 3 Windows acceptance pass, re-judged by the current verifier. Each
+    /// plan's fingerprint must equal the one its engine run recorded. These pin two defects the real engine exposed: the move-only projection dropping the
+    /// driver's plan_complete (it said Could Not Test for a plain whiff), and failure reasons that did not say what really happened.
+    /// </summary>
+    [Fact]
+    public void RealKfmSequencesOnTheInstalledEngineReadAsTheyWereObserved()
+    {
+        static (InputPlan Plan, TraceLog Log, List<string> Labels) Load(string name)
+        {
+            var plan = InputPlanner.FromJson(File.ReadAllText(Path.Combine(FixtureDir, $"phase3_kfm_{name}_real_plan.json")));
+            var log = TraceReader.ReadFile(Path.Combine(FixtureDir, $"phase3_kfm_{name}_real_trace.jsonl"));
+            Assert.Equal(log.Meta!.PlanFingerprint, InputPlanner.Fingerprint(plan));
+            Assert.Equal("F68DC97081E9C14A348FF95EEBE52A365D2EA67357AEAC8C94BFD3069123D0A1", log.Meta.EngineSha256);
+            return (plan, log, JsonSerializer.Deserialize<List<string>>(File.ReadAllText(Path.Combine(FixtureDir, $"phase3_kfm_{name}_real_labels.json")))!);
+        }
+
+        // x → y straight away: y was pressed inside the hit pause, so it never started; the reason says so and suggests a wait.
+        var (p1, l1, n1) = Load("xy_nowait");
+        var a = SequenceVerifier.Verify(p1, l1, n1);
+        Assert.Equal((SequenceVerdict.DidNotConnect, VerifyReason.WrongState, 2), (a.Verdict, a.Reason, a.FailedStep));
+        Assert.Contains("back in neutral at frame 293", a.Steps[1].Why);
+        Assert.Contains("hit pause after the previous hit (frames 276–284", a.Steps[1].Why);
+        Assert.Contains("try a Wait of about 6 frames", a.Steps[1].Why);
+
+        // x → wait 12 → y: a true combo; the opponent never left hitstun from 276 to 297.
+        var (p2, l2, n2) = Load("xy_wait12");
+        var b = SequenceVerifier.Verify(p2, l2, n2);
+        Assert.Equal(SequenceVerdict.TrueCombo, b.Verdict);
+        Assert.Equal((276L, 297L, 0, 80.0), (b.FirstContactFrame!.Value, b.LastContactFrame!.Value, b.OutOfHitstunFrames!.Value, b.Damage!.Value));
+
+        // Kung Fu Palm → chase to 35 → x: the chase arrived, but the opponent was lying down; x passed over them.
+        var (p3, l3, n3) = Load("palm_chase_lying");
+        var c = SequenceVerifier.Verify(p3, l3, n3);
+        Assert.Equal((SequenceVerdict.DidNotConnect, SequenceReason.NoContact, 3), (c.Verdict, c.Reason, c.FailedStep));
+        Assert.Contains("lying down", c.Steps[2].Why);
+        Assert.Contains("could act again at frame 430", c.Steps[2].Why);
+        Assert.Equal(SequenceStepOutcome.Done, c.Steps[1].Outcome);
+
+        // Kung Fu Palm → chase → wait 20 → x (through the app): it connects as they stand — a connected sequence, not a combo.
+        var (p4, l4, n4) = Load("palm_chase_wait");
+        var d = SequenceVerifier.Verify(p4, l4, n4);
+        Assert.Equal(SequenceVerdict.ConnectedSequence, d.Verdict);
+        Assert.Equal((18, 4), (d.OutOfHitstunFrames!.Value, d.OpponentCouldActFrames!.Value));
+        Assert.Equal((true, 434L), (d.Steps[3].Connected!.Value, d.Steps[3].ContactFrame!.Value));
+        Assert.Equal(113, d.Damage);
     }
 
     [Fact]

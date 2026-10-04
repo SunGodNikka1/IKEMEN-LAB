@@ -1,0 +1,79 @@
+{
+  "schema": "ikemenlab.xray.plan/1",
+  "character": "char:kfm",
+  "route": "sequence:seq-accept-wait12@v1",
+  "approachDistance": 40,
+  "neutralFrames": 20,
+  "tailFrames": 120,
+  "maxFrames": 1800,
+  "steps": [
+    {
+      "index": 1,
+      "edge": "cand:neutral>state:200@state:-1/ctrl:25#0",
+      "kind": "Start",
+      "from": "neutral",
+      "to": "state:200",
+      "fromState": null,
+      "toState": 200,
+      "command": "x",
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "x"
+        ],
+        []
+      ],
+      "notes": [],
+      "attack": true
+    },
+    {
+      "index": 2,
+      "edge": "action:2:Wait",
+      "kind": "Action",
+      "from": "",
+      "to": "",
+      "fromState": null,
+      "toState": -1,
+      "command": null,
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 12,
+      "input": [],
+      "notes": [
+        "Wait 12f"
+      ],
+      "action": {
+        "kind": "release",
+        "frames": 12,
+        "distance": null,
+        "stopIfOpponentRecovers": false,
+        "waitForControl": false,
+        "keys": []
+      }
+    },
+    {
+      "index": 3,
+      "edge": "cand:state:200>state:210@state:-1/ctrl:26#1",
+      "kind": "Cancel",
+      "from": "state:200",
+      "to": "state:210",
+      "fromState": 200,
+      "toState": 210,
+      "command": "y",
+      "contact": null,
+      "earliestTick": 6,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "y"
+        ],
+        []
+      ],
+      "notes": [],
+      "attack": true
+    }
+  ],
+  "warnings": []
+}

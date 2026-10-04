@@ -119,7 +119,7 @@ Reasons for **Could Not Test**: no input injection, missing telemetry, a foreign
 
 ## Tests
 
-- `XRaySequenceLabTests` (23, Core):
+- `XRaySequenceLabTests` (25, Core; includes the real kfm runs above):
   - spec round trip;
   - planner (real cancel vs own command, wait keeps the cancel, chase parameters, refusals);
   - plan JSON/Lua unchanged for route plans; the route verifier refuses sequence plans;
@@ -139,11 +139,38 @@ Reasons for **Could Not Test**: no input injection, missing telemetry, a foreign
   - statistics and Compare;
   - the session scope;
   - the situation after Play Ability (real kfm trace).
-- `SequenceLabUiTests` (4, WPF):
+- `SequenceLabUiTests` (5, WPF; includes scripted-QA isolation):
   - Try Follow-Up, then edit, reorder and remove, the ×50 confirmation, the cost line;
   - Run ×1 showing a verdict per step only for the exact saved version, never in Combos, with the playback store untouched;
   - cancel and cleanup;
   - renamed abilities in the cards and the picker.
+
+## Windows acceptance (2026-10-04)
+
+**Setup.** The installed IKEMEN build (`jg-simul8-v1 - ffa-build`, sha256 `F68DC970…23D0A1`, copied into disposable sandboxes; the install's hash was unchanged), kfm vs kfm, `ASI_FightIsland`, approach distance 40.
+
+| Sequence | Verdict | What the engine showed |
+|---|---|---|
+| x → y (`200 > 210`, a real chain cancel) | **Did not connect** | y was pressed at frame 280, inside the hit pause of the punch's hit (276–284: moveHit stood at 1, then counted on). kfm went back to neutral at 293. The reason now says exactly that and suggests a Wait of about 6 frames. |
+| x → Wait 13 → y | **Connected sequence** | y started at 290 and hit at 298. At 297 the opponent was back in state 0 with control for one frame, so it is not a combo. |
+| x → Wait 12 → y | **True combo** | y started at 289 and hit at 297. The opponent stayed in hitstun from 276 to 297; 80 damage. |
+| Kung Fu Palm → chase to 35 → x | **Did not connect** | The chase reached 34.5 at 408. When x started (411) the opponent was lying down (5110) and only got up at 416 (5120), with control at 430: "ordinary attacks usually pass over a lying opponent; they could act again at frame 430". |
+| Kung Fu Palm → x | **Did not connect** | x started 145 away (the knockdown carried the opponent off): the failed follow-up due to distance. |
+| Kung Fu Palm → chase to 35 → Wait 20 → x (through the app: Play Ability, Sequence Lab, Run ×1) | **Connected sequence** (identical on a second run) | The chase ran 329–408 and the wait 408–428; x connected at 434 for 23 (113 total). Between the hits the opponent was out of hitstun for 18 frames (getting up, then standing) and could act for 4 — a knockdown chase that connects, not a combo. The Combos panel showed nothing. |
+
+**Cleanup and isolation.**
+- After every run: no sandbox left and no engine process.
+- Every trial went to the experiment store, and the Play Combo / Play Ability history was not touched by any sequence run.
+
+**Defects the real engine exposed, fixed:**
+1. The move-only projection dropped the driver's `tail_start` / `plan_complete`, which are tagged with the step after the last one. A plain whiff after a knockdown read as *Could Not Test*. Those events are now kept past the end of the move plan. Watch completeness comes only from the driver finishing, not from the route verifier's combo-continuity checks.
+2. Failure reasons didn't say what happened. Now:
+   - a failed follow-up says the previous move ended (back in neutral at frame N) or which state P1 went into instead;
+   - when the press fell inside a hit pause, it says so (from the engine's hit-pause telemetry, or inferred from the contact counter standing still and then counting on) and suggests a Wait;
+   - a whiff gives the opponent's posture and distance at the attack's start, plus a lying-opponent hint with when they could act again.
+3. **Acceptance runs had touched real data.** The first app QA script started with a Play Ability run (a Phase 2 feature), which wrote one record into the playback history; the keep-25 rule then deleted its oldest record. Scripted QA runs (`--qa-script`) now give every X-Ray window isolated stores under `%LOCALAPPDATA%\IKEMEN Lab\qa-isolated\`, covering playback records, experiments, saved sequences and names. Settings are read from the real file and written only to an isolated copy. A re-run of the same script left the playback history, the experiment store and `settings.json` byte-for-byte unchanged.
+
+The real traces (with plans whose fingerprints equal the recorded ones) are fixtures for a regression test.
 
 ## Deferred to Phase 4 and later
 

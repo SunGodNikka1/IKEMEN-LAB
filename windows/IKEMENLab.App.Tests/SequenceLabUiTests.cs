@@ -240,6 +240,39 @@ public class SequenceLabUiTests : IDisposable
     });
 
     [Fact]
+    public void ScriptedQaRunsUseIsolatedStoresAndNeverWriteTheUsersSettings()
+    {
+        var source = new MemorySettings { Current = new AppSettings { XRayDummy = "kfm" } };
+        var copyPath = Path.Combine(Temp("xray-qa-settings-"), "settings.json");
+        var store = new CopyOnWriteSettingsStore(source, copyPath);
+        Assert.Equal("kfm", store.Load().XRayDummy);                                   // reads the real settings until it has its own copy
+        store.Save(new AppSettings { XRayDummy = "zed" });
+        Assert.Equal("kfm", source.Current.XRayDummy);                                 // the real settings are never written
+        Assert.Equal("zed", store.Load().XRayDummy);
+        Assert.True(File.Exists(copyPath));
+
+        var iso = Temp("xray-qa-iso-");
+        XRayViewModel.IsolatedDataRoot = iso;
+        try
+        {
+            WpfHost.Run(() =>
+            {
+                var entry = new CharacterEntry { Id = "ComboGuy", DisplayName = "Combo Guy", Name = "Combo Guy", Author = "", VersionDate = "", DefPath = "chars/ComboGuy/ComboGuy.def", FolderPath = "chars/ComboGuy" };
+                var vm = new XRayViewModel(_fx.Root, entry, "Combo Guy");
+                Assert.StartsWith(iso, vm.PlaybackService.StoreRoot);
+                Assert.StartsWith(iso, vm.ExperimentStore.Root);
+                Assert.StartsWith(iso, vm.SequenceStore.Directory);
+                Assert.StartsWith(iso, vm.NameStore.Directory);
+                Assert.IsType<CopyOnWriteSettingsStore>(vm.Settings);
+            });
+        }
+        finally
+        {
+            XRayViewModel.IsolatedDataRoot = null;
+        }
+    }
+
+    [Fact]
     public void RenamedAbilitiesAppearInTheStepCardsAndThePicker() => WpfHost.Run(() =>
     {
         var (vm, window, _, _, _, _) = Open();

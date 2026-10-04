@@ -1,0 +1,132 @@
+{
+  "schema": "ikemenlab.xray.plan/1",
+  "character": "char:kfm",
+  "route": "sequence:seq-f9f91c4bb3@v1",
+  "approachDistance": 40,
+  "neutralFrames": 20,
+  "tailFrames": 120,
+  "maxFrames": 1800,
+  "steps": [
+    {
+      "index": 1,
+      "edge": "cand:neutral>state:1000@state:-1/ctrl:8#0",
+      "kind": "Start",
+      "from": "neutral",
+      "to": "state:1000",
+      "fromState": null,
+      "toState": 1000,
+      "command": "QCF_x",
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "D"
+        ],
+        [
+          "D"
+        ],
+        [],
+        [
+          "D",
+          "F"
+        ],
+        [
+          "D",
+          "F"
+        ],
+        [],
+        [
+          "F"
+        ],
+        [
+          "F"
+        ],
+        [
+          "x"
+        ],
+        [
+          "x"
+        ],
+        []
+      ],
+      "notes": [],
+      "attack": true
+    },
+    {
+      "index": 2,
+      "edge": "action:2:Chase",
+      "kind": "Action",
+      "from": "",
+      "to": "",
+      "fromState": null,
+      "toState": -1,
+      "command": null,
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 300,
+      "input": [],
+      "notes": [
+        "Chase until within 35"
+      ],
+      "action": {
+        "kind": "chase",
+        "frames": 300,
+        "distance": 35,
+        "stopIfOpponentRecovers": false,
+        "waitForControl": true,
+        "keys": []
+      }
+    },
+    {
+      "index": 3,
+      "edge": "action:3:Wait",
+      "kind": "Action",
+      "from": "",
+      "to": "",
+      "fromState": null,
+      "toState": -1,
+      "command": null,
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 20,
+      "input": [],
+      "notes": [
+        "Wait 20f"
+      ],
+      "action": {
+        "kind": "release",
+        "frames": 20,
+        "distance": null,
+        "stopIfOpponentRecovers": false,
+        "waitForControl": false,
+        "keys": []
+      }
+    },
+    {
+      "index": 4,
+      "edge": "cand:neutral>state:200@state:-1/ctrl:25#0",
+      "kind": "Start",
+      "from": "neutral",
+      "to": "state:200",
+      "fromState": null,
+      "toState": 200,
+      "command": "x",
+      "contact": null,
+      "earliestTick": null,
+      "timeoutFrames": 45,
+      "input": [
+        [
+          "x"
+        ],
+        []
+      ],
+      "notes": [],
+      "attack": true
+    }
+  ],
+  "warnings": [
+    "Step 1 (QCF x (↓↘→ + LP)): Its gate has 1 condition(s) X-Ray does not model; the script may not satisfy them.",
+    "Step 1 (QCF x (↓↘→ + LP)): its gate has 1 condition(s) X-Ray does not model."
+  ]
+}

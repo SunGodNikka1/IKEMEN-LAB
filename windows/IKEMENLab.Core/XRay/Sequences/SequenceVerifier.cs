@@ -127,7 +127,9 @@ public static class SequenceVerifier
                 }
 
                 failedAt = step.Index; failReason = v.Reason ?? route.Reason; routeBlamed = route.Status == VerifyStatus.Inconclusive;
-                failWhy = $"{label} {(routeBlamed ? "could not be judged" : "did not happen")}: {PlaybackInspector.Describe(failReason)}" + (v.Detail is { Length: > 0 } d ? $" ({d})" : string.Empty) + ".";
+                failWhy = routeBlamed
+                    ? $"{label} could not be judged: {PlaybackInspector.Describe(failReason)}" + (v.Detail is { Length: > 0 } d ? $" ({d})" : string.Empty) + "."
+                    : FailureWords(frames, step, v, label, failReason);
                 stepsOut.Add(new SequenceStepResult(step.Index, step.Kind, label, v.Outcome == StepOutcome.NotReached ? SequenceStepOutcome.NotReached : SequenceStepOutcome.Failed,
                     failReason, failWhy, null, null, v.InputFrame, null, null, null, null, []) { Evidence = v.Evidence });
                 continue;
@@ -204,11 +206,10 @@ public static class SequenceVerifier
         // Every step happened. Did every attack connect, and did the opponent get out in between?
         if (route.Status == VerifyStatus.Inconclusive && route.Reason == VerifyReason.TraceIntegrity)
             return Report(SequenceVerdict.CouldNotTest, VerifyReason.TraceIntegrity, "Could not test: the opponent was already hit before the first move started.", null, route, attacks.Count);
+        // The route verifier's later checks are about combo continuity (its own verdict, not this one). Whether the watch after the last step finished is
+        // the driver's plan_complete + end planComplete, read from the recording itself.
         if (route.Status == VerifyStatus.Inconclusive)
-        {
-            complete = false;
-            notes.Add($"The route verifier could not finish its later checks ({route.Reason}); what follows the last step may be incomplete.");
-        }
+            notes.Add($"The route verifier's combo-continuity checks were inconclusive ({route.Reason}); that is its own verdict and is not used here.");
 
         var connectedCount = 0;
         long? firstContact = null, lastContact = null;
@@ -224,7 +225,7 @@ public static class SequenceVerifier
             if (damage is { } dmg) totalDamage = (totalDamage ?? 0) + dmg;
             if (connected == false)
             {
-                var why = $"{result.Label} did not touch the opponent" + (result.DistanceAtStart is { } d ? $"; they were {d:0.##} away when it started" : string.Empty) + ".";
+                var why = WhiffWords(frames, result);
                 stepsOut[stepsOut.IndexOf(stepsOut.First(r => r.Index == attacks[k].Index))] = stepsOut.First(r => r.Index == attacks[k].Index) with { Reason = SequenceReason.NoContact, Why = why };
                 return Report(SequenceVerdict.DidNotConnect, SequenceReason.NoContact, "Did not connect: " + why, attacks[k].Index, route, attacks.Count, connectedCount,
                     firstContact, lastContact, null, null, totalDamage, EndAt(frames, frames[^1].Frame), complete);
@@ -255,10 +256,80 @@ public static class SequenceVerifier
             null, route, attacks.Count, connectedCount, firstContact, lastContact, outOfHitstun, couldAct, totalDamage, finalEnd, complete);
     }
 
+    /// <summary>
+    /// Plain words for why a move step did not start, from the samples around its input: the previous move ending (back in neutral) before it, and/or its
+    /// input pressed during a hit pause. The hit pause comes from the engine's hit-pause telemetry when the build reports it, otherwise it is inferred from
+    /// P1's contact counter (moveHit, ticks since contact) standing still and then counting on in the same state. The reason code is unchanged.
+    /// </summary>
+    internal static string FailureWords(List<FrameEvent> frames, PlanStep step, StepVerdict v, string label, string? reason)
+    {
+        var parts = new List<string>();
+        if (v.InputFrame is { } input)
+        {
+            var left = step.FromState is { } src ? frames.FirstOrDefault(f => f.Frame > input && f.P1.State != src) : null;
+            if (left is not null && left.P1.Ctrl == true)
+                parts.Add($"the previous move ended (you were back in neutral at frame {left.Frame}) before {label} started");
+            else if (left is not null)
+                parts.Add($"you went into State {left.P1.State} at frame {left.Frame} instead");
+            if (HitPauseAround(frames, input) is { } pause)
+                parts.Add($"its input (frame {input}) was pressed during the hit pause after the previous hit (frames {pause.From}–{pause.To}{(pause.Inferred ? ", inferred from the contact counter standing still" : string.Empty)}): " +
+                          $"the move's own clock is frozen then and a short press can be lost; try a Wait of about {pause.To - input + 2} frames before {label}");
+        }
+
+        return parts.Count == 0
+            ? $"{label} did not happen: {PlaybackInspector.Describe(reason)}" + (v.Detail is { Length: > 0 } d ? $" ({d})" : string.Empty) + "."
+            : $"{label} did not happen: {string.Join("; ", parts)}.";
+    }
+
+    /// <summary>
+    /// Plain words for an attack that started but did not touch the opponent: how far away they were and what they were doing when it started. A lying
+    /// opponent gets a hint and the frame they could act again (ordinary attacks usually pass over a downed opponent).
+    /// </summary>
+    internal static string WhiffWords(List<FrameEvent> frames, SequenceStepResult attack)
+    {
+        var at = attack.StartFrame is { } s ? frames.LastOrDefault(f => f.Frame <= s) : null;
+        var why = $"{attack.Label} did not touch the opponent";
+        if (at is null) return why + ".";
+        why += $": when it started they were {Situation.Posture(at.P2)}" + (attack.DistanceAtStart is { } d ? $", {d:0.##} away" : string.Empty) + ".";
+        if (string.Equals(at.P2.StateType, "L", StringComparison.OrdinalIgnoreCase))
+        {
+            var up = frames.FirstOrDefault(f => f.Frame > at.Frame && f.P2.Ctrl == true)?.Frame;
+            why += " Ordinary attacks usually pass over a lying opponent" +
+                   (up is { } u ? $"; they could act again at frame {u} ({u - at.Frame} frames later) — try waiting for them to get up, or a move made to hit downed opponents." : ".");
+        }
+
+        return why;
+    }
+
+    /// <summary>The hit pause around <paramref name="frame"/>, or null when the samples do not show one.</summary>
+    internal static (long From, long To, bool Inferred)? HitPauseAround(List<FrameEvent> frames, long frame)
+    {
+        var at = frames.FindIndex(f => f.Frame == frame);
+        if (at < 0) return null;
+        var state = frames[at].P1.State;
+        if (frames[at].P1.HitPause is > 0)
+        {
+            int a = at, b = at;
+            while (a > 0 && frames[a - 1].P1.HitPause is > 0) a--;
+            while (b + 1 < frames.Count && frames[b + 1].P1.HitPause is > 0) b++;
+            return (frames[a].Frame, frames[b].Frame, false);
+        }
+
+        if (frames[at].P1.MoveHit is not (> 0 and var counter)) return null;
+        int from = at, to = at;
+        while (from > 0 && frames[from - 1].P1.MoveHit == counter && frames[from - 1].P1.State == state) from--;
+        while (to + 1 < frames.Count && frames[to + 1].P1.MoveHit == counter && frames[to + 1].P1.State == state) to++;
+        // A counter that stood still for several samples and then counts on, in the same state, is a paused counter (not a flag that is simply 1).
+        var countsOn = to + 1 < frames.Count && frames[to + 1].P1.State == state && frames[to + 1].P1.MoveHit > counter;
+        return to - from >= 2 && countsOn ? (frames[from].Frame, frames[to].Frame, true) : null;
+    }
+
     /// <summary>The trace as the route verifier sees the move steps alone: the movement steps' inputs and driver bookkeeping removed, move steps renumbered.</summary>
-    internal static TraceLog Project(TraceLog log, InputPlan plan, IReadOnlyDictionary<int, int> toSub, string subFingerprint)
+    public static TraceLog Project(TraceLog log, InputPlan plan, IReadOnlyDictionary<int, int> toSub, string subFingerprint)
     {
         var actionSteps = plan.Steps.Where(s => s.IsAction).Select(s => s.Index).ToHashSet();
+        // The driver tags its tail bookkeeping (tail_start, plan_complete) with the step index after the last step: keep it past the end of the move plan.
+        int? Map(int s) => toSub.TryGetValue(s, out var m) ? m : s > plan.Steps.Count ? toSub.Count + (s - plan.Steps.Count) : null;
         var meta = log.Meta is null ? null : log.Meta with { PlanFingerprint = subFingerprint };
         var events = new List<TraceEvent>();
         foreach (var e in log.Events)
@@ -267,10 +338,10 @@ public static class SequenceVerifier
             {
                 case TraceMeta: if (meta is not null) events.Add(meta); break;
                 case InputEvent i when i.Step is { } s:
-                    if (!actionSteps.Contains(s) && toSub.TryGetValue(s, out var si)) events.Add(i with { Step = si });
+                    if (!actionSteps.Contains(s) && Map(s) is { } si) events.Add(i with { Step = si });
                     break;
                 case DriverEvent d when d.Step is { } s:
-                    if (!actionSteps.Contains(s) && toSub.TryGetValue(s, out var sd)) events.Add(d with { Step = sd });
+                    if (!actionSteps.Contains(s) && Map(s) is { } sd) events.Add(d with { Step = sd });
                     break;
                 default: events.Add(e); break;
             }

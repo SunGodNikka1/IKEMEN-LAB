@@ -47,16 +47,23 @@ public sealed class XRayViewModel : ObservableObject
     private XRayLensKind _activeLens = XRayLensKind.Atlas;
     private IReadOnlyList<XRayRow> _searchResults = [];
 
+    /// <summary>
+    /// Scripted QA runs (<c>--qa-script</c>) set this so an X-Ray window opened by a script never writes the user's real data: playback records,
+    /// experiments, saved sequences, names and setting changes all go under this folder (settings are read from the real file, written here).
+    /// </summary>
+    public static string? IsolatedDataRoot { get; set; }
+
     public XRayViewModel(string root, CharacterEntry entry, string displayName, ISettingsStore? settings = null, ComboPlaybackService? playback = null,
         NameOverlayStore? names = null, SequenceStore? sequences = null, ExperimentStore? experiments = null)
     {
-        NameStore = names ?? NameOverlayStore.CreateDefault();
-        SequenceStore = sequences ?? SequenceStore.CreateDefault();
-        ExperimentStore = experiments ?? new ExperimentStore();
+        var iso = IsolatedDataRoot;
+        NameStore = names ?? (iso is null ? NameOverlayStore.CreateDefault() : new NameOverlayStore(Path.Combine(iso, "names")));
+        SequenceStore = sequences ?? (iso is null ? SequenceStore.CreateDefault() : new SequenceStore(Path.Combine(iso, "sequences")));
+        ExperimentStore = experiments ?? new ExperimentStore(iso is null ? null : Path.Combine(iso, "xray-experiments"));
         _root = root;
         _entry = entry;
-        Settings = settings ?? new JsonSettingsStore();
-        PlaybackService = playback ?? new ComboPlaybackService();
+        Settings = settings ?? (iso is null ? new JsonSettingsStore() : new CopyOnWriteSettingsStore(new JsonSettingsStore(), Path.Combine(iso, "settings.json")));
+        PlaybackService = playback ?? (iso is null ? new ComboPlaybackService() : new ComboPlaybackService(storeRoot: Path.Combine(iso, "xray-playback")));
         // One session for the whole window: Play Combo, Play Ability and Preview State share it, so only one engine runs at a time.
         // Notifications are posted to the UI thread, never invoked synchronously (a worker that blocks on the UI thread could deadlock a close).
         var ui = new UiDispatcher();
@@ -498,3 +505,18 @@ public sealed class NameReviewRow
     public bool HasSuggestions => Suggestions.Length > 0;
     public bool CanKeep { get; }
 }
+
+/// <summary>Reads the real settings until the first change, then keeps reading and writing its own copy (scripted QA runs never change the user's settings).</summary>
+public sealed class CopyOnWriteSettingsStore(ISettingsStore source, string path) : ISettingsStore
+{
+    private readonly JsonSettingsStore _copy = new(path);
+
+    public AppSettings Load() => File.Exists(path) ? _copy.Load() : source.Load();
+
+    public void Save(AppSettings settings)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        _copy.Save(settings);
+    }
+}
+

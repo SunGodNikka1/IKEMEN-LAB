@@ -63,6 +63,8 @@ public partial class App : Application
         {
             // Scripted QA run: no modal dialogs, never activated, exits when the script ends.
             UserDialogs.QaMode = true;
+            // A script must never consume or evict the user's playback history, experiments, names or settings: X-Ray windows it opens use isolated stores.
+            ViewModels.XRayViewModel.IsolatedDataRoot = System.IO.Path.Combine(Core.Settings.AppDataPaths.GetAppDataDirectory(), "qa-isolated");
             window.ShowActivated = false;
             window.WindowStartupLocation = WindowStartupLocation.Manual;
             window.Left = SystemParameters.VirtualScreenLeft + 20;

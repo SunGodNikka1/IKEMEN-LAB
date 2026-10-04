@@ -531,6 +531,7 @@ case "xray-combos-find":
         await Task.Delay(500);
         var vm = XRayVm();
         _log.Add($"  xray-open: '{vm.CharacterName}' status='{vm.Status}' selected={vm.SelectedId} title='{vm.Title}'");
+        _log.Add($"  xray-open: stores playback={vm.PlaybackService.StoreRoot} experiments={vm.ExperimentStore.Root} sequences={vm.SequenceStore.Directory} names={vm.NameStore.Directory}");
     }
 
     /// <summary>xray-lens NAME — switches the visible lens the way the tab strip does.</summary>
