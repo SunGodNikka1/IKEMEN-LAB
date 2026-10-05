@@ -132,6 +132,9 @@ internal sealed class TestEngine : ICancellableEngineRunner
     private readonly object _gate = new();
 
     public string Scenario { get; set; } = "seq_true";
+    /// <summary>What a watched match records (given the engine copy's sha256): by default a knockdown chase.</summary>
+    public Func<string, string> WatchTrace { get; set; } = sha => IKEMENLab.Tests.BehaviorTraces.KnockdownChase().Jsonl(sha);
+    public string? WatchArguments { get; private set; }
     /// <summary>Hold every run (true) or none (false).</summary>
     public bool Block { get => BlockFromRun != int.MaxValue; set => BlockFromRun = value ? 0 : int.MaxValue; }
     /// <summary>Hold the runs from this run number on (1 = the first run of the test).</summary>
@@ -147,12 +150,15 @@ internal sealed class TestEngine : ICancellableEngineRunner
 
     public EngineRunResult Run(RuntimeSandbox sandbox, TimeSpan timeout, CancellationToken cancel)
     {
-        var lua = File.ReadAllText(Path.Combine(sandbox.Root, "external", "mods", "xray_plan.lua"));
+        // A watched match (observe mode) has no plan: it gets WatchTrace, stamped with the real hash of the engine copy (as the sandbox's probe config is).
+        var planPath = Path.Combine(sandbox.Root, "external", "mods", "xray_plan.lua");
+        var lua = File.Exists(planPath) ? File.ReadAllText(planPath) : null;
         int number;
         lock (_gate)
         {
             Sandboxes.Add(sandbox.Root);
-            Plans.Add(lua);
+            Plans.Add(lua ?? "(watch)");
+            if (lua is null) WatchArguments = string.Join(" ", sandbox.Arguments);
             number = Sandboxes.Count;
         }
 
@@ -161,6 +167,13 @@ internal sealed class TestEngine : ICancellableEngineRunner
         {
             WaitHandle.WaitAny([cancel.WaitHandle, _release.WaitHandle], TimeSpan.FromSeconds(30));
             cancel.ThrowIfCancellationRequested();
+        }
+
+        if (lua is null)
+        {
+            var sha = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(sandbox.ExePath)));
+            File.WriteAllText(sandbox.TracePath, WatchTrace(sha));
+            return new EngineRunResult(0, false, null);
         }
 
         var fingerprint = Regex.Match(lua, "fingerprint = \"([0-9A-F]+)\"").Groups[1].Value;

@@ -256,6 +256,32 @@ case "seq-save":
 case "seq-run":
     SeqRun(rest);
     break;
+case "watch-run":
+    WatchRun(rest);
+    break;
+case "watch-status":
+    WatchStatus();
+    break;
+case "watch-episode":
+    WatchEpisode(rest);
+    break;
+case "watch-select-run":
+    {
+        var lens = XRayVm().WatchAsk;
+        var i = int.Parse(rest.Trim(), CultureInfo.InvariantCulture);
+        lens.SelectedRun = lens.Runs[i];
+        _log.Add($"  watch-select-run: {lens.SelectedRun.Title}");
+        break;
+    }
+case "watch-why":
+    WatchWhy(rest);
+    break;
+case "watch-card":
+    WatchCard(rest);
+    break;
+case "xray-rename":
+    XRayRename(rest);
+    break;
 case "seq-status":
     SeqStatus();
     break;
@@ -531,7 +557,7 @@ case "xray-combos-find":
         await Task.Delay(500);
         var vm = XRayVm();
         _log.Add($"  xray-open: '{vm.CharacterName}' status='{vm.Status}' selected={vm.SelectedId} title='{vm.Title}'");
-        _log.Add($"  xray-open: stores playback={vm.PlaybackService.StoreRoot} experiments={vm.ExperimentStore.Root} sequences={vm.SequenceStore.Directory} names={vm.NameStore.Directory}");
+        _log.Add($"  xray-open: stores playback={vm.PlaybackService.StoreRoot} experiments={vm.ExperimentStore.Root} sequences={vm.SequenceStore.Directory} names={vm.NameStore.Directory} watch={vm.BehaviorStore.Root}");
     }
 
     /// <summary>xray-lens NAME — switches the visible lens the way the tab strip does.</summary>
@@ -1027,6 +1053,96 @@ case "xray-combos-find":
         _log.Add($"  seq-run: ×{n} invoked; attemptId={session.AttemptId} (previous {before}) scope={session.AttemptRouteKey}");
     }
 
+    // ------------------------------------------------------------------ Watch & Ask (Phase 5)
+
+    /// <summary>watch-run [seconds] [opponentAi] — starts watching a match (playback-wait settled waits for it).</summary>
+    private void WatchRun(string rest)
+    {
+        var lens = XRayVm().WatchAsk;
+        var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length > 0) lens.SecondsText = parts[0];
+        if (parts.Length > 1) lens.OpponentAiText = parts[1];
+        if (!lens.WatchCommand.CanExecute(null)) throw new InvalidOperationException($"watch-run refused (busy={lens.IsBusy})");
+        var before = XRayVm().PlaybackSession.AttemptId;
+        lens.WatchCommand.Execute(null);
+        _log.Add($"  watch-run: {lens.SecondsText}s opponentAi={lens.OpponentAiText}; attemptId={XRayVm().PlaybackSession.AttemptId} (previous {before}) status={lens.Status}");
+    }
+
+    private void WatchStatus()
+    {
+        var lens = XRayVm().WatchAsk;
+        _log.Add($"  watch.headline={lens.Headline}");
+        _log.Add($"  watch.run={lens.SelectedRun?.Title} runs={lens.Runs.Count}");
+        foreach (var c in lens.Cards) _log.Add($"  watch.card {c.Name}: {c.Level} — {c.Counts}");
+        foreach (var e in lens.Episodes) _log.Add($"  watch.episode {e.Behavior} {e.Frames}: {e.Situation} | {e.Action} | {e.Outcome} [{e.Badge}]");
+        _log.Add($"  watch.current={lens.CurrentBehavior} [{lens.CurrentBadge}]");
+        _log.Add($"  watch.situation={lens.CurrentSituation}");
+        _log.Add($"  watch.action={lens.CurrentAction}");
+        _log.Add($"  watch.outcome={lens.CurrentOutcome}");
+        foreach (var t in lens.Timeline.Take(40)) _log.Add($"  watch.timeline {t.FrameText}: {t.Text}");
+        foreach (var line in lens.DetailsText.Split('\n', StringSplitOptions.RemoveEmptyEntries)) _log.Add("  watch.detail| " + line);
+    }
+
+    /// <summary>xray-rename ID NAME — the window's own Rename (Phase 1) on the object; under a QA script the name store is the isolated one.</summary>
+    private void XRayRename(string rest)
+    {
+        var vm = XRayVm();
+        var space = rest.IndexOf(' ');
+        if (space <= 0) throw new InvalidOperationException("xray-rename expects ID NAME");
+        vm.Select(rest[..space]);
+        vm.RenameText = rest[(space + 1)..].Trim();
+        vm.RenameCommand.Execute(null);
+        _log.Add($"  xray-rename: {vm.SelectedId} -> '{vm.Title}'");
+    }
+
+    /// <summary>watch-episode &lt;behavior name or index&gt;[@start frame] — selects an episode of the current run.</summary>
+    private void WatchEpisode(string rest)
+    {
+        var lens = XRayVm().WatchAsk;
+        var spec = rest.Trim();
+        long? at = spec.LastIndexOf('@') is var k and > 0 && long.TryParse(spec[(k + 1)..], NumberStyles.None, CultureInfo.InvariantCulture, out var f) ? f : null;
+        if (at is not null) spec = spec[..spec.LastIndexOf('@')].Trim();
+        var pick = int.TryParse(spec, out var i) && i >= 0 && i < lens.Episodes.Count ? lens.Episodes[i]
+            : lens.Episodes.FirstOrDefault(e => e.Behavior.Equals(spec, StringComparison.OrdinalIgnoreCase) && (at is null || e.Episode.StartFrame == at));
+        lens.SelectedEpisode = pick ?? throw new InvalidOperationException($"watch-episode: no episode '{rest}'");
+        _log.Add($"  watch-episode: {pick.Behavior} {pick.Frames}");
+    }
+
+    private void WatchWhy(string rest)
+    {
+        var lens = XRayVm().WatchAsk;
+        // "ep" = a moment inside the selected episode (5 frames after it starts).
+        var frame = rest.Trim() == "ep" ? (lens.SelectedEpisode?.Episode.StartFrame ?? throw new InvalidOperationException("watch-why ep: no episode selected")) + 5
+            : long.Parse(rest.Trim(), CultureInfo.InvariantCulture);
+        lens.WhyAt(frame);
+        _log.Add($"  watch.why.frame={frame}");
+        _log.Add($"  watch.why.summary={lens.WhySummary}");
+        _log.Add($"  watch.why.context={lens.WhyContext}");
+        _log.Add($"  watch.why.next={lens.WhyNext}");
+        _log.Add($"  watch.why.conditions={lens.WhyConditions}");
+        foreach (var r in lens.WhyRules) _log.Add($"  watch.why.rule={r}");
+        _log.Add($"  watch.why.cause={lens.WhyCause}");
+        // Bring the answer into view (for a screenshot that shows it).
+        var win = XRayWin();
+        win.UpdateLayout();
+        if (win.Content is Grid grid && Descendants(grid).OfType<FrameworkElement>().FirstOrDefault(e => System.Windows.Automation.AutomationProperties.GetName(e) == "Why cause") is { } cause)
+            cause.BringIntoView();
+        win.UpdateLayout();
+    }
+
+    private void WatchCard(string rest)
+    {
+        var lens = XRayVm().WatchAsk;
+        var card = lens.Cards.FirstOrDefault(c => c.Name.Equals(rest.Trim(), StringComparison.OrdinalIgnoreCase)) ?? throw new InvalidOperationException($"watch-card: no card '{rest}'");
+        lens.SelectedCard = card;
+        _log.Add($"  watch.card.selected={card.Name} [{card.Level}] {card.Counts}");
+        _log.Add($"  watch.card.meaning={card.LevelMeaning}");
+        _log.Add($"  watch.card.outcomes={card.Outcomes} setups={card.Setups}");
+        foreach (var l in card.Links) _log.Add($"  watch.card.link={l.Text} ({l.Id})");
+        foreach (var r in card.StaticRules) _log.Add($"  watch.card.rule={r}");
+        if (card.HasStale) _log.Add($"  watch.card.stale={card.Stale}");
+    }
+
     private void SeqStatus()
     {
         var lab = SeqLab();
@@ -1059,7 +1175,7 @@ case "xray-combos-find":
         var v = p.VerdictForLatestAttempt();
         return v.Kind switch
         {
-            VerdictWaitKind.Verdict or VerdictWaitKind.Preview or VerdictWaitKind.EndedWithoutVerdict => true,
+            VerdictWaitKind.Verdict or VerdictWaitKind.Preview or VerdictWaitKind.Observation or VerdictWaitKind.EndedWithoutVerdict => true,
             VerdictWaitKind.Pending => false,
             _ => throw new InvalidOperationException(v.Message)
         };

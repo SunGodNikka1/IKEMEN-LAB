@@ -14,8 +14,14 @@ public class McpServerTests
     public static readonly string[] ExpectedTools =
     [
         "inspect_character", "list_abilities", "inspect_ability", "explain_state", "get_source", "list_experiments", "get_experiment_results", "get_runtime_trace",
+        "list_behaviors", "inspect_behavior", "why_did_ai_do_this", "watch_match",
         "play_ability", "preview_state", "test_sequence", "create_experiment", "run_experiment", "compare_experiments", "get_job", "cancel_job"
     ];
+
+    /// <summary>The read-only Observe tools (watch_match observes too, but writes a recording).</summary>
+    public static readonly string[] ReadOnlyObserve =
+        ["inspect_character", "list_abilities", "inspect_ability", "explain_state", "get_source", "list_experiments", "get_experiment_results", "get_runtime_trace",
+         "list_behaviors", "inspect_behavior", "why_did_ai_do_this"];
 
     [Fact]
     public async Task TheHandshakeNegotiatesTheProtocolAndListsExactlyTheObserveAndExperimentTools()
@@ -53,7 +59,7 @@ public class McpServerTests
         // No editing or deployment tool exists in this phase.
         Assert.DoesNotContain(list, t => t!["name"]!.GetValue<string>().Contains("edit", StringComparison.OrdinalIgnoreCase) ||
                                          t!["name"]!.GetValue<string>().Contains("deploy", StringComparison.OrdinalIgnoreCase));
-        foreach (var observe in ExpectedTools.Take(8))
+        foreach (var observe in ReadOnlyObserve)
             Assert.True(list.Single(t => t!["name"]!.GetValue<string>() == observe)!["annotations"]!["readOnlyHint"]!.GetValue<bool>());
 
         var unknownMethod = (await server.HandleMessageAsync(h.Request("resources/list"), CancellationToken.None))!;

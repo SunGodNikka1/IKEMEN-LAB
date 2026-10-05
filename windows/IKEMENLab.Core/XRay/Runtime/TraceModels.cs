@@ -7,7 +7,18 @@ namespace IKEMENLab.Core.XRay.Runtime;
 public sealed record PlayerSample(
     int? State, int? PrevState, bool? Ctrl, string? StateType, string? MoveType, int? Anim, int? AnimElem,
     double? Life, double? Power, double? PosX, double? PosY, double? VelX, double? VelY, int? Facing,
-    int? MoveHit, int? MoveContact, int? HitPause);
+    int? MoveHit, int? MoveContact, int? HitPause)
+{
+    /// <summary>The player's AI level (0 = not on the AI). Probe 0.4+; null when the build does not expose it.</summary>
+    public double? AiLevel { get; init; }
+    /// <summary>The engine's fall flag for the player's current hit (gethitvar fall). Probe 0.4+.</summary>
+    public bool? HitFall { get; init; }
+    /// <summary>Distance from the player's back / front edge of the body to the screen edge (BackEdgeBodyDist / FrontEdgeBodyDist). Probe 0.4+.</summary>
+    public double? BackEdgeBodyDist { get; init; }
+    public double? FrontEdgeBodyDist { get; init; }
+    /// <summary>How many Projectile-controller projectiles the player owns (NumProj; helper "projectiles" are not counted). Probe 0.4+.</summary>
+    public int? Projectiles { get; init; }
+}
 
 /// <summary>
 /// One line of the JSONL runtime trace. <see cref="Frame"/> is the probe's own monotonically increasing counter (the identity all

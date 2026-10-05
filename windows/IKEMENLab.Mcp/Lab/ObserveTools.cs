@@ -649,7 +649,7 @@ internal sealed partial class ObserveTools(LabContext ctx)
 
     private (string Dir, string Store)? FindRun(string runId)
     {
-        foreach (var (root, label) in new[] { (ctx.Runs.StoreRoot, "MCP runs"), (ctx.AppPlaybackRoot, "your playback history (read-only)") })
+        foreach (var (root, label) in new[] { (ctx.Runs.StoreRoot, "MCP runs"), (ctx.Behavior.Root, "watched runs"), (ctx.AppPlaybackRoot, "your playback history (read-only)") })
         {
             var d = Path.Combine(root, runId);
             if (File.Exists(Path.Combine(d, "meta.json"))) return (d, label);

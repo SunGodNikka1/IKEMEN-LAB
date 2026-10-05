@@ -15,7 +15,7 @@
 if rawget(_G, "__ikemenlab_xray") then return end
 _G.__ikemenlab_xray = true
 
-local PROBE_VERSION = "0.3-phase2-force"
+local PROBE_VERSION = "0.4-phase5-behavior"
 local cfg = { trace = "xray_trace.jsonl", maxFrames = 900, hooks = { "loop" }, character = "" }
 do
 	local ok, c = pcall(dofile, "external/mods/xray_config.lua")
@@ -161,6 +161,12 @@ local FIELDS = {
 	{ "moveHit", num, { function() return call("moveHit") end, function() return call("movehit") end } },
 	{ "moveContact", num, { function() return call("moveContact") end, function() return call("movecontact") end } },
 	{ "hitPause", num, { function() return call("hitpausetime") end } },
+	-- Phase 5 (behavior recognition): the engine's own answers, so "falling", "cornered" and "AI-controlled" are read, not guessed.
+	{ "aiLevel", num, { function() return call("aiLevel") end, function() return call("ailevel") end } },
+	{ "hitFall", bool, { function() return call("hitFall") end, function() return call("hitfall") end } },
+	{ "backEdgeBodyDist", num, { function() return call("backEdgeBodyDist") end, function() return call("backedgebodydist") end } },
+	{ "frontEdgeBodyDist", num, { function() return call("frontEdgeBodyDist") end, function() return call("frontedgebodydist") end } },
+	{ "numProj", num, { function() return call("numProj") end, function() return call("numproj") end } },
 }
 
 local MATCH_FIELDS = {

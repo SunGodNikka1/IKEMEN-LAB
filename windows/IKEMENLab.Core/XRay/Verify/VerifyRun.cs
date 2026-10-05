@@ -96,6 +96,9 @@ public sealed record VerifyRunResult(VerificationReport Report, string? SandboxP
     public TraceLog? Log { get; init; }
 }
 
+/// <summary>One engine run without a plan (observe mode), before anything is read from it.</summary>
+public sealed record ObservedRun(TraceLog Log, EngineRunResult Engine, IReadOnlyList<string> Notes, string? SandboxPath, string? TracePath);
+
 /// <summary>One engine run of a prepared plan, before anything is judged: the trace as read, and the run's own notes (sandbox, trace hash, engine problems).</summary>
 public sealed record EngineRun(InputPlan Plan, TraceLog Log, EngineRunResult Engine, IReadOnlyList<string> Notes, string? SandboxPath, string? TracePath);
 
@@ -123,6 +126,19 @@ public static class VerifyRunner
     /// </summary>
     public static EngineRun Execute(InputPlan plan, VerifyRunRequest request, IEngineRunner runner)
     {
+        var run = Launch(plan, request, runner, (sandbox, raw) => request.Collect?.Invoke(new VerifyArtifacts(plan, sandbox.Root, sandbox.TracePath, raw)));
+        return new EngineRun(plan, run.Log, run.Engine, run.Notes, run.SandboxPath, run.TracePath);
+    }
+
+    /// <summary>
+    /// Observe mode: the same disposable sandbox, probe and cleanup as <see cref="Execute"/>, with no plan — both sides fight on the engine's AI at the
+    /// sandbox request's AI levels. <paramref name="collect"/> gets the raw trace before the sandbox is deleted. Nothing is judged.
+    /// </summary>
+    public static ObservedRun Observe(VerifyRunRequest request, IEngineRunner runner, Action<string?>? collect = null) =>
+        Launch(null, request, runner, (_, raw) => collect?.Invoke(raw));
+
+    private static ObservedRun Launch(InputPlan? plan, VerifyRunRequest request, IEngineRunner runner, Action<RuntimeSandbox, string?> collect)
+    {
         request.Progress?.Invoke("preparing");
         var sandboxRequest = request.Sandbox with { Plan = plan, Cancel = request.Cancel, CleanupFailed = request.Sandbox.CleanupFailed ?? request.CleanupFailed };
         var sandbox = RuntimeSandbox.Create(sandboxRequest);
@@ -140,7 +156,7 @@ public static class VerifyRunner
             request.Progress?.Invoke("judging");
             request.Cancel.ThrowIfCancellationRequested();
             var raw = File.Exists(sandbox.TracePath) ? File.ReadAllText(sandbox.TracePath) : null;
-            request.Collect?.Invoke(new VerifyArtifacts(plan, sandbox.Root, sandbox.TracePath, raw));
+            collect(sandbox, raw);
             var log = raw is null ? new TraceLog { Events = [], Issues = [] } : TraceReader.ReadFile(sandbox.TracePath);
             var notes = new List<string>(sandbox.Notes);
             if (File.Exists(sandbox.TracePath)) notes.Add("Trace sha256: " + Convert.ToHexString(
@@ -148,7 +164,7 @@ public static class VerifyRunner
             if (engine.Error is not null) notes.Add("Engine: " + engine.Error);
             if (engine.TimedOut) notes.Add("The engine was stopped after the timeout.");
             request.Cancel.ThrowIfCancellationRequested();
-            return new EngineRun(plan, log, engine, notes, keep ? sandbox.Root : null, keep ? sandbox.TracePath : null);
+            return new ObservedRun(log, engine, notes, keep ? sandbox.Root : null, keep ? sandbox.TracePath : null);
         }
         finally
         {

@@ -263,6 +263,7 @@ public class SequenceLabUiTests : IDisposable
                 Assert.StartsWith(iso, vm.ExperimentStore.Root);
                 Assert.StartsWith(iso, vm.SequenceStore.Directory);
                 Assert.StartsWith(iso, vm.NameStore.Directory);
+                Assert.StartsWith(iso, vm.BehaviorStore.Root);                              // Phase 5: watched runs too
                 Assert.IsType<CopyOnWriteSettingsStore>(vm.Settings);
             });
         }

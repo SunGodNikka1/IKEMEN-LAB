@@ -39,6 +39,9 @@ public sealed record SandboxRequest(
     public Action<string, string?>? CleanupFailed { get; init; }
     /// <summary>Deletes a sandbox folder, returning (false, reason) on failure. Null = <see cref="RuntimeSandbox.Delete"/>. A seam so cleanup failure can be injected deterministically.</summary>
     public Func<string, (bool Ok, string? Why)>? Deleter { get; init; }
+    /// <summary>Observe mode only (no plan): the AI levels the subject (P1) and the dummy (P2) fight with (1–8).</summary>
+    public int SubjectAiLevel { get; init; } = 1;
+    public int DummyAiLevel { get; init; } = 1;
 }
 
 public static class RuntimeProbe
@@ -251,9 +254,11 @@ public sealed class RuntimeSandbox : IDisposable
 
     private static IReadOnlyList<string> BuildArguments(SandboxRequest r) =>
         r.Plan is null
-            ? ["-p1", r.SubjectFolder, "-p2", r.DummyFolder, "-s", r.StageDef.Replace('\\', '/'), "-p1.ai", "1", "-p2.ai", "1", "-nosound"]
+            ? ["-p1", r.SubjectFolder, "-p2", r.DummyFolder, "-s", r.StageDef.Replace('\\', '/'), "-p1.ai", Level(r.SubjectAiLevel), "-p2.ai", Level(r.DummyAiLevel), "-nosound"]
             // Verify mode: nobody is on the engine's AI. P1 is fed by the driver, P2 is a dummy that receives no input.
             : ["-p1", r.SubjectFolder, "-p2", r.DummyFolder, "-s", r.StageDef.Replace('\\', '/'), "-nosound"];
+
+    private static string Level(int level) => Math.Clamp(level, 1, 8).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static void InstallProbe(string root, SandboxRequest request, List<string> notes)
     {

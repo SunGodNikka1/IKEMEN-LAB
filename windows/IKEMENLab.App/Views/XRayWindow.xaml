@@ -133,6 +133,34 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="LensWatch" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Watch">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- Behavior evidence badge (Tag = Confirmed / Observed / Possible / NotSeen): the three levels never look alike -->
+        <Style x:Key="BehaviorBadge" TargetType="Border">
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="Padding" Value="8,1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Confirmed">
+                    <Setter Property="Background" Value="{DynamicResource PositiveBackgroundBrush}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource PositiveBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Observed">
+                    <Setter Property="BorderBrush" Value="{DynamicResource PositiveBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Possible">
+                    <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <Style x:Key="LensCombos" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
             <Style.Triggers>
                 <DataTrigger Binding="{Binding ActiveLens}" Value="Combos">
@@ -191,6 +219,8 @@
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Combos}"/>
                     <RadioButton GroupName="XRayLens" Content="Sequence Lab" Style="{StaticResource SegmentedItem}"
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Sequences}"/>
+                    <RadioButton GroupName="XRayLens" Content="Watch &amp; Ask" Style="{StaticResource SegmentedItem}" AutomationProperties.Name="Watch and Ask"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Watch}"/>
                 </StackPanel>
             </Border>
         </DockPanel>
@@ -817,6 +847,194 @@
                                 </Border>
                                 <TextBox Text="{Binding SequenceLab.DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" MaxHeight="320"
                                          VerticalScrollBarVisibility="Auto" Visibility="{Binding SequenceLab.ShowDetails, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Sequence technical details"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <!-- 9. Watch & Ask (Phase 5): watch the AI fight, read it as behavior, ask why — read-only -->
+                    <Grid x:Name="LensWatchPanel" Style="{StaticResource LensWatch}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="340"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <!-- left: recognised-behavior cards -->
+                        <Border BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BorderSubtle}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="14,12,14,12">
+                                    <TextBlock Text="Behaviors" Style="{StaticResource SectionLabel}"/>
+                                    <ListBox ItemsSource="{Binding WatchAsk.Cards}" SelectedItem="{Binding WatchAsk.SelectedCard, Mode=TwoWay}" MaxHeight="300"
+                                             Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}" AutomationProperties.Name="Behavior cards">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="8,4">
+                                                    <Border DockPanel.Dock="Right" Style="{StaticResource BehaviorBadge}" Tag="{Binding LevelKind}" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Level}" FontSize="10" Foreground="{DynamicResource TextPrimary}"/>
+                                                    </Border>
+                                                    <StackPanel Margin="0,0,6,0">
+                                                        <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" ToolTip="{Binding Name}" Foreground="{DynamicResource TextPrimary}"/>
+                                                        <TextBlock Text="{Binding Counts}" FontSize="10" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextTertiary}"/>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <StackPanel Margin="0,10,0,0" Visibility="{Binding WatchAsk.HasCard, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Behavior card">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource BehaviorBadge}" Tag="{Binding WatchAsk.SelectedCard.LevelKind}" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding WatchAsk.SelectedCard.Level}" FontSize="11" Foreground="{DynamicResource TextPrimary}"/>
+                                            </Border>
+                                            <TextBlock Text="{Binding WatchAsk.SelectedCard.Name}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                                        </DockPanel>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.Category}" FontSize="11" Foreground="{DynamicResource TextTertiary}"/>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.Summary}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.LevelMeaning}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                        <TextBlock Text="When" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.Conditions}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="Does" Style="{StaticResource SectionLabel}" Margin="0,6,0,0"/>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.Actions}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="Outcomes" Style="{StaticResource SectionLabel}" Margin="0,6,0,0"/>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.Outcomes}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="Seen against" Style="{StaticResource SectionLabel}" Margin="0,6,0,0"/>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.Setups}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="{Binding WatchAsk.SelectedCard.Stale}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource WarningBrush}"
+                                                   Visibility="{Binding WatchAsk.SelectedCard.HasStale, Converter={StaticResource BoolToVis}}"/>
+                                        <TextBlock Text="Moves involved" Style="{StaticResource SectionLabel}" Margin="0,6,0,0"/>
+                                        <ItemsControl ItemsSource="{Binding WatchAsk.SelectedCard.Links}" Focusable="False">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Button Content="{Binding Text}" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Padding="6,1" Margin="0,1"
+                                                            Command="{Binding DataContext.WatchAsk.ShowLinkCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"/>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <Expander Header="Limitations" Margin="0,8,0,0" Foreground="{DynamicResource TextSecondary}">
+                                            <ItemsControl ItemsSource="{Binding WatchAsk.SelectedCard.Limitations}" Focusable="False">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate><TextBlock Text="{Binding StringFormat='• {0}'}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/></DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </Expander>
+                                        <Expander Header="Static AI rules" Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding WatchAsk.SelectedCard.StaticNote}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/>
+                                                <ItemsControl ItemsSource="{Binding WatchAsk.SelectedCard.StaticRules}" Focusable="False">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate><TextBlock Text="{Binding StringFormat='• {0}'}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/></DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Expander>
+                                        <Expander Header="Technical evidence" Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}">
+                                            <TextBox Text="{Binding WatchAsk.SelectedCard.Evidence, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="10"/>
+                                        </Expander>
+                                    </StackPanel>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                        <!-- right: watch, the current behavior, the timeline and Why -->
+                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="14,12,14,12">
+                                <WrapPanel>
+                                    <Button Content="&#x25B6; Watch a match" Style="{StaticResource PrimaryButton}" Margin="0,0,10,6" Command="{Binding WatchAsk.WatchCommand}" AutomationProperties.Name="Watch a match"
+                                            ToolTip="Plays a match with this character on the engine's AI against the playback dummy, in a disposable sandbox, and reads the behavior from it."/>
+                                    <TextBlock Text="Seconds" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,6" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBox Style="{StaticResource FieldBox}" Width="60" Text="{Binding WatchAsk.SecondsText}" Margin="0,0,10,6" AutomationProperties.Name="Watch seconds"/>
+                                    <TextBlock Text="Opponent AI level" FontSize="11" VerticalAlignment="Center" Margin="0,0,4,6" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBox Style="{StaticResource FieldBox}" Width="52" Text="{Binding WatchAsk.OpponentAiText}" Margin="0,0,10,6" AutomationProperties.Name="Opponent AI level"/>
+                                    <Button Content="Cancel" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding WatchAsk.CancelCommand}"
+                                            Visibility="{Binding WatchAsk.IsBusy, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Cancel watching"/>
+                                    <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.OpenSetupCommand}" AutomationProperties.Name="Open playback setup from Watch and Ask"/>
+                                    <Button Content="Details" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding WatchAsk.ToggleDetailsCommand}" AutomationProperties.Name="Show watch technical details"/>
+                                    <Button Content="Open run folder" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding WatchAsk.OpenFolderCommand}" AutomationProperties.Name="Open the watched run folder"/>
+                                </WrapPanel>
+                                <TextBlock Text="{Binding WatchAsk.Status}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"
+                                           Visibility="{Binding WatchAsk.HasStatus, Converter={StaticResource BoolToVis}}"/>
+                                <Border Style="{StaticResource Card}" Padding="10,6" CornerRadius="8" Margin="0,6,0,6" Visibility="{Binding WatchAsk.HasHeadline, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding WatchAsk.Headline}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Watch result"/>
+                                </Border>
+                                <DockPanel Margin="0,4,0,0">
+                                    <TextBlock Text="Watched run" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0" Foreground="{DynamicResource TextSecondary}"/>
+                                    <ComboBox ItemsSource="{Binding WatchAsk.Runs}" SelectedItem="{Binding WatchAsk.SelectedRun}" DisplayMemberPath="Title" AutomationProperties.Name="Watched run"/>
+                                </DockPanel>
+
+                                <!-- the easy view: what it was doing, why it started, what it did, what followed -->
+                                <Border Style="{StaticResource Card}" Padding="12,10" CornerRadius="10" Margin="0,10,0,0" AutomationProperties.Name="Current behavior">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource BehaviorBadge}" Tag="{Binding WatchAsk.CurrentBadgeKind}" VerticalAlignment="Center"
+                                                    Visibility="{Binding WatchAsk.HasEpisode, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock Text="{Binding WatchAsk.CurrentBadge}" FontSize="11" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Evidence badge"/>
+                                            </Border>
+                                            <TextBlock Text="{Binding WatchAsk.CurrentBehavior}" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Likely behavior"/>
+                                        </DockPanel>
+                                        <Grid Margin="0,6,0,0" Visibility="{Binding WatchAsk.HasEpisode, Converter={StaticResource BoolToVis}}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition/>
+                                                <RowDefinition/>
+                                                <RowDefinition/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="Situation" FontSize="11" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding WatchAsk.CurrentSituation}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Behavior situation"/>
+                                            <TextBlock Grid.Row="1" Text="Action" FontSize="11" Margin="0,3,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding WatchAsk.CurrentAction}" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Behavior action"/>
+                                            <TextBlock Grid.Row="2" Text="Outcome" FontSize="11" Margin="0,3,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding WatchAsk.CurrentOutcome}" FontSize="12" Margin="0,3,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Behavior outcome"/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+                                <TextBlock Text="Behavior episodes in this run" Style="{StaticResource SectionLabel}" Margin="0,10,0,2"/>
+                                <ListBox ItemsSource="{Binding WatchAsk.Episodes}" SelectedItem="{Binding WatchAsk.SelectedEpisode, Mode=TwoWay}" MaxHeight="170"
+                                         Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}" AutomationProperties.Name="Behavior episodes">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="8,3">
+                                                <TextBlock DockPanel.Dock="Right" Text="{Binding Frames}" FontSize="10" VerticalAlignment="Center" Foreground="{DynamicResource TextTertiary}"/>
+                                                <TextBlock FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimary}">
+                                                    <Run Text="{Binding Behavior, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=" — "/><Run Text="{Binding Outcome, Mode=OneWay}"/>
+                                                </TextBlock>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <DockPanel Margin="0,10,0,2">
+                                    <CheckBox DockPanel.Dock="Right" Content="All events" IsChecked="{Binding WatchAsk.ShowAllEvents}" Foreground="{DynamicResource TextSecondary}" AutomationProperties.Name="Show all events"/>
+                                    <TextBlock Text="Timeline" Style="{StaticResource SectionLabel}"/>
+                                </DockPanel>
+                                <ListBox ItemsSource="{Binding WatchAsk.Timeline}" SelectedItem="{Binding WatchAsk.SelectedMoment, Mode=TwoWay}" MaxHeight="260"
+                                         Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}" AutomationProperties.Name="Behavior timeline">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="8,2">
+                                                <TextBlock DockPanel.Dock="Left" Text="{Binding FrameText}" Width="48" FontSize="10" VerticalAlignment="Center" Foreground="{DynamicResource TextTertiary}"/>
+                                                <TextBlock Text="{Binding Text}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <Button Content="Why did it do that?" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Command="{Binding WatchAsk.WhyCommand}"
+                                        AutomationProperties.Name="Why did it do that" ToolTip="Explains the selected moment from what was observed. It never claims which AI rule fired."/>
+                                <Border Style="{StaticResource Card}" Padding="12,10" CornerRadius="10" Margin="0,8,0,0" Visibility="{Binding WatchAsk.HasWhy, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding WatchAsk.WhySummary}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Why summary"/>
+                                        <TextBlock Text="{Binding WatchAsk.WhyContext}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                        <TextBlock Text="{Binding WatchAsk.WhyNext}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                        <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondary}">
+                                            <Run Text="Conditions that held: "/><Run Text="{Binding WatchAsk.WhyConditions, Mode=OneWay}"/>
+                                        </TextBlock>
+                                        <ItemsControl ItemsSource="{Binding WatchAsk.WhyRules}" Focusable="False" Margin="0,4,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate><TextBlock Text="{Binding StringFormat='Consistent static rule: {0}'}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/></DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock Text="{Binding WatchAsk.WhyCause}" FontSize="11" FontStyle="Italic" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource WarningBrush}" AutomationProperties.Name="Why cause"/>
+                                    </StackPanel>
+                                </Border>
+                                <TextBox Text="{Binding WatchAsk.DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" MaxHeight="320" Margin="0,8,0,0"
+                                         VerticalScrollBarVisibility="Auto" Visibility="{Binding WatchAsk.ShowDetails, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Watch technical details"/>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>

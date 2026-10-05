@@ -355,7 +355,7 @@ internal sealed class ExperimentTools(LabContext ctx, JobQueue jobs)
     // ------------------------------------------------------------------ plumbing
 
     /// <summary>Runs one session job and reads its result. A job the session did not take (it was closing) is never read as someone else's result.</summary>
-    private static async Task<JobOutcome> OnSession(PlaybackSession session, Func<Task> start, Func<JobOutcome> read)
+    internal static async Task<JobOutcome> OnSession(PlaybackSession session, Func<Task> start, Func<JobOutcome> read)
     {
         var before = session.AttemptId;
         await start().ConfigureAwait(false);
@@ -371,7 +371,9 @@ internal sealed class ExperimentTools(LabContext ctx, JobQueue jobs)
     }
 
     /// <summary>The immediate answer for a new job: its state (queued or running), who holds the engine if it must wait, and — with wait_seconds — the result.</summary>
-    private async Task<JsonObject> Started(LabJob job, ToolArgs a, CancellationToken cancel)
+    private Task<JsonObject> Started(LabJob job, ToolArgs a, CancellationToken cancel) => Started(ctx, jobs, job, a, cancel);
+
+    internal static async Task<JsonObject> Started(LabContext ctx, JobQueue jobs, LabJob job, ToolArgs a, CancellationToken cancel)
     {
         var wait = a.Int("wait_seconds", 0, 0, MaxWaitSeconds);
         if (wait > 0) await Task.WhenAny(job.Finished, Task.Delay(TimeSpan.FromSeconds(wait), cancel)).ConfigureAwait(false);
@@ -381,7 +383,9 @@ internal sealed class ExperimentTools(LabContext ctx, JobQueue jobs)
         return o;
     }
 
-    private PlaybackSetup ReadySetup(LoadedCharacter c, ToolArgs a)
+    private PlaybackSetup ReadySetup(LoadedCharacter c, ToolArgs a) => ReadySetup(ctx, c, a);
+
+    internal static PlaybackSetup ReadySetup(LabContext ctx, LoadedCharacter c, ToolArgs a)
     {
         var setup = ctx.Setup(c, Override(a));
         if (!setup.Ready)

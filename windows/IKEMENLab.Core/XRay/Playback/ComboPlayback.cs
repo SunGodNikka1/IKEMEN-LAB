@@ -19,7 +19,9 @@ public enum PlaybackMode
     /// <summary>A state forced with the engine's changeState for a look. Never proof, never a verdict.</summary>
     Preview,
     /// <summary>A Sequence Lab sequence (one or more trials, in the isolated experiment store).</summary>
-    Sequence
+    Sequence,
+    /// <summary>Watch & Ask: a match with both sides on the engine's AI, recorded for behavior recognition. Never a verdict.</summary>
+    Watch
 }
 
 /// <summary>Anything the playback session can run. Every job has a scope: its result is only ever shown against that scope.</summary>
@@ -94,6 +96,19 @@ public sealed record SequenceJob(string SequenceKey, string Label, PlaybackSetup
     public StaticSnapshot? Snapshot { get; init; }
     public PlaybackMode Mode => PlaybackMode.Sequence;
     public string ScopeKey => Sequences.Sequence.ScopePrefix + SequenceKey;
+}
+
+/// <summary>A watched match (Watch & Ask): P1 = the character on AI level <see cref="SubjectAiLevel"/>, P2 = the dummy on <see cref="OpponentAiLevel"/>.</summary>
+public sealed record WatchRequest(string Root, string Character, string SubjectFolder, string SubjectDef, PlaybackSetup Setup, int Seconds, int SubjectAiLevel,
+    int OpponentAiLevel, string Summary);
+
+/// <summary>A watched match as a session job. Its scope is the character; its result is a recording, never a verdict.</summary>
+public sealed record WatchJob(string Subject, PlaybackSetup Setup, int Seconds, string Summary) : IPlaybackJob
+{
+    public const string ScopePrefix = "watch:";
+    public StaticSnapshot? Snapshot { get; init; }
+    public PlaybackMode Mode => PlaybackMode.Watch;
+    public string ScopeKey => ScopePrefix + Subject;
 }
 
 /// <summary>One run of a sequence plan (Sequence Lab). The plan is built once per experiment by <see cref="Sequences.SequencePlanner"/>.</summary>
@@ -428,6 +443,62 @@ public sealed class ComboPlaybackService
         Prune();
         var log = File.Exists(record.TracePath) ? TraceReader.ReadFile(record.TracePath) : engineRun.Log;
         return new SequenceOutcome(record, report, log) { Plan = plan };
+    }
+
+    /// <summary>
+    /// Records a match with both sides on the engine's AI (Watch & Ask) in the same disposable sandbox, probe, record store and commit/cancel gate as every
+    /// other run. Nothing is judged here: <paramref name="beforeCommit"/> (record folder, record id, trace) writes whatever is read from it before the record
+    /// becomes visible, so a cancel either wins and leaves nothing, or loses and the record is complete.
+    /// </summary>
+    public (PlaybackRecord Record, TraceLog Log) Watch(WatchRequest request, Action<string>? progress, PlaybackCancellation gate, Action<string, string, TraceLog>? beforeCommit = null)
+    {
+        var cancel = gate.Token;
+        var setup = request.Setup;
+        if (!setup.Ready) throw new InvalidOperationException("Playback is not set up: " + string.Join(" ", setup.Issues));
+        if (request.Seconds < 5) throw new InvalidOperationException("A watched match needs at least 5 seconds.");
+        progress?.Invoke("planning");
+        cancel.ThrowIfCancellationRequested();
+
+        var started = DateTime.UtcNow;
+        var id = started.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..6];
+        var dir = Path.Combine(_storeRoot, id);
+        Directory.CreateDirectory(dir);
+        var frames = request.Seconds * 60;
+        var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, frames, _sandboxBase,
+            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls)
+        {
+            Deleter = SandboxDeleter, SubjectAiLevel = request.SubjectAiLevel, DummyAiLevel = request.OpponentAiLevel
+        };
+        var run = new VerifyRunRequest(sandbox, TimeSpan.FromSeconds(request.Seconds + 120)) { Progress = progress, Cancel = cancel, CleanupFailed = (path, why) => CleanupFailed?.Invoke(path, why) };
+
+        PlaybackRecord record;
+        TraceLog log;
+        var tmp = Path.Combine(dir, "meta.json.tmp");
+        try
+        {
+            var observed = VerifyRunner.Observe(run, _runner, raw => { if (raw is not null) File.WriteAllText(Path.Combine(dir, "trace.jsonl"), raw, new UTF8Encoding(false)); });
+            cancel.ThrowIfCancellationRequested();
+            log = observed.Log;
+            File.WriteAllLines(Path.Combine(dir, "run-notes.txt"), observed.Notes, new UTF8Encoding(false));
+            beforeCommit?.Invoke(dir, id, log);
+            var frameCount = log.Frames.Count();
+            record = new PlaybackRecord(id, started, request.Character, WatchJob.ScopePrefix + request.SubjectFolder, request.Summary,
+                frameCount > 0 ? "Recorded" : "NothingRecorded", frameCount > 0 ? null : "no match samples were recorded",
+                null, setup.Dummy, setup.Stage, log.Meta?.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir)
+            {
+                ApproachDistance = setup.ApproachDistance, Mode = "watch", TargetId = request.SubjectFolder
+            };
+            Commit(dir, tmp, record, gate, cancel);
+        }
+        catch
+        {
+            TryDelete(dir);
+            throw;
+        }
+
+        CommitSeam?.Invoke("after-commit");
+        Prune();
+        return (record, log);
     }
 
     private static string MetaJson(PlaybackRecord r)

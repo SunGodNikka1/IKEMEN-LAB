@@ -134,7 +134,11 @@ public static class TraceReader
         return new PlayerSample(
             Int(p, "state"), Int(p, "prevState"), Bool(p, "ctrl"), Str(p, "stateType"), Str(p, "moveType"), Int(p, "anim"), Int(p, "animElem"),
             Dbl(p, "life"), Dbl(p, "power"), Dbl(p, "x"), Dbl(p, "y"), Dbl(p, "velX"), Dbl(p, "velY"), Int(p, "facing"),
-            Int(p, "moveHit"), Int(p, "moveContact"), Int(p, "hitPause"));
+            Int(p, "moveHit"), Int(p, "moveContact"), Int(p, "hitPause"))
+        {
+            AiLevel = Dbl(p, "aiLevel"), HitFall = Bool(p, "hitFall"), BackEdgeBodyDist = Dbl(p, "backEdgeBodyDist"),
+            FrontEdgeBodyDist = Dbl(p, "frontEdgeBodyDist"), Projectiles = Int(p, "numProj")
+        };
     }
 
     private static IReadOnlyList<string> Strings(JsonElement e, string name)

@@ -24,6 +24,8 @@ public enum AttemptState
     VerdictProduced,
     /// <summary>A State Preview finished and committed its record. A preview is never a verdict.</summary>
     PreviewProduced,
+    /// <summary>A watched match (Watch & Ask) finished and committed its recording. A recording is never a verdict.</summary>
+    ObservationProduced,
     Cancelled,
     /// <summary>The attempt failed for a reason other than a preflight refusal (e.g. the route cannot be scripted).</summary>
     Error
@@ -42,7 +44,9 @@ public enum VerdictWaitKind
     /// <summary>The latest attempt ended without a verdict (cancelled, or failed for another reason).</summary>
     EndedWithoutVerdict,
     /// <summary>The latest attempt was a State Preview and produced its record: there is no runtime verdict, by design.</summary>
-    Preview
+    Preview,
+    /// <summary>The latest attempt was a watched match and produced its recording: there is no runtime verdict, by design.</summary>
+    Observation
 }
 
 public sealed record VerdictWait(VerdictWaitKind Kind, string Message);
@@ -111,6 +115,8 @@ public sealed class PlaybackSession
     public PreviewOutcome? PreviewResult { get; private set; }
     /// <summary>The stored Sequence Lab result (an experiment of one or more trials).</summary>
     public Sequences.ExperimentOutcome? ExperimentResult { get; private set; }
+    /// <summary>The stored watched match (Watch & Ask): the recording and what behavior recognition read from it.</summary>
+    public Behavior.WatchOutcome? WatchResult { get; private set; }
     private string _trialLabel = string.Empty;
 
     /// <summary>The scope this run (or last result) belongs to: a combo's route key, or a Play Ability / preview scope. Results are only shown against it.</summary>
@@ -133,10 +139,10 @@ public sealed class PlaybackSession
     public string? AttemptRouteKey { get; private set; }
     /// <summary>The attempt that produced the stored <see cref="Outcome"/>; null when there is none.</summary>
     public int? ResultAttemptId { get; private set; }
-    public string? ResultRunId => Outcome?.Record.Id ?? PreviewResult?.Record.Id ?? ExperimentResult?.Summary.Id;
+    public string? ResultRunId => Outcome?.Record.Id ?? PreviewResult?.Record.Id ?? ExperimentResult?.Summary.Id ?? WatchResult?.Record.Id;
     public string? ResultRouteKey => _resultScope;
     /// <summary>True only when the stored result was produced by the latest attempt. A result left over from an earlier attempt is never current.</summary>
-    public bool ResultIsCurrent => (Outcome is not null || PreviewResult is not null || ExperimentResult is not null) && ResultAttemptId == AttemptId;
+    public bool ResultIsCurrent => (Outcome is not null || PreviewResult is not null || ExperimentResult is not null || WatchResult is not null) && ResultAttemptId == AttemptId;
 
     /// <summary>
     /// What "wait for a verdict" means right now: always about the LATEST attempt. A result stored by an earlier attempt never satisfies it, and a
@@ -152,6 +158,7 @@ public sealed class PlaybackSession
                 AttemptState.PreflightRefused => new(VerdictWaitKind.RefusedPreflight, $"no runtime verdict: attempt {AttemptId} refused during preflight: {AttemptIssue}"),
                 AttemptState.VerdictProduced when ResultIsCurrent => new(VerdictWaitKind.Verdict, $"attempt {AttemptId} produced a runtime verdict (run {ResultRunId})"),
                 AttemptState.PreviewProduced when ResultIsCurrent => new(VerdictWaitKind.Preview, $"no runtime verdict: attempt {AttemptId} was a State Preview (run {ResultRunId}); a preview is never a verdict"),
+                AttemptState.ObservationProduced when ResultIsCurrent => new(VerdictWaitKind.Observation, $"no runtime verdict: attempt {AttemptId} was a watched match (run {ResultRunId}); a recording is never a verdict"),
                 AttemptState.Cancelled or AttemptState.Error => new(VerdictWaitKind.EndedWithoutVerdict, $"attempt {AttemptId} ended without a verdict ({Attempt})" + (AttemptIssue is null ? string.Empty : ": " + AttemptIssue)),
                 _ => new(VerdictWaitKind.Pending, $"attempt {AttemptId} is {Attempt}")
             };
@@ -159,7 +166,7 @@ public sealed class PlaybackSession
     }
 
     public bool IsBusy => State is PlaybackState.Preparing or PlaybackState.Running or PlaybackState.Judging;
-    public bool HasResult => (Outcome is not null || PreviewResult is not null || ExperimentResult is not null) && State == PlaybackState.Finished;
+    public bool HasResult => (Outcome is not null || PreviewResult is not null || ExperimentResult is not null || WatchResult is not null) && State == PlaybackState.Finished;
     /// <summary>A route that was not Verified, or an ability that was not performed. A preview has nothing to inspect: it is never a verdict.</summary>
     public bool CanInspect => HasResult && Outcome is { } o && (o.Ability is { } a ? a.Status != AbilityStatus.Performed : o.Report.Status != VerifyStatus.Verified);
     public bool CanReplay => !IsBusy && _lastJob is not null;
@@ -174,6 +181,8 @@ public sealed class PlaybackSession
                 case PlaybackState.Idle: return string.Empty;
                 case PlaybackState.Cancelled: return "Playback cancelled.";
                 case PlaybackState.Error: return "Could not play: " + Error;
+                case PlaybackState.Finished when WatchResult is { } w:
+                    return Behavior.BehaviorText.Headline(w.Run);
                 case PlaybackState.Finished when ExperimentResult is { } x:
                     return Sequences.ExperimentText.Headline(x.Summary, x.LastTrial?.Report);
                 case PlaybackState.Finished when PreviewResult is { } p:
@@ -213,6 +222,10 @@ public sealed class PlaybackSession
     public Task RunSequenceAsync(SequenceJob job, Func<PlaybackCancellation, Action<string>, Sequences.ExperimentOutcome> work) =>
         RunAsync(job, gate => work(gate, OnPhase));
 
+    /// <summary>Runs a watched match (Watch & Ask) through the same one-run-at-a-time session. Never throws; its result is a recording, never a verdict.</summary>
+    public Task WatchAsync(WatchJob job, Func<PlaybackCancellation, Action<string>, Behavior.WatchOutcome> work) =>
+        RunAsync(job, gate => work(gate, OnPhase));
+
     private async Task RunAsync(IPlaybackJob job, Func<PlaybackCancellation, object> work)
     {
         PlaybackCancellation gate;
@@ -229,6 +242,7 @@ public sealed class PlaybackSession
             Outcome = null;
             PreviewResult = null;
             ExperimentResult = null;
+            WatchResult = null;
             _trialLabel = string.Empty;
             ResultAttemptId = null;
             _resultScope = null;
@@ -260,10 +274,11 @@ public sealed class PlaybackSession
             PlaybackDiagnostic.Source completed;
             lock (_gate)
             {
-                var state = result is PreviewOutcome ? AttemptState.PreviewProduced : AttemptState.VerdictProduced;
+                var state = result is PreviewOutcome ? AttemptState.PreviewProduced : result is Behavior.WatchOutcome ? AttemptState.ObservationProduced : AttemptState.VerdictProduced;
                 Outcome = result as PlaybackOutcome;
                 PreviewResult = result as PreviewOutcome;
                 ExperimentResult = result as Sequences.ExperimentOutcome;
+                WatchResult = result as Behavior.WatchOutcome;
                 ResultAttemptId = myAttempt; _resultScope = job.ScopeKey; Attempt = state; State = PlaybackState.Finished; Phase = string.Empty;
                 // One immutable completed-attempt context, built in the same step that publishes the result: this attempt's identity, job, snapshot and outcome.
                 completed = new PlaybackDiagnostic.Source(myAttempt, state, null, job.ScopeKey, job.Setup, job as PlaybackRequest, job.Snapshot, Outcome, myAttempt)
@@ -322,6 +337,7 @@ public sealed class PlaybackSession
             if (AttemptId == 0) return null;
             // A Sequence Lab attempt has its own per-step details view; the route diagnostic does not describe it.
             if (AttemptRouteKey?.StartsWith(Sequences.Sequence.ScopePrefix, StringComparison.Ordinal) == true) return null;
+            if (AttemptRouteKey?.StartsWith(WatchJob.ScopePrefix, StringComparison.Ordinal) == true) return null;
             src = new PlaybackDiagnostic.Source(AttemptId, Attempt, AttemptIssue, AttemptRouteKey, _attemptSetup, _attemptJob as PlaybackRequest, _attemptJob?.Snapshot, Outcome, ResultAttemptId)
                 { PreviewRequest = _attemptJob as PreviewRequest, Preview = PreviewResult };
         }
@@ -434,6 +450,7 @@ public sealed class PlaybackSession
             PlaybackMode.Ability => "Playing the ability in IKEMEN — watch the engine window…",
             PlaybackMode.Preview => "Previewing the state in IKEMEN (forced, not proof) — watch the engine window…",
             PlaybackMode.Sequence => _trialLabel + "Playing the sequence in IKEMEN — watch the engine window…",
+            PlaybackMode.Watch => "Watching the match in IKEMEN (both sides on the AI) — watch the engine window…",
             _ => "Playing the combo in IKEMEN — watch the engine window…"
         });
     }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using IKEMENLab.Core.Settings;
+using IKEMENLab.Core.XRay.Behavior;
 using IKEMENLab.Core.XRay.Combo;
 using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
@@ -66,6 +67,7 @@ public sealed class LabContext
         Sequences = new SequenceStore(Path.Combine(DataDirectory, "xray", "sequences"));
         Experiments = new ExperimentStore(Path.Combine(DataDirectory, "xray-experiments"));
         AppPlaybackRoot = Path.Combine(DataDirectory, "xray-playback");
+        Behavior = new BehaviorStore(Path.Combine(DataDirectory, "xray-watch"));
         SettingsPath = Path.Combine(DataDirectory, "settings.json");
         var real = runner is null;
         // MCP's own Play Ability / Preview State records: the same record format and service, in their own store with their own keep-newest limit,
@@ -80,6 +82,8 @@ public sealed class LabContext
     public NameOverlayStore NameStore { get; }
     public SequenceStore Sequences { get; }
     public ExperimentStore Experiments { get; }
+    /// <summary>Watched runs (Watch &amp; Ask), shared with the app; MCP's runs carry origin "mcp" and never evict the user's.</summary>
+    public BehaviorStore Behavior { get; }
     public ComboPlaybackService Runs { get; }
     /// <summary>The user's own Play Combo / Play Ability history: read (for traces), never written.</summary>
     public string AppPlaybackRoot { get; }

@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json.Nodes;
+using IKEMENLab.Core.XRay.Behavior;
 using IKEMENLab.Core.XRay.Playback;
 using IKEMENLab.Core.XRay.Runtime;
 using IKEMENLab.Core.XRay.Verify;
@@ -26,7 +27,12 @@ public sealed class McpApp
           to another. A State Preview is never proof. Unknown stays unknown.
         - Experiments (×1/×10/×50) are stored with their exact scope (character files, engine, dummy, stage, sequence version); compare_experiments warns
           when two experiments did not run under the same setup.
-        - Nothing here edits character files or the app's settings.
+        - Behavior (Watch & Ask): list_behaviors / inspect_behavior read the AI as combat behavior (Knockdown Chase, Anti-Air, Punish …) at three
+          levels that must never be blurred: Possible (static AI logic suggests it — never runtime proof), Observed (watch_match recorded a complete
+          episode on the current files and engine), Confirmed Pattern (the explicit repeat rule in the answer). Changed files or engine make runtime
+          evidence stale. why_did_ai_do_this gives observed context and consistent static rules only: which AI controller fired is not recorded, so
+          never say the AI did something "because" a rule fired.
+        - Nothing here edits character files, the AI, or the app's settings.
         """;
 
     public McpApp(McpOptions options, TextWriter log, IEngineRunner? runner = null, RuntimeBroker? broker = null, string? sandboxBase = null)
@@ -36,14 +42,15 @@ public sealed class McpApp
         Jobs = new JobQueue(Context, () => "MCP · " + (Server?.ClientName ?? "agent"));
         var observe = new ObserveTools(Context);
         var experiment = new ExperimentTools(Context, Jobs);
-        Server = new McpServer(BuildTools(observe, experiment), Instructions, log, Version);
+        var behavior = new BehaviorTools(Context, Jobs);
+        Server = new McpServer(BuildTools(observe, experiment, behavior), Instructions, log, Version);
     }
 
     public LabContext Context { get; }
     public JobQueue Jobs { get; }
     public McpServer Server { get; }
 
-    public static string Version => typeof(McpApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.4.0";
+    public static string Version => typeof(McpApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.5.0";
 
     public Task<ShutdownResult> ShutdownAsync(TimeSpan? timeout = null) => Jobs.ShutdownAsync(timeout ?? TimeSpan.FromSeconds(30));
 
@@ -83,7 +90,7 @@ public sealed class McpApp
 
     private static JsonObject Spec() => Schema.Str("Alternative to steps: the Sequence Lab's compact form, e.g. \"1000 > chase:35 > wait:20 > 200\" (ids, walk:N, back:N, wait:N, chase:D, chase:D!, dash, jump).");
 
-    private static IReadOnlyList<McpTool> BuildTools(ObserveTools o, ExperimentTools x)
+    private static IReadOnlyList<McpTool> BuildTools(ObserveTools o, ExperimentTools x, BehaviorTools b)
     {
         static Func<ToolArgs, CancellationToken, Task<JsonObject>> Sync(Func<ToolArgs, JsonObject> f) => (a, _) => Task.FromResult(f(a));
 
@@ -151,6 +158,35 @@ public sealed class McpApp
                     ["samples"] = Schema.Bool("Also sampled frames (positions, states, distance).", false),
                     ["max_samples"] = Schema.Int("At most this many samples.", 1, 120, 30)
                 }, "run_id"), true, Sync(o.GetRuntimeTrace)),
+
+            // ---------------------------------------------------------- Observe: behavior (Watch & Ask)
+            new("list_behaviors", "List behaviors",
+                "The character's recognisable combat behaviors (Knockdown Chase, Anti-Air, Punish, Pressure, Retreat, …) with their evidence level: Possible (static AI logic suggests it), Observed (a complete episode was recorded in a watched match on the current files and engine) or Confirmed Pattern (repeated across runs and setups).",
+                Schema.Object(new JsonObject
+                {
+                    ["character"] = Character(),
+                    ["include_not_seen"] = Schema.Bool("Also behaviors with no evidence at all.", true)
+                }, "character"), true, Sync(b.ListBehaviors)),
+            new("inspect_behavior", "Inspect behavior",
+                "One behavior card: plain conditions, actions and outcomes, evidence level, recorded episodes (situation → action → outcome), opponents/setups, stale evidence, static AI rules consistent with it, the states and abilities involved, and its limitations.",
+                Schema.Object(new JsonObject { ["character"] = Character(), ["behavior"] = Schema.Str("The behavior's name or id (e.g. \"Knockdown Chase\").") },
+                    "character", "behavior"), true, Sync(b.InspectBehavior)),
+            new("why_did_ai_do_this", "Why did the AI do this?",
+                "For one moment of a watched run: the observed context, what the fighter did next, which behavior pattern it matches, and the static AI rules consistent with it. Never names the rule that fired — controller attribution is not available.",
+                Schema.Object(new JsonObject
+                {
+                    ["character"] = Character(), ["run_id"] = Schema.Str("A watched run (watch_match / inspect_behavior)."), ["frame"] = Schema.Int("The moment (a frame of that run).", 0, int.MaxValue)
+                }, "character", "run_id", "frame"), true, Sync(b.Why)),
+            new("watch_match", "Watch a match",
+                "Records a match with the character on the engine's AI against the playback dummy (both on AI), then recognises behavior episodes in it. Launches one IKEMEN window; writes only a recording (never the character). Long-running: returns a jobId.",
+                Schema.Object(new JsonObject
+                {
+                    ["character"] = Character(),
+                    ["seconds"] = Schema.Int("How long to watch.", BehaviorWatch.MinSeconds, BehaviorWatch.MaxSeconds, BehaviorWatch.DefaultSeconds),
+                    ["opponent_ai_level"] = Schema.Int("The dummy's AI level.", 1, 8, BehaviorWatch.DefaultOpponentAi),
+                    ["subject_ai_level"] = Schema.Int("The character's AI level.", 1, 8, BehaviorWatch.DefaultSubjectAi),
+                    ["setup"] = Setup(), ["wait_seconds"] = Wait()
+                }, "character"), false, b.WatchMatch),
 
             // ---------------------------------------------------------- Experiment
             new("play_ability", "Play ability",

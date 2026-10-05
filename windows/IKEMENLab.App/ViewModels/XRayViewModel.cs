@@ -14,11 +14,12 @@ using IKEMENLab.Core.XRay.Indexing;
 using IKEMENLab.Core.XRay.Model;
 using IKEMENLab.Core.XRay.Names;
 using IKEMENLab.Core.XRay.Sequences;
+using IKEMENLab.Core.XRay.Behavior;
 using IKEMENLab.Core.XRay.Source;
 
 namespace IKEMENLab.App.ViewModels;
 
-public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, Sequences }
+public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, Sequences, Watch }
 
 /// <summary>
 /// Character X-Ray workspace: one <see cref="SemanticIndex"/>, one selection, six lenses. Selecting anything in any lens
@@ -54,12 +55,13 @@ public sealed class XRayViewModel : ObservableObject
     public static string? IsolatedDataRoot { get; set; }
 
     public XRayViewModel(string root, CharacterEntry entry, string displayName, ISettingsStore? settings = null, ComboPlaybackService? playback = null,
-        NameOverlayStore? names = null, SequenceStore? sequences = null, ExperimentStore? experiments = null)
+        NameOverlayStore? names = null, SequenceStore? sequences = null, ExperimentStore? experiments = null, BehaviorStore? behavior = null)
     {
         var iso = IsolatedDataRoot;
         NameStore = names ?? (iso is null ? NameOverlayStore.CreateDefault() : new NameOverlayStore(Path.Combine(iso, "names")));
         SequenceStore = sequences ?? (iso is null ? SequenceStore.CreateDefault() : new SequenceStore(Path.Combine(iso, "sequences")));
         ExperimentStore = experiments ?? new ExperimentStore(iso is null ? null : Path.Combine(iso, "xray-experiments"));
+        BehaviorStore = behavior ?? new BehaviorStore(iso is null ? null : Path.Combine(iso, "xray-watch"));
         _root = root;
         _entry = entry;
         Settings = settings ?? (iso is null ? new JsonSettingsStore() : new CopyOnWriteSettingsStore(new JsonSettingsStore(), Path.Combine(iso, "settings.json")));
@@ -77,7 +79,8 @@ public sealed class XRayViewModel : ObservableObject
         Timeline = new AnimationTimelineLens(this);
         Combos = new ComboLens(this);
         SequenceLab = new SequenceLabLens(this);
-        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, SequenceLab];
+        WatchAsk = new WatchAskLens(this);
+        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, SequenceLab, WatchAsk];
 
         SelectCommand = new RelayCommand(p => { if (p is string id) Select(id); });
         BackCommand = new RelayCommand(Back, () => _history.Count > 1);
@@ -146,6 +149,10 @@ public sealed class XRayViewModel : ObservableObject
     public SequenceStore SequenceStore { get; }
     /// <summary>The isolated experiment store: Sequence Lab trials never go to the playback history.</summary>
     public ExperimentStore ExperimentStore { get; }
+    /// <summary>Watch &amp; Ask (Phase 5): read-only behavior recognition from watched matches. Built after the Combos lens (it reads its candidate graph).</summary>
+    public WatchAskLens WatchAsk { get; }
+    /// <summary>Watched runs (their own store; never the playback history or the experiment store).</summary>
+    public BehaviorStore BehaviorStore { get; }
     public IReadOnlyList<XRayLens> Lenses { get; }
 
     public ICommand SelectCommand { get; }
