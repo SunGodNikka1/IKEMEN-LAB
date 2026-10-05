@@ -14,6 +14,10 @@
 -- soon as the opponent has control again), or presses U and watches for P1 to be airborne (jump). waitCtrl = true makes the step start only
 -- once P1 can act. Each records step_ready / step_done (or step_timeout / chase_stopped) like any step; IKEMEN Lab judges the trace.
 --
+-- Teach AI fixture (a step with action = "handover", never part of a route, ability or Sequence Lab plan): io.setAI(1, aiLevel) gives P1's input slot
+-- back and puts P1 on the engine's AI — from then on the character's own AI (with any generated Director behavior) decides and the driver never injects
+-- for P1 again; with opponentAi > 0 the same is done for P2. It records "handover" (or "handover_failed", which ends the run).
+--
 -- State Preview (a step with force = true, never part of a route): instead of feeding input, the driver asks io.force(1, toState) to
 -- change P1's state with the engine's own changeState once P1 is free and close enough, records "force_applied" or "force_failed",
 -- and then only watches (the tail). A forced state is never evidence that a move can be performed; IKEMEN Lab never judges it.
@@ -39,9 +43,11 @@ function M.new(plan, io)
 	local held = {}
 	local inputPos = 0
 	local neutralRun = 0
+	local released = {}        -- players handed to the engine's AI (handover): never injected again
 
 
 	local function setKeys(frame, keys, tag)
+		if released[1] then return true end
 		local ok, res = pcall(io.inject, 1, keys)
 		if not ok or res ~= true then
 			io.emit("driver", frame, "event", "inject_unavailable", "step", stepIdx > 0 and stepIdx or nil,
@@ -82,7 +88,7 @@ function M.new(plan, io)
 	end
 
 	function d.tick(frame, obs)
-		if type(io.inject) == "function" then
+		if type(io.inject) == "function" and not released[2] then
 			local ok, result = pcall(io.inject, 2, {})
 			if not ok or result ~= true then
 				io.emit("driver", frame, "event", "inject_unavailable", "detail", "could not isolate P2 input")
@@ -239,6 +245,20 @@ function M.new(plan, io)
 				if not setKeys(frame, counter <= 3 and { "U" } or {}, counter <= 3 and "jump" or "jump_end") then return "noInject" end
 				if p1.stateType == "A" then note(frame, "step_done", "airborne"); beginStep(frame); return nil end
 				if counter > (step.frames or 45) then note(frame, "step_timeout", "never left the ground"); return "stepTimeout" end
+				return nil
+			elseif a == "handover" then
+				local setAI = io.setAI or function() return false end
+				local okA, res = pcall(setAI, 1, step.aiLevel or 8)
+				if not okA or res ~= true then note(frame, "handover_failed", "P1 could not be put on the engine's AI"); return "handoverFailed" end
+				released[1] = true
+				if (step.opponentAi or 0) > 0 then
+					local okB, resB = pcall(setAI, 2, step.opponentAi)
+					if not okB or resB ~= true then note(frame, "handover_failed", "P2 could not be put on the engine's AI"); return "handoverFailed" end
+					released[2] = true
+				end
+				note(frame, "handover", "P1 on AI level " .. tostring(step.aiLevel or 8) .. ((step.opponentAi or 0) > 0 and ("; P2 on AI level " .. tostring(step.opponentAi)) or "; P2 idle"))
+				note(frame, "step_done", "handover")
+				beginStep(frame)
 				return nil
 			end
 			note(frame, "driver_error", "unknown action " .. tostring(a))

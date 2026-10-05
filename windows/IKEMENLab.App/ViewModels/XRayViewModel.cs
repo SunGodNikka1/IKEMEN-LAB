@@ -19,7 +19,7 @@ using IKEMENLab.Core.XRay.Source;
 
 namespace IKEMENLab.App.ViewModels;
 
-public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, Sequences, Watch }
+public enum XRayLensKind { Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, Sequences, Watch, Director }
 
 /// <summary>
 /// Character X-Ray workspace: one <see cref="SemanticIndex"/>, one selection, six lenses. Selecting anything in any lens
@@ -55,9 +55,12 @@ public sealed class XRayViewModel : ObservableObject
     public static string? IsolatedDataRoot { get; set; }
 
     public XRayViewModel(string root, CharacterEntry entry, string displayName, ISettingsStore? settings = null, ComboPlaybackService? playback = null,
-        NameOverlayStore? names = null, SequenceStore? sequences = null, ExperimentStore? experiments = null, BehaviorStore? behavior = null)
+        NameOverlayStore? names = null, SequenceStore? sequences = null, ExperimentStore? experiments = null, BehaviorStore? behavior = null,
+        string? directorRoot = null, Core.Mutations.ISafeMutationService? mutations = null)
     {
         var iso = IsolatedDataRoot;
+        DirectorRoot = directorRoot ?? (iso is null ? Core.XRay.Director.DirectorService.DefaultDataRoot : Path.Combine(iso, "ai-director"));
+        _mutations = mutations;
         NameStore = names ?? (iso is null ? NameOverlayStore.CreateDefault() : new NameOverlayStore(Path.Combine(iso, "names")));
         SequenceStore = sequences ?? (iso is null ? SequenceStore.CreateDefault() : new SequenceStore(Path.Combine(iso, "sequences")));
         ExperimentStore = experiments ?? new ExperimentStore(iso is null ? null : Path.Combine(iso, "xray-experiments"));
@@ -80,7 +83,8 @@ public sealed class XRayViewModel : ObservableObject
         Combos = new ComboLens(this);
         SequenceLab = new SequenceLabLens(this);
         WatchAsk = new WatchAskLens(this);
-        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, SequenceLab, WatchAsk];
+        Director = new DirectorLens(this);
+        Lenses = [Atlas, Triggers, Graph, Variables, Helpers, Timeline, Combos, SequenceLab, WatchAsk, Director];
 
         SelectCommand = new RelayCommand(p => { if (p is string id) Select(id); });
         BackCommand = new RelayCommand(Back, () => _history.Count > 1);
@@ -153,6 +157,13 @@ public sealed class XRayViewModel : ObservableObject
     public WatchAskLens WatchAsk { get; }
     /// <summary>Watched runs (their own store; never the playback history or the experiment store).</summary>
     public BehaviorStore BehaviorStore { get; }
+    /// <summary>AI Director (Phase 6): Teach AI — taught behaviors, tests, the working copy, approval and deployment. Built after the Combos lens.</summary>
+    public DirectorLens Director { get; }
+    /// <summary>Where the AI Director keeps its data (isolated under a QA script).</summary>
+    public string DirectorRoot { get; }
+    private Core.Mutations.ISafeMutationService? _mutations;
+    /// <summary>The one gateway for writes to the IKEMEN install (deployment and rollback only).</summary>
+    public Core.Mutations.ISafeMutationService Mutations => _mutations ??= new Core.Mutations.SafeMutationService();
     public IReadOnlyList<XRayLens> Lenses { get; }
 
     public ICommand SelectCommand { get; }

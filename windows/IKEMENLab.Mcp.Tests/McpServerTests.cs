@@ -15,13 +15,14 @@ public class McpServerTests
     [
         "inspect_character", "list_abilities", "inspect_ability", "explain_state", "get_source", "list_experiments", "get_experiment_results", "get_runtime_trace",
         "list_behaviors", "inspect_behavior", "why_did_ai_do_this", "watch_match",
+        "propose_behavior", "inspect_behavior_draft", "test_behavior",
         "play_ability", "preview_state", "test_sequence", "create_experiment", "run_experiment", "compare_experiments", "get_job", "cancel_job"
     ];
 
-    /// <summary>The read-only Observe tools (watch_match observes too, but writes a recording).</summary>
+    /// <summary>The read-only Observe tools (watch_match observes too, but writes a recording; propose/test_behavior write drafts and reports, never character files).</summary>
     public static readonly string[] ReadOnlyObserve =
         ["inspect_character", "list_abilities", "inspect_ability", "explain_state", "get_source", "list_experiments", "get_experiment_results", "get_runtime_trace",
-         "list_behaviors", "inspect_behavior", "why_did_ai_do_this"];
+         "list_behaviors", "inspect_behavior", "why_did_ai_do_this", "inspect_behavior_draft"];
 
     [Fact]
     public async Task TheHandshakeNegotiatesTheProtocolAndListsExactlyTheObserveAndExperimentTools()
@@ -56,9 +57,11 @@ public class McpServerTests
             Assert.False(t["annotations"]!["destructiveHint"]!.GetValue<bool>());
         }
 
-        // No editing or deployment tool exists in this phase.
+        // No editing, approval or deployment tool exists: Teach AI's approval and deployment are the user's, in the app.
         Assert.DoesNotContain(list, t => t!["name"]!.GetValue<string>().Contains("edit", StringComparison.OrdinalIgnoreCase) ||
-                                         t!["name"]!.GetValue<string>().Contains("deploy", StringComparison.OrdinalIgnoreCase));
+                                         t!["name"]!.GetValue<string>().Contains("deploy", StringComparison.OrdinalIgnoreCase) ||
+                                         t!["name"]!.GetValue<string>().Contains("approve", StringComparison.OrdinalIgnoreCase) ||
+                                         t!["name"]!.GetValue<string>().Contains("rollback", StringComparison.OrdinalIgnoreCase));
         foreach (var observe in ReadOnlyObserve)
             Assert.True(list.Single(t => t!["name"]!.GetValue<string>() == observe)!["annotations"]!["readOnlyHint"]!.GetValue<bool>());
 

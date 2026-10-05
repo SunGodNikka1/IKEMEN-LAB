@@ -18,7 +18,16 @@ public sealed record PlayerSample(
     public double? FrontEdgeBodyDist { get; init; }
     /// <summary>How many Projectile-controller projectiles the player owns (NumProj; helper "projectiles" are not counted). Probe 0.4+.</summary>
     public int? Projectiles { get; init; }
+    /// <summary>The width of the player's localcoord (320, 640, 1280 …): its positions, velocities and edge distances are in these units. Probe 0.5+.</summary>
+    public double? LocalCoord { get; init; }
 }
+
+/// <summary>
+/// The AI Director's intention register for P1 at one sample (probe 0.5+, Director test runs only): what the generated behavior's code published with
+/// MapSet — behavior slot, the reason code of its last decision, the state it chose next, the distance (P1's units) and the enemy posture it read, the
+/// engine tick of that decision and the per-knockdown roll. Published intent, not proof of what executed: IKEMEN Lab checks it against the trace.
+/// </summary>
+public sealed record DirectorSample(double? Behavior, double? Why, double? Next, double? Distance, double? Tick, double? Down, double? Roll);
 
 /// <summary>
 /// One line of the JSONL runtime trace. <see cref="Frame"/> is the probe's own monotonically increasing counter (the identity all
@@ -32,7 +41,11 @@ public sealed record TraceMeta(
 
 public sealed record FrameEvent(
     long Frame, long? EngineTick, int? Round, PlayerSample P1, PlayerSample P2,
-    double? Distance, int? P1TargetCount, int? P1TargetId, int? ComboCount, string? DistanceSource = null) : TraceEvent(Frame, EngineTick);
+    double? Distance, int? P1TargetCount, int? P1TargetId, int? ComboCount, string? DistanceSource = null) : TraceEvent(Frame, EngineTick)
+{
+    /// <summary>The AI Director's intention register (Director test runs only), else null.</summary>
+    public DirectorSample? Director { get; init; }
+}
 
 public sealed record StateChangeEvent(long Frame, long? EngineTick, int Player, int? From, int? To) : TraceEvent(Frame, EngineTick);
 

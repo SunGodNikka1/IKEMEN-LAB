@@ -82,6 +82,8 @@ public sealed class LabContext
     public NameOverlayStore NameStore { get; }
     public SequenceStore Sequences { get; }
     public ExperimentStore Experiments { get; }
+    /// <summary>The AI Director's data (taught behaviors, tests, working copies) - shared with the app. MCP writes drafts and test reports here, never character files.</summary>
+    public string DirectorRoot => Path.Combine(DataDirectory, "ai-director");
     /// <summary>Watched runs (Watch &amp; Ask), shared with the app; MCP's runs carry origin "mcp" and never evict the user's.</summary>
     public BehaviorStore Behavior { get; }
     public ComboPlaybackService Runs { get; }

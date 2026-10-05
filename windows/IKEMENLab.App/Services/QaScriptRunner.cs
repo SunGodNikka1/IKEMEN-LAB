@@ -282,6 +282,44 @@ case "watch-card":
 case "xray-rename":
     XRayRename(rest);
     break;
+case "director-teach":
+    DirectorTeach(rest);
+    break;
+case "director-set":
+    DirectorSet(rest);
+    break;
+case "director-save":
+    XRayVm().Director.SaveCommand.Execute(null);
+    _log.Add($"  director-save: {XRayVm().Director.Status}");
+    break;
+case "director-test":
+    DirectorTest();
+    break;
+case "director-status":
+    DirectorStatus();
+    break;
+case "director-select-run":
+    {
+        var lens = XRayVm().Director;
+        lens.WhyRun = lens.Runs[int.Parse(rest.Trim(), CultureInfo.InvariantCulture)];
+        _log.Add($"  director-select-run: {lens.WhyRun?.Text}");
+        break;
+    }
+case "director-why":
+    DirectorWhyVerb(rest);
+    break;
+case "director-evidence":
+    XRayVm().Director.ShowEvidence = rest.Trim() != "off";
+    _log.Add($"  director-evidence: {XRayVm().Director.ShowEvidence}");
+    break;
+case "director-approve":
+    {
+        var lens = XRayVm().Director;
+        if (!lens.ApproveCommand.CanExecute(null)) throw new InvalidOperationException($"director-approve refused: {lens.CardStatus}");
+        lens.ApproveCommand.Execute(null);
+        _log.Add($"  director-approve: {lens.Status} | {lens.ApprovalText}");
+        break;
+    }
 case "seq-status":
     SeqStatus();
     break;
@@ -592,6 +630,9 @@ case "xray-combos-find":
     private void XRayShot(string path)
     {
         var win = XRayWin();
+        // Verbs run back to back at Normal priority, so the dispatcher's lower-priority work (CommandManager's CanExecute requery after a session
+        // ends) would otherwise not have run yet and buttons would render with stale enabled states. A person's pause between clicks lets it run.
+        win.Dispatcher.Invoke(() => { }, System.Windows.Threading.DispatcherPriority.ContextIdle);
         win.UpdateLayout();
         Render((FrameworkElement)win.Content, path);
     }
@@ -1127,6 +1168,109 @@ case "xray-combos-find":
         win.UpdateLayout();
         if (win.Content is Grid grid && Descendants(grid).OfType<FrameworkElement>().FirstOrDefault(e => System.Windows.Automation.AutomationProperties.GetName(e) == "Why cause") is { } cause)
             cause.BringIntoView();
+        win.UpdateLayout();
+    }
+
+    // ------------------------------------------------------------------ AI Director (Phase 6). There is deliberately no deploy verb: a script never writes to the install.
+
+    /// <summary>director-teach &lt;experiment id&gt; | latest — opens the Teach AI wizard pre-filled from a Sequence Lab experiment.</summary>
+    private void DirectorTeach(string rest)
+    {
+        var vm = XRayVm();
+        var hash = Core.XRay.Sequences.ExperimentScope.HashOf(vm.Index!);
+        var list = vm.ExperimentStore.List(hash);
+        var id = rest.Trim();
+        var e = id == "latest" ? list.FirstOrDefault(x => x.Successes > 0 && x.Steps.Contains("Chase", StringComparison.Ordinal)) : list.FirstOrDefault(x => x.Id == id);
+        if (e is null) throw new InvalidOperationException($"director-teach: no experiment '{id}' on these files");
+        vm.Director.TeachFromExperiment(e);
+        _log.Add($"  director-teach: {e.Id} → editing={vm.Director.Editing} {vm.Director.Status}");
+        _log.Add($"  director-teach: notes={vm.Director.DraftNotes.Replace("\n", " | ")}");
+    }
+
+    /// <summary>director-set key=value|… — the wizard's answers (when, limit, attack, timing, lead, giveup, often, fallback, placement, second, trials, follow).</summary>
+    private void DirectorSet(string rest)
+    {
+        var lens = XRayVm().Director;
+        foreach (var pair in rest.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eq = pair.IndexOf('=');
+            var (key, value) = (pair[..eq].Trim(), pair[(eq + 1)..].Trim());
+            switch (key)
+            {
+                case "when": lens.When = lens.Whens.First(w => w.Value.ToString().Equals(value, StringComparison.OrdinalIgnoreCase)); break;
+                case "limit": lens.ChaseLimitText = value; break;
+                case "attack": lens.AttackDistanceText = value; break;
+                case "timing": lens.Timing = lens.Timings.First(t => t.Value.ToString().Equals(value, StringComparison.OrdinalIgnoreCase)); break;
+                case "lead": lens.LeadText = value; break;
+                case "giveup": lens.GiveUpText = value; break;
+                case "often": lens.Frequency = lens.Frequencies.First(f => f.Value.ToString().Equals(value, StringComparison.OrdinalIgnoreCase)); break;
+                case "fallback": lens.Fallback = lens.Fallbacks.First(f => f.Value.ToString().Equals(value, StringComparison.OrdinalIgnoreCase)); break;
+                case "placement": lens.Placement = lens.Placements.First(p => p.Value.ToString().Equals(value, StringComparison.OrdinalIgnoreCase)); break;
+                case "second": lens.SecondOpponentText = value; break;
+                case "trials": lens.TrialsText = value; break;
+                case "follow": lens.FollowUp = lens.FollowUps.First(f => f.Choice.Name.Equals(value, StringComparison.OrdinalIgnoreCase) || f.Choice.AbilityId == value); break;
+                default: throw new InvalidOperationException($"director-set: unknown key '{key}'");
+            }
+        }
+
+        _log.Add($"  director-set: when={lens.When} limit={lens.ChaseLimitText} attack={lens.AttackDistanceText} timing={lens.Timing} lead={lens.LeadText} giveup={lens.GiveUpText} " +
+                 $"often={lens.Frequency} follow={lens.FollowUp} fallback={lens.Fallback} placement={lens.Placement} second={lens.SecondOpponentText} trials={lens.TrialsText}");
+    }
+
+    private void DirectorTest()
+    {
+        var lens = XRayVm().Director;
+        if (!lens.TestCommand.CanExecute(null)) throw new InvalidOperationException($"director-test refused: busy={lens.IsBusy} problems={lens.Problems}");
+        var before = XRayVm().PlaybackSession.AttemptId;
+        lens.TestCommand.Execute(null);
+        _log.Add($"  director-test: attemptId={XRayVm().PlaybackSession.AttemptId} (previous {before}) status={lens.Status}");
+    }
+
+    private void DirectorStatus()
+    {
+        var lens = XRayVm().Director;
+        _log.Add($"  director.card={lens.CardName} [{lens.CardStatus}]");
+        _log.Add($"  director.when={lens.CardWhen}");
+        _log.Add($"  director.do={lens.CardDo}");
+        _log.Add($"  director.then={lens.CardThen}");
+        _log.Add($"  director.giveup={lens.CardGiveUp}");
+        _log.Add($"  director.sentence={lens.CardSentence}");
+        _log.Add($"  director.proof={lens.ProofText}");
+        _log.Add($"  director.ownership={lens.OwnershipSummary}");
+        foreach (var r in lens.OwnershipRows.Take(8)) _log.Add($"  director.ownership.row={r.Plain}");
+        if (lens.HasProblems) _log.Add($"  director.problems={lens.Problems.Replace("\n", " | ")}");
+        _log.Add($"  director.report={lens.ReportHeadline}");
+        foreach (var r in lens.Runs) _log.Add($"  director.run={r.Text} | {r.Detail.Replace("\n", " | ")}");
+        foreach (var line in lens.ReportFindings.Split('\n', StringSplitOptions.RemoveEmptyEntries)) _log.Add($"  director.finding={line}");
+        _log.Add($"  director.workingcopy={lens.WorkingCopyText}");
+        _log.Add($"  director.approval={lens.ApprovalText}");
+        _log.Add($"  director.deployment={lens.DeploymentText}");
+        _log.Add($"  director.headline={lens.Headline}");
+    }
+
+    /// <summary>director-why &lt;frame | start | attack&gt; — Why at a frame of the selected test run (start / attack = that decision's frame + 3).</summary>
+    private void DirectorWhyVerb(string rest)
+    {
+        var lens = XRayVm().Director;
+        var arg = rest.Trim();
+        long frame;
+        if (arg is "start" or "attack")
+        {
+            var why = arg == "start" ? Core.XRay.Director.DirectorCompiler.WhyStart : Core.XRay.Director.DirectorCompiler.WhyAttack;
+            var d = lens.WhyRun?.Metrics.Decisions.FirstOrDefault(x => x.Why == why) ?? throw new InvalidOperationException($"director-why: no '{arg}' decision in the selected run");
+            frame = d.Frame + 3;
+        }
+        else frame = long.Parse(arg, CultureInfo.InvariantCulture);
+        lens.WhyAt(frame);
+        _log.Add($"  director.why.frame={frame} [{lens.WhyBadge}]");
+        _log.Add($"  director.why.statement={lens.WhyStatement}");
+        foreach (var l in lens.WhyChecks.Split('\n', StringSplitOptions.RemoveEmptyEntries)) _log.Add($"  director.why.check={l}");
+        _log.Add($"  director.why.action={lens.WhyAction.Replace("\n", " | ")}");
+        _log.Add($"  director.why.verification={lens.WhyVerification}");
+        var win = XRayWin();
+        win.UpdateLayout();
+        if (win.Content is Grid grid && Descendants(grid).OfType<FrameworkElement>().FirstOrDefault(e => System.Windows.Automation.AutomationProperties.GetName(e) == "Director why") is { } el)
+            el.BringIntoView();
         win.UpdateLayout();
     }
 

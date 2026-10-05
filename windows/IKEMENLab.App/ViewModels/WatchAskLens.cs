@@ -99,6 +99,8 @@ public sealed class WatchAskLens : XRayLens
         ToggleDetailsCommand = new RelayCommand(() => ShowDetails = !ShowDetails);
         ShowLinkCommand = new RelayCommand(p => { if (p is BehaviorLink { Id.Length: > 0 } l) Owner.Select(l.Id); });
         OpenFolderCommand = new RelayCommand(OpenFolder, () => _selectedRun is not null);
+        TeachAiCommand = new RelayCommand(() => { if (_selectedRun is { } r && _selectedEpisode is { } e) Owner.Director.TeachFromEpisode(r.Run, e.Episode); },
+            () => _selectedEpisode?.Episode.Template == BehaviorTemplates.KnockdownChase && _selectedRun is { Stale: false } && !_session.IsBusy);
     }
 
     public ObservableCollection<BehaviorCardRow> Cards { get; } = [];
@@ -113,6 +115,8 @@ public sealed class WatchAskLens : XRayLens
     public ICommand ToggleDetailsCommand { get; }
     public ICommand ShowLinkCommand { get; }
     public ICommand OpenFolderCommand { get; }
+    /// <summary>Teach AI (Phase 6): a Knockdown Chase pre-filled from the selected recognised chase.</summary>
+    public ICommand TeachAiCommand { get; }
 
     public string SecondsText { get => _secondsText; set => SetProperty(ref _secondsText, value); }
     public string OpponentAiText { get => _opponentAiText; set => SetProperty(ref _opponentAiText, value); }

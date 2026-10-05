@@ -5,7 +5,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <RootNamespace>IKEMENLab.Mcp</RootNamespace>
     <AssemblyName>ikemenlab-mcp</AssemblyName>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

@@ -21,7 +21,9 @@ public enum PlaybackMode
     /// <summary>A Sequence Lab sequence (one or more trials, in the isolated experiment store).</summary>
     Sequence,
     /// <summary>Watch & Ask: a match with both sides on the engine's AI, recorded for behavior recognition. Never a verdict.</summary>
-    Watch
+    Watch,
+    /// <summary>Teach AI: a taught behavior's test suite (controlled fixtures, a watched match, regressions) on an AI Director build.</summary>
+    Director
 }
 
 /// <summary>Anything the playback session can run. Every job has a scope: its result is only ever shown against that scope.</summary>
@@ -47,6 +49,8 @@ public sealed record PlaybackRequest(
     /// </summary>
     public PlaybackMode Mode { get; init; } = PlaybackMode.Combo;
     public string? AbilityId { get; init; }
+    /// <summary>Teach AI regression: play from an AI Director build (working copy) instead of the installed character.</summary>
+    public string? SubjectSource { get; init; }
 
     public string ScopeKey => Mode == PlaybackMode.Ability ? AbilityPlayback.ScopeKey(AbilityId ?? Route.Key) : Route.Key;
     public string Summary => RouteSummary;
@@ -76,6 +80,8 @@ public sealed record PlaybackRecord(
     public string Mode { get; init; } = "combo";
     /// <summary>The ability (Play Ability) or state (State Preview) the run was for; null for a combo.</summary>
     public string? TargetId { get; init; }
+    /// <summary>The character files the run used (<see cref="Sequences.ExperimentScope.HashOf"/>); null for records made before Phase 6.</summary>
+    public string? CharacterHash { get; init; }
     public string AbilityReportPath => System.IO.Path.Combine(Directory, "ability.json");
     public string PreviewReportPath => System.IO.Path.Combine(Directory, "preview.json");
 }
@@ -98,9 +104,27 @@ public sealed record SequenceJob(string SequenceKey, string Label, PlaybackSetup
     public string ScopeKey => Sequences.Sequence.ScopePrefix + SequenceKey;
 }
 
+/// <summary>One Teach AI fixture run: the plan (opening → handover → watch) against <see cref="Setup"/>, P1 copied from <see cref="SubjectSource"/> (a build).</summary>
+public sealed record DirectorRunRequest(string Root, string SubjectFolder, string SubjectDef, InputPlan Plan, PlaybackSetup Setup, string Summary, string SubjectSource);
+
+/// <summary>A Teach AI test as a session job: every run of one behavior's test suite, one engine at a time. Its result is a test report, not a route verdict.</summary>
+public sealed record DirectorTestJob(string BehaviorId, PlaybackSetup Setup, string Summary) : IPlaybackJob
+{
+    public const string ScopePrefix = "director:";
+    public StaticSnapshot? Snapshot { get; init; }
+    public PlaybackMode Mode => PlaybackMode.Director;
+    public string ScopeKey => ScopePrefix + BehaviorId;
+}
+
 /// <summary>A watched match (Watch & Ask): P1 = the character on AI level <see cref="SubjectAiLevel"/>, P2 = the dummy on <see cref="OpponentAiLevel"/>.</summary>
 public sealed record WatchRequest(string Root, string Character, string SubjectFolder, string SubjectDef, PlaybackSetup Setup, int Seconds, int SubjectAiLevel,
-    int OpponentAiLevel, string Summary);
+    int OpponentAiLevel, string Summary)
+{
+    /// <summary>Teach AI: watch an AI Director build (working copy) instead of the installed character.</summary>
+    public string? SubjectSource { get; init; }
+    /// <summary>Teach AI: record the Director's intention register.</summary>
+    public bool Director { get; init; }
+}
 
 /// <summary>A watched match as a session job. Its scope is the character; its result is a recording, never a verdict.</summary>
 public sealed record WatchJob(string Subject, PlaybackSetup Setup, int Seconds, string Summary) : IPlaybackJob
@@ -112,7 +136,11 @@ public sealed record WatchJob(string Subject, PlaybackSetup Setup, int Seconds, 
 }
 
 /// <summary>One run of a sequence plan (Sequence Lab). The plan is built once per experiment by <see cref="Sequences.SequencePlanner"/>.</summary>
-public sealed record SequenceRunRequest(string Root, string SubjectFolder, string SubjectDef, InputPlan Plan, IReadOnlyList<string> Labels, PlaybackSetup Setup, string Summary);
+public sealed record SequenceRunRequest(string Root, string SubjectFolder, string SubjectDef, InputPlan Plan, IReadOnlyList<string> Labels, PlaybackSetup Setup, string Summary)
+{
+    /// <summary>Teach AI regression: run from an AI Director build (working copy) instead of the installed character.</summary>
+    public string? SubjectSource { get; init; }
+}
 
 /// <summary>The saved result of one sequence trial: the sequence verdict, per-step results and the trace.</summary>
 public sealed record SequenceOutcome(PlaybackRecord Record, Sequences.SequenceReport Report, TraceLog Log)
@@ -213,7 +241,7 @@ public sealed class ComboPlaybackService
         var snapshot = request.Snapshot ?? StaticSnapshot.Capture(request.Graph, request.Route, request.AbilityId);
 
         var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, planOptions.MaxFrames, _sandboxBase,
-            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames, Deleter = SandboxDeleter };
+            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames, Deleter = SandboxDeleter, SubjectSourceFolder = request.SubjectSource };
         var run = new VerifyRunRequest(sandbox, TimeSpan.FromSeconds(180))
         {
             Progress = progress,
@@ -250,7 +278,8 @@ public sealed class ComboPlaybackService
                 abilityReport is null ? report0.FailedStep : abilityReport.Status == AbilityStatus.Performed ? null : 1,
                 setup.Dummy, setup.Stage, report0.EngineSha256, Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir)
             {
-                ApproachDistance = planOptions.ApproachDistance, Mode = ability ? "ability" : "combo", TargetId = request.AbilityId
+                ApproachDistance = planOptions.ApproachDistance, Mode = ability ? "ability" : "combo", TargetId = request.AbilityId,
+                CharacterHash = request.SubjectSource is null ? Sequences.ExperimentScope.HashOf(request.Graph.Index) : null
             };
             Commit(dir, tmp, record, gate, cancel);
         }
@@ -385,6 +414,71 @@ public sealed class ComboPlaybackService
     }
 
     /// <summary>
+    /// Teach AI: one controlled fixture run of an AI Director build — the driver plays the proven opening, hands P1 to the engine's AI and watches — in the
+    /// same disposable sandbox, probe and commit/cancel gate as every run, with the intention register recorded. <paramref name="evaluate"/> (record
+    /// folder, trace) writes its reading of the run before the record becomes visible. Nothing here judges the behavior.
+    /// </summary>
+    public (PlaybackRecord Record, TraceLog Log) PlayDirector(DirectorRunRequest request, Action<string>? progress, PlaybackCancellation gate, Action<string, TraceLog>? evaluate = null)
+    {
+        var cancel = gate.Token;
+        var setup = request.Setup;
+        if (!setup.Ready) throw new InvalidOperationException("Playback is not set up: " + string.Join(" ", setup.Issues));
+        var plan = request.Plan;
+        progress?.Invoke("planning");
+        cancel.ThrowIfCancellationRequested();
+
+        var started = DateTime.UtcNow;
+        var id = started.ToString("yyyyMMdd-HHmmss", System.Globalization.CultureInfo.InvariantCulture) + "-" + Guid.NewGuid().ToString("N")[..6];
+        var dir = Path.Combine(_storeRoot, id);
+        Directory.CreateDirectory(dir);
+        var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, plan.MaxFrames, _sandboxBase,
+            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls)
+        {
+            LingerFrames = LingerFrames, Deleter = SandboxDeleter, SubjectSourceFolder = request.SubjectSource, Director = true
+        };
+        var run = new VerifyRunRequest(sandbox, TimeSpan.FromSeconds(Math.Max(180, plan.MaxFrames / 60 + 120)))
+        {
+            Progress = progress,
+            Cancel = cancel,
+            CleanupFailed = (path, why) => CleanupFailed?.Invoke(path, why),
+            Collect = a =>
+            {
+                File.WriteAllText(Path.Combine(dir, "plan.json"), InputPlanner.ToJson(a.Plan), new UTF8Encoding(false));
+                if (a.RawTrace is not null) File.WriteAllText(Path.Combine(dir, "trace.jsonl"), a.RawTrace, new UTF8Encoding(false));
+            }
+        };
+
+        PlaybackRecord record;
+        TraceLog log;
+        var tmp = Path.Combine(dir, "meta.json.tmp");
+        try
+        {
+            var engineRun = VerifyRunner.Execute(plan, run, _runner);
+            cancel.ThrowIfCancellationRequested();
+            log = engineRun.Log;
+            File.WriteAllLines(Path.Combine(dir, "run-notes.txt"), engineRun.Notes, new UTF8Encoding(false));
+            evaluate?.Invoke(dir, log);
+            var frameCount = log.Frames.Count();
+            record = new PlaybackRecord(id, started, plan.Character, plan.RouteKey, request.Summary, frameCount > 0 ? "Recorded" : "NothingRecorded",
+                frameCount > 0 ? null : "no match samples were recorded", null, setup.Dummy, setup.Stage, log.Meta?.EngineSha256,
+                Math.Round((DateTime.UtcNow - started).TotalSeconds, 1), dir)
+            {
+                ApproachDistance = plan.ApproachDistance, Mode = "director", TargetId = plan.RouteKey
+            };
+            Commit(dir, tmp, record, gate, cancel);
+        }
+        catch
+        {
+            TryDelete(dir);
+            throw;
+        }
+
+        CommitSeam?.Invoke("after-commit");
+        Prune();
+        return (record, log);
+    }
+
+    /// <summary>
     /// Plays one trial of a sequence plan in the same disposable sandbox, driver, probe and commit/cancel gate as a route, and judges it with the
     /// <see cref="Sequences.SequenceVerifier"/>. The record goes to this service's store (the experiment store, for the Sequence Lab).
     /// </summary>
@@ -402,7 +496,7 @@ public sealed class ComboPlaybackService
         var dir = Path.Combine(_storeRoot, id);
         Directory.CreateDirectory(dir);
         var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, plan.MaxFrames, _sandboxBase,
-            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames, Deleter = SandboxDeleter };
+            AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls) { LingerFrames = LingerFrames, Deleter = SandboxDeleter, SubjectSourceFolder = request.SubjectSource };
         var run = new VerifyRunRequest(sandbox, TimeSpan.FromSeconds(Math.Max(180, plan.MaxFrames / 60 + 120)))
         {
             Progress = progress,
@@ -467,7 +561,8 @@ public sealed class ComboPlaybackService
         var sandbox = new SandboxRequest(request.Root, request.SubjectFolder, request.SubjectDef, setup.Dummy!, setup.DummyDef!, setup.Stage!, frames, _sandboxBase,
             AdapterPath: null, EngineExePath: setup.EnginePath, EngineRuntimeDlls: setup.EngineDlls)
         {
-            Deleter = SandboxDeleter, SubjectAiLevel = request.SubjectAiLevel, DummyAiLevel = request.OpponentAiLevel
+            Deleter = SandboxDeleter, SubjectAiLevel = request.SubjectAiLevel, DummyAiLevel = request.OpponentAiLevel,
+            SubjectSourceFolder = request.SubjectSource, Director = request.Director
         };
         var run = new VerifyRunRequest(sandbox, TimeSpan.FromSeconds(request.Seconds + 120)) { Progress = progress, Cancel = cancel, CleanupFailed = (path, why) => CleanupFailed?.Invoke(path, why) };
 
@@ -521,6 +616,7 @@ public sealed class ComboPlaybackService
             if (r.EngineSha256 is null) w.WriteNull("engineSha256"); else w.WriteString("engineSha256", r.EngineSha256);
             w.WriteNumber("seconds", r.Seconds);
             w.WriteNumber("approachDistance", r.ApproachDistance);
+            if (r.CharacterHash is not null) w.WriteString("characterHash", r.CharacterHash);
             if (r.Mode != "combo")
             {
                 w.WriteString("mode", r.Mode);

@@ -140,6 +140,45 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+        <Style x:Key="LensDirector" TargetType="Grid" BasedOn="{StaticResource LensPanel}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ActiveLens}" Value="Director">
+                    <Setter Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- AI Director badge (Tag = Draft / Testing / Ready / Live / Retired; Owned / Refused; Exact / NotSeen) -->
+        <Style x:Key="DirectorBadge" TargetType="Border">
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="Padding" Value="8,1"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSubtle}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Style.Triggers>
+                <Trigger Property="Tag" Value="Live">
+                    <Setter Property="Background" Value="{DynamicResource PositiveBackgroundBrush}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource PositiveBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Exact">
+                    <Setter Property="Background" Value="{DynamicResource PositiveBackgroundBrush}"/>
+                    <Setter Property="BorderBrush" Value="{DynamicResource PositiveBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Ready">
+                    <Setter Property="BorderBrush" Value="{DynamicResource PositiveBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Owned">
+                    <Setter Property="BorderBrush" Value="{DynamicResource PositiveBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Testing">
+                    <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                </Trigger>
+                <Trigger Property="Tag" Value="Refused">
+                    <Setter Property="BorderBrush" Value="{DynamicResource WarningBrush}"/>
+                    <Setter Property="Background" Value="{DynamicResource WarningBackgroundBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <!-- Behavior evidence badge (Tag = Confirmed / Observed / Possible / NotSeen): the three levels never look alike -->
         <Style x:Key="BehaviorBadge" TargetType="Border">
             <Setter Property="CornerRadius" Value="9"/>
@@ -221,6 +260,8 @@
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Sequences}"/>
                     <RadioButton GroupName="XRayLens" Content="Watch &amp; Ask" Style="{StaticResource SegmentedItem}" AutomationProperties.Name="Watch and Ask"
                                  IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Watch}"/>
+                    <RadioButton GroupName="XRayLens" Content="AI Director" Style="{StaticResource SegmentedItem}" AutomationProperties.Name="AI Director"
+                                 IsChecked="{Binding ActiveLens, Converter={StaticResource EnumEquals}, ConverterParameter=Director}"/>
                 </StackPanel>
             </Border>
         </DockPanel>
@@ -286,6 +327,8 @@
                                                 Visibility="{Binding Atlas.Lab.HasResult, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="View the ability run's trace"/>
                                         <Button Content="Copy Full Diagnostic" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.CopyDiagnosticCommand}"
                                                 AutomationProperties.Name="Copy the full diagnostic for the last ability attempt"/>
+                                        <Button Content="Teach AI&#x2026;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.TeachAiCommand}"
+                                                AutomationProperties.Name="Teach AI with this ability as the follow-up" ToolTip="AI Director: a Knockdown Chase that ends with this move (it needs runtime proof first)."/>
                                         <Button Content="Try Follow-Up &#x2192;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.TryFollowUpCommand}"
                                                 AutomationProperties.Name="Try a follow-up in the Sequence Lab" ToolTip="Opens the Sequence Lab with a new sequence that starts with this ability."/>
                                         <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Atlas.Lab.OpenSetupCommand}"
@@ -824,6 +867,8 @@
                                             Visibility="{Binding SequenceLab.IsBusy, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Cancel the sequence run"/>
                                     <Button Content="View Trace" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.ViewTraceCommand}" AutomationProperties.Name="View the last trial's trace"/>
                                     <Button Content="Open experiment folder" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.OpenFolderCommand}" AutomationProperties.Name="Open the experiment folder"/>
+                                    <Button Content="Teach AI&#x2026;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.TeachAiCommand}" AutomationProperties.Name="Teach AI from this experiment"
+                                            ToolTip="AI Director: a Knockdown Chase pre-filled from this proven sequence (opening, chase distance, timing, follow-up)."/>
                                     <Button Content="Details" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding SequenceLab.ToggleDetailsCommand}" AutomationProperties.Name="Show technical details"/>
                                     <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Atlas.Lab.OpenSetupCommand}" AutomationProperties.Name="Open playback setup from the Sequence Lab"/>
                                 </WrapPanel>
@@ -945,6 +990,8 @@
                                             Visibility="{Binding WatchAsk.IsBusy, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Cancel watching"/>
                                     <Button Content="Playback setup" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Atlas.Lab.OpenSetupCommand}" AutomationProperties.Name="Open playback setup from Watch and Ask"/>
                                     <Button Content="Details" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding WatchAsk.ToggleDetailsCommand}" AutomationProperties.Name="Show watch technical details"/>
+                                    <Button Content="Teach AI from this chase&#x2026;" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding WatchAsk.TeachAiCommand}" AutomationProperties.Name="Teach AI from this chase"
+                                            ToolTip="AI Director: a Knockdown Chase pre-filled from the selected recognised chase."/>
                                     <Button Content="Open run folder" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding WatchAsk.OpenFolderCommand}" AutomationProperties.Name="Open the watched run folder"/>
                                 </WrapPanel>
                                 <TextBlock Text="{Binding WatchAsk.Status}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"
@@ -1035,6 +1082,219 @@
                                 </Border>
                                 <TextBox Text="{Binding WatchAsk.DetailsText, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap" FontFamily="Consolas" FontSize="11" MaxHeight="320" Margin="0,8,0,0"
                                          VerticalScrollBarVisibility="Auto" Visibility="{Binding WatchAsk.ShowDetails, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Watch technical details"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+
+                    <!-- 10. AI Director (Phase 6): Teach AI v1 - Knockdown Chase only -->
+                    <Grid x:Name="LensDirectorPanel" Style="{StaticResource LensDirector}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Border BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BorderSubtle}">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel Margin="14,12,14,12">
+                                    <TextBlock Text="Taught behaviors" Style="{StaticResource SectionLabel}"/>
+                                    <ListBox ItemsSource="{Binding Director.Behaviors}" SelectedItem="{Binding Director.SelectedBehavior, Mode=TwoWay}" MaxHeight="260"
+                                             Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}" AutomationProperties.Name="Taught behaviors">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel Margin="8,4">
+                                                    <Border DockPanel.Dock="Right" Style="{StaticResource DirectorBadge}" Tag="{Binding StatusKind}" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Status}" FontSize="10" Foreground="{DynamicResource TextPrimary}"/>
+                                                    </Border>
+                                                    <StackPanel Margin="0,0,6,0">
+                                                        <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextPrimary}"/>
+                                                        <TextBlock Text="{Binding Subtitle}" FontSize="10" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextTertiary}"/>
+                                                    </StackPanel>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <TextBlock FontSize="11" TextWrapping="Wrap" Margin="0,10,0,0" Foreground="{DynamicResource TextSecondary}"
+                                               Text="Teach AI v1 teaches one behavior: Knockdown Chase. Start it from a successful Sequence Lab experiment (Teach AI&#x2026;), a recognised chase in Watch &amp; Ask, or a move in the Ability Lab. Draft and Testing never change the installed character; approval and deployment are separate steps."/>
+                                    <TextBlock Text="Ownership" Style="{StaticResource SectionLabel}" Margin="0,12,0,0"/>
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource DirectorBadge}" Tag="{Binding Director.OwnershipKind}" VerticalAlignment="Top">
+                                            <TextBlock Text="{Binding Director.OwnershipKind}" FontSize="10" Foreground="{DynamicResource TextPrimary}"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding Director.OwnershipSummary}" FontSize="11" TextWrapping="Wrap" Margin="0,0,6,0" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Ownership summary"/>
+                                    </DockPanel>
+                                    <TextBlock Text="Follow-up proof" Style="{StaticResource SectionLabel}" Margin="0,10,0,0"/>
+                                    <TextBlock Text="{Binding Director.ProofText}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Follow-up proof"/>
+                                </StackPanel>
+                            </ScrollViewer>
+                        </Border>
+                        <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel Margin="14,12,14,12">
+                                <TextBlock Text="{Binding Director.Status}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6" Foreground="{DynamicResource TextSecondary}"
+                                           Visibility="{Binding Director.HasStatus, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Director status"/>
+                                <Border Style="{StaticResource Card}" Padding="10,6" CornerRadius="8" Margin="0,0,0,8" Visibility="{Binding Director.HasHeadline, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding Director.Headline}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Director headline"/>
+                                </Border>
+
+                                <!-- the simple card -->
+                                <Border Style="{StaticResource Card}" Padding="14,10" CornerRadius="10" Visibility="{Binding Director.NotEditing, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Behavior card">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource DirectorBadge}" Tag="{Binding Director.CardStatusKind}" VerticalAlignment="Center"
+                                                    Visibility="{Binding Director.HasBehavior, Converter={StaticResource BoolToVis}}">
+                                                <TextBlock Text="{Binding Director.CardStatus}" FontSize="11" Foreground="{DynamicResource TextPrimary}"/>
+                                            </Border>
+                                            <TextBlock Text="{Binding Director.CardName}" FontSize="17" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                                        </DockPanel>
+                                        <Grid Margin="0,8,0,0" Visibility="{Binding Director.HasBehavior, Converter={StaticResource BoolToVis}}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="90"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition/>
+                                                <RowDefinition/>
+                                                <RowDefinition/>
+                                                <RowDefinition/>
+                                                <RowDefinition/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Text="WHEN" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Director.CardWhen}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Card when"/>
+                                            <TextBlock Grid.Row="1" Text="DO" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding Director.CardDo}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Card do"/>
+                                            <TextBlock Grid.Row="2" Text="THEN" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding Director.CardThen}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Card then"/>
+                                            <TextBlock Grid.Row="3" Text="GIVE UP IF" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding Director.CardGiveUp}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Card give up"/>
+                                            <TextBlock Grid.Row="4" Text="STATUS" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                            <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding Director.CardStatus}" FontSize="12" Margin="0,4,0,0" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Card status"/>
+                                        </Grid>
+                                        <TextBlock Text="{Binding Director.CardSentence}" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                        <TextBlock Text="{Binding Director.CardSource}" FontSize="10" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                        <WrapPanel Margin="0,10,0,0">
+                                            <Button Content="Test" Style="{StaticResource PrimaryButton}" Margin="0,0,8,6" Command="{Binding Director.TestCommand}" AutomationProperties.Name="Test the taught behavior"
+                                                    ToolTip="Generates it into the working copy and runs the controlled tests and regressions in sandboxes."/>
+                                            <Button Content="Edit" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Director.EditCommand}" AutomationProperties.Name="Edit the taught behavior"/>
+                                            <Button Content="Why?" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Director.WhyCommand}" AutomationProperties.Name="Why did the generated behavior do that"/>
+                                            <Button Content="View Evidence" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Director.ToggleEvidenceCommand}" AutomationProperties.Name="View the evidence"/>
+                                            <Button Content="Approve" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Director.ApproveCommand}" AutomationProperties.Name="Approve this exact build"/>
+                                            <Button Content="Deploy" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Director.DeployCommand}" AutomationProperties.Name="Deploy the approved build"/>
+                                            <Button Content="Roll back" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Director.RollbackCommand}" AutomationProperties.Name="Roll back the deployment"/>
+                                            <Button Content="Retire" Style="{StaticResource SecondaryButton}" Margin="0,0,8,6" Command="{Binding Director.RetireCommand}" AutomationProperties.Name="Retire the taught behavior"/>
+                                            <Button Content="Cancel" Style="{StaticResource SecondaryButton}" Margin="0,0,0,6" Command="{Binding Director.CancelCommand}"
+                                                    Visibility="{Binding Director.IsBusy, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Cancel the test"/>
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding Director.Problems}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource WarningBrush}"
+                                                   Visibility="{Binding Director.HasProblems, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Director problems"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- the Teach AI wizard -->
+                                <Border Style="{StaticResource Card}" Padding="14,10" CornerRadius="10" Visibility="{Binding Director.Editing, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Teach AI wizard">
+                                    <StackPanel>
+                                        <TextBlock Text="Teach AI &#x2014; Knockdown Chase" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="{Binding Director.DraftSource}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,6" Foreground="{DynamicResource TextTertiary}"/>
+                                        <TextBlock Text="{Binding Director.DraftNotes}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,8" Foreground="{DynamicResource TextSecondary}"/>
+                                        <TextBlock Text="When should this happen?" Style="{StaticResource SectionLabel}"/>
+                                        <ComboBox ItemsSource="{Binding Director.Whens}" SelectedItem="{Binding Director.When}" AutomationProperties.Name="When"/>
+                                        <TextBlock Text="How far should we chase? (only when the knockdown is within this many px)" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <TextBox Style="{StaticResource FieldBox}" Width="80" HorizontalAlignment="Left" Text="{Binding Director.ChaseLimitText}" AutomationProperties.Name="Chase limit"/>
+                                        <TextBlock Text="When should the attack happen? (attack distance, px)" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <WrapPanel>
+                                            <TextBox Style="{StaticResource FieldBox}" Width="80" Text="{Binding Director.AttackDistanceText}" Margin="0,0,10,0" AutomationProperties.Name="Attack distance"/>
+                                            <ComboBox ItemsSource="{Binding Director.Timings}" SelectedItem="{Binding Director.Timing}" MinWidth="320" AutomationProperties.Name="Attack timing"/>
+                                        </WrapPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0" Visibility="{Binding Director.ShowLead, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="Frames before they can act:" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" Foreground="{DynamicResource TextSecondary}"/>
+                                            <TextBox Style="{StaticResource FieldBox}" Width="60" Text="{Binding Director.LeadText}" AutomationProperties.Name="Lead frames"/>
+                                        </StackPanel>
+                                        <TextBlock Text="How long may the chase continue? (give up after frames)" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <TextBox Style="{StaticResource FieldBox}" Width="80" HorizontalAlignment="Left" Text="{Binding Director.GiveUpText}" AutomationProperties.Name="Give up frames"/>
+                                        <TextBlock Text="How often?" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <ComboBox ItemsSource="{Binding Director.Frequencies}" SelectedItem="{Binding Director.Frequency}" AutomationProperties.Name="How often"/>
+                                        <TextBlock Text="Which follow-up? (&#x2713; = proven at runtime on these files and this engine)" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <ComboBox ItemsSource="{Binding Director.FollowUps}" SelectedItem="{Binding Director.FollowUp}" AutomationProperties.Name="Follow-up"/>
+                                        <TextBlock Text="{Binding Director.MeterText}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                        <TextBlock Text="What if the opponent recovers or the follow-up is no longer valid?" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <ComboBox ItemsSource="{Binding Director.Fallbacks}" SelectedItem="{Binding Director.Fallback}" AutomationProperties.Name="Fallback"/>
+                                        <TextBlock Text="Who owns the decision? (the existing AI's rules)" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <ComboBox ItemsSource="{Binding Director.Placements}" SelectedItem="{Binding Director.Placement}" AutomationProperties.Name="Ownership placement"/>
+                                        <ItemsControl ItemsSource="{Binding Director.SuppressChoices}" Margin="0,4,0,0" Focusable="False" Visibility="{Binding Director.ShowSuppress, Converter={StaticResource BoolToVis}}">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate><CheckBox IsChecked="{Binding Checked}" Margin="0,1"><TextBlock Text="{Binding Text}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/></CheckBox></DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock Text="Test against (optional second opponent folder) and trials per setup" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                        <WrapPanel>
+                                            <TextBox Style="{StaticResource FieldBox}" Width="160" Text="{Binding Director.SecondOpponentText}" Margin="0,0,10,0" AutomationProperties.Name="Second opponent"/>
+                                            <TextBox Style="{StaticResource FieldBox}" Width="50" Text="{Binding Director.TrialsText}" AutomationProperties.Name="Trials per setup"/>
+                                        </WrapPanel>
+                                        <WrapPanel Margin="0,10,0,0">
+                                            <Button Content="Save draft" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" Command="{Binding Director.SaveCommand}" AutomationProperties.Name="Save the draft"/>
+                                            <Button Content="Cancel" Style="{StaticResource SecondaryButton}" Command="{Binding Director.CancelEditCommand}" AutomationProperties.Name="Cancel teaching"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Why: exact for the generated behavior (intention register, confirmed by the trace) -->
+                                <TextBlock Text="Why? (a moment of a test run)" Style="{StaticResource SectionLabel}" Margin="0,12,0,2"/>
+                                <ComboBox ItemsSource="{Binding Director.Runs}" SelectedItem="{Binding Director.WhyRun}" DisplayMemberPath="Text" AutomationProperties.Name="Test run"/>
+                                <ListBox ItemsSource="{Binding Director.Moments}" SelectedItem="{Binding Director.Moment, Mode=TwoWay}" MaxHeight="180" Margin="0,4,0,0"
+                                         Style="{StaticResource BrowserListBox}" ItemContainerStyle="{StaticResource BrowserRowItem}" AutomationProperties.Name="Test run moments">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <!-- The generated behavior's decisions stand out from the plain state changes around them. -->
+                                            <TextBlock x:Name="MomentText" Text="{Binding Text}" Margin="8,2" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/>
+                                            <DataTemplate.Triggers>
+                                                <DataTrigger Binding="{Binding IsDecision}" Value="True">
+                                                    <Setter TargetName="MomentText" Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                                                    <Setter TargetName="MomentText" Property="FontWeight" Value="SemiBold"/>
+                                                </DataTrigger>
+                                            </DataTemplate.Triggers>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <Border Style="{StaticResource Card}" Padding="12,10" CornerRadius="10" Margin="0,8,0,0" Visibility="{Binding Director.HasWhy, Converter={StaticResource BoolToVis}}">
+                                    <StackPanel>
+                                        <Border Style="{StaticResource DirectorBadge}" Tag="{Binding Director.WhyKind}" HorizontalAlignment="Left" Margin="0,0,0,6">
+                                            <TextBlock Text="{Binding Director.WhyBadge}" FontSize="10" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Why badge"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding Director.WhyStatement}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Director why"/>
+                                        <TextBlock Text="{Binding Director.WhyChecks}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource TextSecondary}" AutomationProperties.Name="Director why checks"/>
+                                        <TextBlock Text="{Binding Director.WhyAction}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                        <TextBlock Text="{Binding Director.WhyVerification}" FontSize="10" FontStyle="Italic" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource TextTertiary}"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- evidence -->
+                                <StackPanel Margin="0,12,0,0" Visibility="{Binding Director.ShowEvidence, Converter={StaticResource BoolToVis}}" AutomationProperties.Name="Director evidence">
+                                    <TextBlock Text="Test" Style="{StaticResource SectionLabel}"/>
+                                    <TextBlock Text="{Binding Director.ReportHeadline}" FontSize="12" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Director report"/>
+                                    <ItemsControl ItemsSource="{Binding Director.Runs}" Focusable="False" Margin="0,4,0,0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate><TextBlock Text="{Binding Text}" ToolTip="{Binding Detail}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextPrimary}"/></DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="{Binding Director.ReportFindings}" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBlock Text="Existing rules that compete" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                    <ItemsControl ItemsSource="{Binding Director.OwnershipRows}" Focusable="False">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate><TextBlock Text="{Binding Plain, StringFormat='&#x2022; {0}'}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/></DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock Text="Change to the character (working copy vs installed)" Style="{StaticResource SectionLabel}" Margin="0,8,0,0"/>
+                                    <TextBlock Text="{Binding Director.WorkingCopyText}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBox Text="{Binding Director.DiffText, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" FontSize="10" MaxHeight="300" Margin="0,4,0,0"
+                                             VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" AutomationProperties.Name="Director diff"/>
+                                    <TextBlock Text="{Binding Director.ApprovalText}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Director approval"/>
+                                    <TextBlock Text="{Binding Director.DeploymentText}" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0" Foreground="{DynamicResource TextPrimary}" AutomationProperties.Name="Director deployment"/>
+                                    <Button Content="Open working copy" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Left" Margin="0,6,0,0" Command="{Binding Director.OpenWorkingCopyCommand}"/>
+                                    <Expander Header="Advanced: generated rules and CNS" Margin="0,8,0,0" Foreground="{DynamicResource TextSecondary}" AutomationProperties.Name="Advanced generated code">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Director.GeneratedRules}" FontSize="11" TextWrapping="Wrap" Foreground="{DynamicResource TextSecondary}"/>
+                                            <TextBox Text="{Binding Director.GeneratedCode, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" FontSize="10" MaxHeight="400" Margin="0,6,0,0"
+                                                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                                        </StackPanel>
+                                    </Expander>
+                                </StackPanel>
                             </StackPanel>
                         </ScrollViewer>
                     </Grid>

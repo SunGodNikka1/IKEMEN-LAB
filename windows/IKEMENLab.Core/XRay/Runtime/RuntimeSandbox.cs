@@ -42,6 +42,13 @@ public sealed record SandboxRequest(
     /// <summary>Observe mode only (no plan): the AI levels the subject (P1) and the dummy (P2) fight with (1–8).</summary>
     public int SubjectAiLevel { get; init; } = 1;
     public int DummyAiLevel { get; init; } = 1;
+    /// <summary>
+    /// Teach AI: copy the subject from this folder (an AI Director working copy or test build) instead of the install's <c>chars\SubjectFolder</c>. It lands
+    /// in the sandbox under the same folder name, so the match is the same apart from the files. Null = the installed character.
+    /// </summary>
+    public string? SubjectSourceFolder { get; init; }
+    /// <summary>Teach AI: record the AI Director's intention register (P1's xrd_* maps) in every frame.</summary>
+    public bool Director { get; init; }
 }
 
 public static class RuntimeProbe
@@ -144,7 +151,13 @@ public sealed class RuntimeSandbox : IDisposable
             foreach (var dir in CopiedDirectories)
                 CopyDirectory(Path.Combine(source, dir), Path.Combine(root, dir), request.Cancel);
 
-            CopyDirectory(Path.Combine(source, "chars", request.SubjectFolder), Path.Combine(root, "chars", request.SubjectFolder), request.Cancel);
+            if (request.SubjectSourceFolder is { } subjectSource)
+            {
+                if (!Directory.Exists(subjectSource)) throw new DirectoryNotFoundException(subjectSource);
+                CopyDirectory(subjectSource, Path.Combine(root, "chars", request.SubjectFolder), request.Cancel);
+                notes.Add($"Subject copied from {Path.GetFullPath(subjectSource)} (an AI Director build), not from the install.");
+            }
+            else CopyDirectory(Path.Combine(source, "chars", request.SubjectFolder), Path.Combine(root, "chars", request.SubjectFolder), request.Cancel);
             if (!request.DummyFolder.Equals(request.SubjectFolder, StringComparison.OrdinalIgnoreCase))
                 CopyDirectory(Path.Combine(source, "chars", request.DummyFolder), Path.Combine(root, "chars", request.DummyFolder), request.Cancel);
             request.Cancel.ThrowIfCancellationRequested();
@@ -279,7 +292,7 @@ public sealed class RuntimeSandbox : IDisposable
             planConfig = ", plan = \"external/mods/xray_plan.lua\", driver = \"external/mods/xray_driver.lua\", adapter = \"external/mods/xray_inject.lua\"";
         }
 
-        var linger = request.LingerFrames is { } lf && lf > 0 ? $", lingerFrames = {lf}" : string.Empty;
+        var linger = (request.LingerFrames is { } lf && lf > 0 ? $", lingerFrames = {lf}" : string.Empty) + (request.Director ? ", director = true" : string.Empty);
         static string LuaPath(string p) => p.Replace('\\', '/').Replace("\"", "\\\"");
         var actualEngine = Path.Combine(root, Services.IkemenInstallationValidator.ExeFileName);
         var engineSource = Path.GetFullPath(request.EngineExePath ?? Path.Combine(request.SourceRoot, Services.IkemenInstallationValidator.ExeFileName));

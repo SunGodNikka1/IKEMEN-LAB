@@ -35,6 +35,7 @@ public sealed class AbilityPlaybackPanel : ObservableObject
         InspectFailureCommand = new RelayCommand(InspectFailure, () => ShownScope is { } s && _session.CanInspectFor(s));
         ViewTraceCommand = new RelayCommand(ViewTrace, () => ShownScope is { } s && _session.HasResultFor(s));
         CopyDiagnosticCommand = new RelayCommand(CopyDiagnostic, () => AttemptScope is { } s && _session.DiagnosticFor(s) is not null);
+        TeachAiCommand = new RelayCommand(() => { if (_abilityId is { } id) _owner.Director.TeachFromAbility(id); }, () => _abilityId is not null && !session.IsBusy);
         TryFollowUpCommand = new RelayCommand(() =>
         {
             if (_abilityId is null) return;
@@ -58,6 +59,8 @@ public sealed class AbilityPlaybackPanel : ObservableObject
     public ICommand OpenSetupCommand { get; }
     /// <summary>Opens the Sequence Lab with a new sequence that starts with this ability.</summary>
     public ICommand TryFollowUpCommand { get; }
+    /// <summary>Teach AI (Phase 6): a Knockdown Chase with this ability as the follow-up (it still needs runtime proof).</summary>
+    public ICommand TeachAiCommand { get; }
 
     // ------------------------------------------------------------------ selection
 

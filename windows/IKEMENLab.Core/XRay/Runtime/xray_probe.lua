@@ -15,7 +15,7 @@
 if rawget(_G, "__ikemenlab_xray") then return end
 _G.__ikemenlab_xray = true
 
-local PROBE_VERSION = "0.4-phase5-behavior"
+local PROBE_VERSION = "0.5-phase6-director"
 local cfg = { trace = "xray_trace.jsonl", maxFrames = 900, hooks = { "loop" }, character = "" }
 do
 	local ok, c = pcall(dofile, "external/mods/xray_config.lua")
@@ -102,6 +102,19 @@ local function loadDriver(emitFn, OFn)
 			pcall(sel, 1)
 			return ok and entered == true
 		end,
+		-- Teach AI fixture only: give the player's input slot back and hand the player to the engine's AI at `level` (setAILevel, redirected with
+		-- player(n)). From then on the character's own AI — including any generated Director behavior — decides; nothing is injected for it.
+		setAI = function(playerNo, level)
+			local sel, set = rawget(_G, "player"), rawget(_G, "setAILevel")
+			if type(sel) ~= "function" or type(set) ~= "function" then return false end
+			local release = rawget(_G, "__ikemenlab_xray_release")
+			if type(release) == "function" then pcall(release, playerNo) end
+			local okSel, selected = pcall(sel, playerNo)
+			if not okSel or not selected then return false end
+			local ok = pcall(set, level)
+			pcall(sel, 1)
+			return ok
+		end,
 	})
 end
 
@@ -167,15 +180,24 @@ local FIELDS = {
 	{ "backEdgeBodyDist", num, { function() return call("backEdgeBodyDist") end, function() return call("backedgebodydist") end } },
 	{ "frontEdgeBodyDist", num, { function() return call("frontEdgeBodyDist") end, function() return call("frontedgebodydist") end } },
 	{ "numProj", num, { function() return call("numProj") end, function() return call("numproj") end } },
+	-- Phase 6: the width of the player's own localcoord (320, 640, 1280 …). Every position, velocity and edge distance above is in these units.
+	{ "localCoord", num, { function() return call("localCoordX") end } },
 }
 
 local MATCH_FIELDS = {
 	{ "round", num, { function() return call("roundNo") end, function() return call("roundno") end } },
 	{ "engineTick", num, { function() return call("gameTime") end, function() return call("tickcount") end, function() return call("gametick") end, function() return call("gametime") end } },
-	{ "distance", num, { function() return call("p2distx") end, function() return call("p2dist", "x") end } },
+	-- The engine's own P2Dist X read from P1: facing-relative, in P1's localcoord units, and correct across characters of different localcoords
+	-- (IKEMEN converts through world units). "p2distx" was the old guess at the binding's name; IKEMEN registers it as "p2DistX".
+	{ "distance", num, { function() return call("p2DistX") end, function() return call("p2distx") end, function() return call("p2dist", "x") end } },
+	-- The camera's x in world units: Lua's posX is pos − camera (the camera is NOT scaled by the player's localcoord).
+	{ "cameraX", num, { function() return call("cameraPosX") end } },
 	{ "p1TargetCount", num, { function() return call("numtarget") end } },
 	{ "p1TargetId", num, { function() return call("targetid") end } },
 }
+
+-- The AI Director's intention register (generated code writes these; see DirectorCompiler.Maps). "xrd_beh" is recorded as "beh", and so on.
+local DIRECTOR_MAPS = { "xrd_beh", "xrd_why", "xrd_next", "xrd_dist", "xrd_tick", "xrd_down", "xrd_roll" }
 
 local capabilities = {}
 local chosen = {}
@@ -337,21 +359,43 @@ local function sample()
 	frame[#frame + 1] = { "round", extra.round == nil and NULL or extra.round }
 	frame[#frame + 1] = { "p1", p1 }
 	frame[#frame + 1] = { "p2", p2 }
-	-- Common-axis delta, derived from raw positions. It is not facing-relative P2DistX,
-	-- nor P2BodyDistX. The driver uses only its magnitude for the approach threshold.
-	local distanceSource = extra.distance ~= nil and "engine-trigger" or nil
-	if extra.distance == nil then
-		local ax, bx = value(p1, "x"), value(p2, "x")
-		if type(ax) == "number" and type(bx) == "number" then
-			extra.distance = bx - ax
-			distanceSource = "derived:p2.x-p1.x"
-		end
+	-- ONE distance interpretation (0.5): the horizontal centre-to-centre distance from P1 to P2 along the world axis (positive when P2 is to the right),
+	-- in the engine's world units — the 320-wide scale every distance in X-Ray is written in (approach, chase, behavior ranges, Teach AI), whatever
+	-- either character's localcoord. Sources, best first:
+	--   engine:p2DistX     the engine's P2Dist X (P1's units, facing-relative) × P1 facing × 320 / P1 localcoord
+	--   derived:world      both positions back in world units: (posX + camera) × 320 / localcoord, per player
+	--   derived:p2.x-p1.x  raw positions (the pre-0.5 reading; wrong when the localcoords differ) — only when nothing else is readable
+	-- The driver uses only its magnitude (approach and chase thresholds).
+	local ax, bx = value(p1, "x"), value(p2, "x")
+	local lc1, lc2, f1 = value(p1, "localCoord"), value(p2, "localCoord"), value(p1, "facing")
+	local distance, distanceSource = nil, nil
+	if type(extra.distance) == "number" and type(lc1) == "number" and lc1 > 0 and type(f1) == "number" and f1 ~= 0 then
+		distance, distanceSource = extra.distance * f1 * 320 / lc1, "engine:p2DistX"
+	elseif type(ax) == "number" and type(bx) == "number" and type(extra.cameraX) == "number" and type(lc1) == "number" and lc1 > 0
+		and type(lc2) == "number" and lc2 > 0 then
+		distance, distanceSource = (bx + extra.cameraX) * 320 / lc2 - (ax + extra.cameraX) * 320 / lc1, "derived:world"
+	elseif type(ax) == "number" and type(bx) == "number" then
+		distance, distanceSource = bx - ax, "derived:p2.x-p1.x"
 	end
+	extra.distance = distance
 	frame[#frame + 1] = { "distance", extra.distance == nil and NULL or extra.distance }
 	frame[#frame + 1] = { "distanceSource", distanceSource or NULL }
 	frame[#frame + 1] = { "p1TargetCount", extra.p1TargetCount == nil and NULL or extra.p1TargetCount }
 	frame[#frame + 1] = { "p1TargetId", extra.p1TargetId == nil and NULL or extra.p1TargetId }
 	frame[#frame + 1] = { "combo", extra.combo == nil and NULL or extra.combo }
+	-- Phase 6 (AI Director): the generated behavior's intention register — the maps its generated code writes with MapSet — read for P1 every frame,
+	-- only when the run tests a Director build. These are what the generated code PUBLISHED; IKEMEN Lab checks them against what executed.
+	if cfg.director then
+		local reg = withPlayer(1, function()
+			local o = { __object = true }
+			for _, name in ipairs(DIRECTOR_MAPS) do
+				local v = num(call("map", name))
+				o[#o + 1] = { name:sub(5), v == nil and NULL or v }
+			end
+			return o
+		end)
+		frame[#frame + 1] = { "dir", reg or NULL }
+	end
 
 	writeMeta()
 	emit(frame)

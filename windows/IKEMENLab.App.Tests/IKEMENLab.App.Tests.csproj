@@ -21,6 +21,8 @@
     <Compile Include="..\IKEMENLab.Tests\XRayFixtures.cs" Link="Shared\XRayFixtures.cs" />
     <Compile Include="..\IKEMENLab.Tests\SffTestBuilder.cs" Link="Shared\SffTestBuilder.cs" />
     <Compile Include="..\IKEMENLab.Tests\BehaviorTraces.cs" Link="Shared\BehaviorTraces.cs" />
+    <Compile Include="..\IKEMENLab.Tests\DirectorFixtures.cs" Link="Shared\DirectorFixtures.cs" />
     <None Include="..\IKEMENLab.Tests\Fixtures\xray_driver_mock_seq_*.jsonl" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\IKEMENLab.Tests\Fixtures\xray_driver_mock_ability.jsonl" Link="Fixtures\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

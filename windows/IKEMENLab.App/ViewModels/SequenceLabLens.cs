@@ -151,6 +151,7 @@ public sealed class SequenceLabLens : XRayLens
         CancelCommand = new RelayCommand(() => _session.Cancel(), () => _session.IsBusy);
         ViewTraceCommand = new RelayCommand(ViewTrace, () => ShownResult?.LastTrial is not null);
         OpenFolderCommand = new RelayCommand(OpenFolder, () => ShownResult is not null);
+        TeachAiCommand = new RelayCommand(() => { if (TeachableExperiment is { } e) Owner.Director.TeachFromExperiment(e); }, () => TeachableExperiment is not null && !_session.IsBusy);
         ToggleDetailsCommand = new RelayCommand(() => ShowDetails = !ShowDetails);
         CompareCommand = new RelayCommand(Compare, () => _compareA is not null && _compareB is not null);
     }
@@ -179,6 +180,11 @@ public sealed class SequenceLabLens : XRayLens
     public ICommand CancelCommand { get; }
     public ICommand ViewTraceCommand { get; }
     public ICommand OpenFolderCommand { get; }
+    /// <summary>Teach AI (Phase 6): a Knockdown Chase pre-filled from the shown experiment, when it succeeded and has a chase followed by an attack.</summary>
+    public ICommand TeachAiCommand { get; }
+
+    /// <summary>The shown experiment when it can seed a Knockdown Chase: at least one successful trial, and a chase step in the sequence.</summary>
+    public ExperimentSummary? TeachableExperiment => ShownResult?.Summary is { Successes: > 0 } s && s.Steps.Contains("Chase", StringComparison.Ordinal) ? s : null;
     public ICommand ToggleDetailsCommand { get; }
     public ICommand CompareCommand { get; }
 

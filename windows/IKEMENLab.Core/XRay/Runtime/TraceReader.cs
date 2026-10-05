@@ -95,7 +95,8 @@ public static class TraceReader
                 events.Add(type switch
                 {
                     "frame" => new FrameEvent(frame.Value, engineTick, Int(root, "round"), Player(root, "p1"), Player(root, "p2"),
-                        Dbl(root, "distance"), Int(root, "p1TargetCount"), Int(root, "p1TargetId"), Int(root, "combo"), Str(root, "distanceSource")),
+                        Dbl(root, "distance"), Int(root, "p1TargetCount"), Int(root, "p1TargetId"), Int(root, "combo"), Str(root, "distanceSource"))
+                        { Director = Director(root) },
                     "state_change" => new StateChangeEvent(frame.Value, engineTick, Int(root, "player") ?? 0, Int(root, "from"), Int(root, "to")),
                     "life_change" => new LifeChangeEvent(frame.Value, engineTick, Int(root, "player") ?? 0, Dbl(root, "from"), Dbl(root, "to")),
                     "hit" => new HitEvent(frame.Value, engineTick, Int(root, "attacker"), Int(root, "defender"), Dbl(root, "lifeBefore"), Dbl(root, "lifeAfter")),
@@ -127,6 +128,11 @@ public static class TraceReader
             Str(root, "platform"), caps, hooks, Str(root, "planFingerprint"), Str(root, "engineSha256"), Str(root, "engineExecutable"), Str(root, "engineSource"));
     }
 
+    private static DirectorSample? Director(JsonElement root) =>
+        root.TryGetProperty("dir", out var d) && d.ValueKind == JsonValueKind.Object
+            ? new DirectorSample(Dbl(d, "beh"), Dbl(d, "why"), Dbl(d, "next"), Dbl(d, "dist"), Dbl(d, "tick"), Dbl(d, "down"), Dbl(d, "roll"))
+            : null;
+
     private static PlayerSample Player(JsonElement root, string name)
     {
         if (!root.TryGetProperty(name, out var p) || p.ValueKind != JsonValueKind.Object)
@@ -137,7 +143,7 @@ public static class TraceReader
             Int(p, "moveHit"), Int(p, "moveContact"), Int(p, "hitPause"))
         {
             AiLevel = Dbl(p, "aiLevel"), HitFall = Bool(p, "hitFall"), BackEdgeBodyDist = Dbl(p, "backEdgeBodyDist"),
-            FrontEdgeBodyDist = Dbl(p, "frontEdgeBodyDist"), Projectiles = Int(p, "numProj")
+            FrontEdgeBodyDist = Dbl(p, "frontEdgeBodyDist"), Projectiles = Int(p, "numProj"), LocalCoord = Dbl(p, "localCoord")
         };
     }
 

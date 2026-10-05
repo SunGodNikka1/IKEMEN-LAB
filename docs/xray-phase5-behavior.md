@@ -241,7 +241,8 @@ names and MCP runs byte-identical. The three app QA runs left the real stores by
 - **Coordinates** assume symmetric bodies when re-expressing a mixed-scale opponent (error ≤ half the front/back width difference) and need probe 0.4
   edge distances; DLL changes next to the engine are not part of the engine identity (exe sha256 only).
 - **Driver approach distance (Phase 2–4, not changed here).** The driver's approach threshold uses the probe's raw `p2.x − p1.x`, so against an
-  opponent with another localcoord (e.g. kfm720) Play Ability / Sequence Lab approach distances are in mixed units. Recorded, not reopened.
+  opponent with another localcoord (e.g. kfm720) Play Ability / Sequence Lab approach distances are in mixed units. Recorded, not reopened. **Fixed in Phase 6**
+  (probe 0.5 reads the engine's `p2DistX` in world units — see `xray-phase6-teach-ai.md`).
 - QA isolation keeps names in `qa-isolated\names`, while MCP with `--data-dir qa-isolated` reads `xray\names` under it (an existing Phase 3/4 layout
   difference); in normal use both share `%LOCALAPPDATA%\IKEMEN Lab\xray\names`.
 

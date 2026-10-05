@@ -21,10 +21,18 @@ public sealed record InputFrame(IReadOnlyList<string> Keys);
 /// <item><c>jump</c>: press U and expect P1 to be airborne within <see cref="Frames"/> ticks.</item>
 /// </list>
 /// With <see cref="WaitForControl"/> the step starts only once P1 can act. Route and ability plans never contain one.
+/// <para>
+/// <c>handover</c> (Teach AI fixtures only, never a Sequence Lab step): give P1's input slot back and put P1 on the engine's AI at <see cref="AiLevel"/>;
+/// with <see cref="OpponentAiLevel"/> &gt; 0 also P2. From then on the character's own AI decides; nothing is injected for a handed-over player.
+/// </para>
 /// </summary>
 public sealed record StepAction(string Kind, int? Frames = null, int? Distance = null, bool StopIfOpponentRecovers = false, IReadOnlyList<string>? Keys = null, bool WaitForControl = true)
 {
-    public const string Hold = "hold", Release = "release", Chase = "chase", Jump = "jump";
+    public const string Hold = "hold", Release = "release", Chase = "chase", Jump = "jump", Handover = "handover";
+    /// <summary>Handover only: the AI level P1 is given (1–8).</summary>
+    public int? AiLevel { get; init; }
+    /// <summary>Handover only: the AI level P2 is given; null or 0 leaves P2 idle.</summary>
+    public int? OpponentAiLevel { get; init; }
 }
 
 /// <summary>
@@ -257,6 +265,9 @@ public static class InputPlanner
                     w.WriteStartArray();
                     foreach (var k in a.Keys ?? []) w.WriteStringValue(k);
                     w.WriteEndArray();
+                    // Only a handover carries these, so every other plan's JSON (and fingerprint) is unchanged.
+                    if (a.AiLevel is { } ai) w.WriteNumber("aiLevel", ai);
+                    if (a.OpponentAiLevel is { } oai) w.WriteNumber("opponentAiLevel", oai);
                     w.WriteEndObject();
                 }
 
@@ -301,7 +312,8 @@ public static class InputPlanner
                 StepAction? action = null;
                 if (s.TryGetProperty("action", out var a) && a.ValueKind == JsonValueKind.Object)
                     action = new StepAction(a.GetProperty("kind").GetString()!, OptInt(a, "frames"), OptInt(a, "distance"), a.GetProperty("stopIfOpponentRecovers").GetBoolean(),
-                        a.GetProperty("keys").EnumerateArray().Select(k => k.GetString()!).ToList(), a.GetProperty("waitForControl").GetBoolean());
+                        a.GetProperty("keys").EnumerateArray().Select(k => k.GetString()!).ToList(), a.GetProperty("waitForControl").GetBoolean())
+                        { AiLevel = OptInt(a, "aiLevel"), OpponentAiLevel = OptInt(a, "opponentAiLevel") };
                 steps.Add(new PlanStep(s.GetProperty("index").GetInt32(), s.GetProperty("edge").GetString()!, s.GetProperty("kind").GetString()!,
                     s.GetProperty("from").GetString()!, s.GetProperty("to").GetString()!, OptInt(s, "fromState"), s.GetProperty("toState").GetInt32(),
                     OptStr(s, "command"), input, OptStr(s, "contact"), OptInt(s, "earliestTick"), s.GetProperty("timeoutFrames").GetInt32(),
@@ -337,7 +349,8 @@ public static class InputPlanner
             sb.Append(s.IsForce ? " force = true," : string.Empty);
             if (s.Action is { } act)
                 sb.Append($" action = {Q(act.Kind)}, frames = {N(act.Frames)}, distance = {N(act.Distance)}, stopOnRecover = {(act.StopIfOpponentRecovers ? "true" : "false")}, " +
-                          $"waitCtrl = {(act.WaitForControl ? "true" : "false")}, keys = {{{string.Join(",", (act.Keys ?? []).Select(Q))}}},");
+                          $"waitCtrl = {(act.WaitForControl ? "true" : "false")}, keys = {{{string.Join(",", (act.Keys ?? []).Select(Q))}}}," +
+                          (act.AiLevel is { } ai ? $" aiLevel = {ai}," : string.Empty) + (act.OpponentAiLevel is { } oai ? $" opponentAi = {oai}," : string.Empty));
             sb.Append('\n');
             sb.Append("      input = {");
             sb.Append(string.Join(", ", s.Input.Select(f => "{" + string.Join(",", f.Keys.Select(Q)) + "}")));

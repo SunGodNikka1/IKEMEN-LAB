@@ -57,19 +57,31 @@ public static class BehaviorCoordinates
     /// The run's samples, in frame order, on one scale. <paramref name="notes"/> (when given) gets one plain line for each correction made, or for a scale that
     /// could not be checked.
     /// </summary>
+    /// <summary>
+    /// Distance sources a probe 0.5+ writes already in world (320-wide) units, centre to centre along the world axis — the ONE distance interpretation
+    /// Play Ability, Sequence Lab, behavior recognition and Teach AI share. Such a distance is never rescaled here.
+    /// </summary>
+    public static bool IsWorldDistance(string? source) => source is "engine:p2DistX" or "derived:world";
+
     public static IReadOnlyList<FrameEvent> Normalize(TraceLog log, int? subjectLocalWidth, List<string>? notes = null)
     {
         var frames = log.Frames.OrderBy(f => f.Frame).ToList();
-        var unit = subjectLocalWidth is int w && w > 0 && w != (int)Reference ? Reference / w : 1.0;
-        var k = OpponentRatio(frames);
+        // The engine's own localcoord report (probe 0.5+) wins over the DEF the caller read.
+        var reported = frames.Select(f => f.P1.LocalCoord).OfType<double>().FirstOrDefault(x => x > 0);
+        var width = reported > 0 ? reported : subjectLocalWidth is int w && w > 0 ? w : Reference;
+        var unit = width != Reference ? Reference / width : 1.0;
+        // How the players' units relate: from both localcoords when the engine reports them, else from their screen-edge sums.
+        var lc2 = frames.Select(f => f.P2.LocalCoord).OfType<double>().FirstOrDefault(x => x > 0);
+        var k = reported > 0 && lc2 > 0 ? reported / lc2 : OpponentRatio(frames);
         var mixed = k is { } ratio && Math.Abs(ratio - 1) > SameScale;
+        var world = frames.Any(f => IsWorldDistance(f.DistanceSource));
         if (k is null && frames.Any(f => f.P1.PosX is not null && f.P2.PosX is not null))
             notes?.Add("The fighters' coordinate scales could not be compared (this trace has no screen-edge distances); positions are used as recorded.");
         if (mixed)
             notes?.Add($"The opponent reports positions on another coordinate scale (one of its units = {k!.Value.ToString("0.###", CultureInfo.InvariantCulture)} of the fighter's); " +
-                       "its position was re-expressed from the engine's screen-edge distances.");
+                       (world ? "its position was placed from the engine's own distance." : "its position was re-expressed from the engine's screen-edge distances."));
         if (unit != 1.0)
-            notes?.Add($"Distances are in {Reference:0}-wide units (the fighter's localcoord is {subjectLocalWidth} wide).");
+            notes?.Add($"Distances are in {Reference:0}-wide units (the fighter's localcoord is {width.ToString("0", CultureInfo.InvariantCulture)} wide).");
         if (!mixed && unit == 1.0) return frames;
 
         return frames.Select(f =>
@@ -77,25 +89,28 @@ public static class BehaviorCoordinates
             var p1 = f.P1;
             var p2 = f.P2;
             var distance = f.Distance;
+            var worldDistance = IsWorldDistance(f.DistanceSource);
             if (mixed)
             {
                 var r = k!.Value;
-                // The fighter's screen centre in its own reported frame, plus the opponent's screen offset in the fighter's units.
-                double? x2 = p1.PosX is { } x1 && ScreenOffset(p1) is { } o1 && ScreenOffset(p2) is { } o2 ? x1 - o1 + r * o2 : null;
+                // The opponent's position in the fighter's frame: from the engine's own distance when the probe wrote one, else the fighter's screen
+                // centre in its own reported frame plus the opponent's screen offset in the fighter's units.
+                double? x2 = worldDistance && distance is { } wd && p1.PosX is { } px ? px + wd / unit
+                    : p1.PosX is { } x1 && ScreenOffset(p1) is { } o1 && ScreenOffset(p2) is { } o2 ? x1 - o1 + r * o2 : null;
                 p2 = p2 with
                 {
                     PosX = x2, PosY = p2.PosY * r, VelX = p2.VelX * r, VelY = p2.VelY * r,
                     BackEdgeBodyDist = p2.BackEdgeBodyDist * r, FrontEdgeBodyDist = p2.FrontEdgeBodyDist * r
                 };
-                // The engine's own P2DistX is already in the fighter's units; a distance the probe derived from raw positions is not.
-                if (f.DistanceSource != "engine-trigger") distance = x2 is { } a && p1.PosX is { } b ? a - b : null;
+                // A distance the probe derived from raw positions is in mixed units; the old "engine-trigger" name was P1's units.
+                if (!worldDistance && f.DistanceSource != "engine-trigger") distance = x2 is { } a && p1.PosX is { } b ? a - b : null;
             }
 
             if (unit != 1.0)
             {
                 p1 = Scale(p1, unit);
                 p2 = Scale(p2, unit);
-                distance *= unit;
+                if (!worldDistance) distance *= unit;
             }
 
             return f with { P1 = p1, P2 = p2, Distance = distance };

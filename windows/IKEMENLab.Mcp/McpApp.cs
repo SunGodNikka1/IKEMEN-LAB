@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json.Nodes;
 using IKEMENLab.Core.XRay.Behavior;
+using IKEMENLab.Core.XRay.Director;
 using IKEMENLab.Core.XRay.Playback;
 using IKEMENLab.Core.XRay.Runtime;
 using IKEMENLab.Core.XRay.Verify;
@@ -32,7 +33,10 @@ public sealed class McpApp
           episode on the current files and engine), Confirmed Pattern (the explicit repeat rule in the answer). Changed files or engine make runtime
           evidence stale. why_did_ai_do_this gives observed context and consistent static rules only: which AI controller fired is not recorded, so
           never say the AI did something "because" a rule fired.
-        - Nothing here edits character files, the AI, or the app's settings.
+        - Teach AI (Knockdown Chase only): propose_behavior makes a Draft from evidence, inspect_behavior_draft shows it (ownership, proof, generated
+          rules), test_behavior runs it in sandboxes on a disposable copy. Approval and deployment are the user's, in the app; there is no tool for them.
+          A generated behavior's Why is exact only where its intention register and the trace agree; existing AI keeps cause unknown.
+        - Nothing here edits character files, the installed AI, or the app's settings.
         """;
 
     public McpApp(McpOptions options, TextWriter log, IEngineRunner? runner = null, RuntimeBroker? broker = null, string? sandboxBase = null)
@@ -43,14 +47,15 @@ public sealed class McpApp
         var observe = new ObserveTools(Context);
         var experiment = new ExperimentTools(Context, Jobs);
         var behavior = new BehaviorTools(Context, Jobs);
-        Server = new McpServer(BuildTools(observe, experiment, behavior), Instructions, log, Version);
+        var director = new DirectorTools(Context, Jobs);
+        Server = new McpServer(BuildTools(observe, experiment, behavior, director), Instructions, log, Version);
     }
 
     public LabContext Context { get; }
     public JobQueue Jobs { get; }
     public McpServer Server { get; }
 
-    public static string Version => typeof(McpApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.5.0";
+    public static string Version => typeof(McpApp).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.6.0";
 
     public Task<ShutdownResult> ShutdownAsync(TimeSpan? timeout = null) => Jobs.ShutdownAsync(timeout ?? TimeSpan.FromSeconds(30));
 
@@ -90,7 +95,7 @@ public sealed class McpApp
 
     private static JsonObject Spec() => Schema.Str("Alternative to steps: the Sequence Lab's compact form, e.g. \"1000 > chase:35 > wait:20 > 200\" (ids, walk:N, back:N, wait:N, chase:D, chase:D!, dash, jump).");
 
-    private static IReadOnlyList<McpTool> BuildTools(ObserveTools o, ExperimentTools x, BehaviorTools b)
+    private static IReadOnlyList<McpTool> BuildTools(ObserveTools o, ExperimentTools x, BehaviorTools b, DirectorTools d)
     {
         static Func<ToolArgs, CancellationToken, Task<JsonObject>> Sync(Func<ToolArgs, JsonObject> f) => (a, _) => Task.FromResult(f(a));
 
@@ -187,6 +192,41 @@ public sealed class McpApp
                     ["subject_ai_level"] = Schema.Int("The character's AI level.", 1, 8, BehaviorWatch.DefaultSubjectAi),
                     ["setup"] = Setup(), ["wait_seconds"] = Wait()
                 }, "character"), false, b.WatchMatch),
+
+            // ---------------------------------------------------------- Teach AI (Knockdown Chase v1): drafts and sandbox tests only - no approve, no deploy
+            new("propose_behavior", "Propose a taught behavior",
+                "Teach AI v1 (Knockdown Chase only): turns evidence into a Draft - from a Sequence Lab experiment (from_experiment), a recognised Knockdown Chase in a watched run (from_watch = \"<run id>@<start frame>\") or a follow-up move. Returns the plain card (WHEN / DO / THEN / GIVE UP IF), the follow-up's runtime proof, the ownership check against the existing AI and the generated rules. Writes only the draft into IKEMEN Lab's data; never character files.",
+                Schema.Object(new JsonObject
+                {
+                    ["character"] = Character(),
+                    ["from_experiment"] = Schema.Str("A Sequence Lab experiment id (opening -> chase -> (wait) -> follow-up)."),
+                    ["from_watch"] = Schema.Str("\"<watched run id>@<Knockdown Chase start frame>\" (inspect_behavior lists episodes)."),
+                    ["follow_up"] = Schema.Str("The follow-up move by name or id (overrides the evidence's)."),
+                    ["when"] = Schema.Enum("Which knockdown starts it.", "falling", "lying", "both"),
+                    ["chase_limit"] = Schema.Int("Only chase when the knockdown is at most this far (px).", KnockdownChaseSpec.MinDistance, KnockdownChaseSpec.MaxDistance),
+                    ["attack_distance"] = Schema.Int("Start the follow-up within this distance (px).", KnockdownChaseSpec.MinDistance, KnockdownChaseSpec.MaxDistance),
+                    ["attack_timing"] = Schema.Enum("While they are down, or as they get up (meaty).", "while_down", "as_they_get_up"),
+                    ["lead_frames"] = Schema.Int("As they get up: how many frames before they can act.", 0, KnockdownChaseSpec.MaxLead),
+                    ["give_up_frames"] = Schema.Int("Give up after this many frames of chasing.", KnockdownChaseSpec.MinGiveUp, KnockdownChaseSpec.MaxGiveUp),
+                    ["frequency"] = Schema.Enum("How often a knockdown is taken (rolled once per knockdown).", "always", "often", "sometimes"),
+                    ["fallback"] = Schema.Enum("If the opponent recovers first.", "stop", "block", "retreat"),
+                    ["placement"] = Schema.Enum("Ownership: before the existing AI, after it, or before it while suppressing chosen rules on knockdowns.", "before", "after", "suppress"),
+                    ["suppress"] = new JsonObject { ["type"] = "array", ["items"] = Schema.Str("A State -1 rule id or name."), ["description"] = "With placement = suppress: the existing rules that yield on knockdowns." },
+                    ["second_opponent"] = Schema.Str("A second opponent (chars/ folder) for the test, e.g. one with another localcoord."),
+                    ["trials"] = Schema.Int("Controlled runs per setup when tested.", 1, 5, 2)
+                }, "character"), false, Sync(d.Propose)),
+            new("inspect_behavior_draft", "Inspect a taught behavior",
+                "Without behavior_id: the character's taught behaviors and their status (Draft, Testing, Ready for approval, Live, Retired). With it: the card, follow-up proof, ownership, generated rules, the latest test and the working-copy diff; include_code adds the generated CNS.",
+                Schema.Object(new JsonObject
+                {
+                    ["character"] = Character(), ["behavior_id"] = Schema.Str("A taught behavior id (kc-...)."), ["include_code"] = Schema.Bool("Include the generated CNS and the diff.", false)
+                }, "character"), true, Sync(d.Inspect)),
+            new("test_behavior", "Test a taught behavior",
+                "Runs the behavior's test suite in sandboxes on a disposable staging copy (never the working copy or the installed character): the proven opening knocks the opponent down, the AI takes over (idle opponent, active opponent, optional second opponent), a natural match, and regressions (the proven sequence, the follow-up). Reports chases, follow-ups, connections, fallbacks, give-ups and conflicts - scoped to these setups. Long-running: returns a jobId.",
+                Schema.Object(new JsonObject
+                {
+                    ["character"] = Character(), ["behavior_id"] = Schema.Str("A taught behavior id (kc-...)."), ["setup"] = Setup(), ["wait_seconds"] = Wait()
+                }, "character", "behavior_id"), false, d.Test),
 
             // ---------------------------------------------------------- Experiment
             new("play_ability", "Play ability",

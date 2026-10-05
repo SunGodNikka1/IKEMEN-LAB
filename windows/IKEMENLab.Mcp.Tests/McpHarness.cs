@@ -123,7 +123,8 @@ internal sealed class McpHarness : IDisposable
 }
 
 /// <summary>
-/// The test engine: a State Preview gets a forced-state trace, a sequence gets the mock trace of <see cref="Scenario"/>, anything else gets a Play Ability
+/// The test engine: a Teach AI fixture (a plan with a hand-over) gets a Director trace (the idle opponent: the follow-up connects; an active one: it recovers
+/// first), a State Preview gets a forced-state trace, a sequence gets the mock trace of <see cref="Scenario"/>, anything else gets a Play Ability
 /// trace (the move starts from its command, hits for 20 and recovers). <see cref="Block"/> holds the run until it is released or cancelled.
 /// </summary>
 internal sealed class TestEngine : ICancellableEngineRunner
@@ -179,7 +180,9 @@ internal sealed class TestEngine : ICancellableEngineRunner
         var fingerprint = Regex.Match(lua, "fingerprint = \"([0-9A-F]+)\"").Groups[1].Value;
         var route = Regex.Match(lua, "route = \"([^\"]+)\"").Groups[1].Value;
         string trace;
-        if (lua.Contains("force = true")) trace = Preview(fingerprint, int.Parse(Regex.Match(lua, "toState = (-?\\d+)").Groups[1].Value));
+        if (lua.Contains("action = \"handover\"", StringComparison.Ordinal))
+            trace = DirectorFixtures.Trace(lua.Contains("opponentAi = ", StringComparison.Ordinal) ? "recover" : "connect", fingerprint);   // a Teach AI fixture
+        else if (lua.Contains("force = true")) trace = Preview(fingerprint, int.Parse(Regex.Match(lua, "toState = (-?\\d+)").Groups[1].Value));
         else if (route.StartsWith("sequence:", StringComparison.Ordinal))
         {
             trace = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", $"xray_driver_mock_{Scenario}.jsonl"));

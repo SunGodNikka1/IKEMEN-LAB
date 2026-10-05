@@ -265,6 +265,19 @@ public sealed class ComboPlaybackPanel : ObservableObject
     /// <summary>Resolves the playback setup the way Play does (Play Ability uses it too, so both lenses share one setup).</summary>
     public PlaybackSetup? CheckSetup(bool showIssuesAsSetup) => RefreshSetup(showIssuesAsSetup);
 
+    /// <summary>The same setup against another opponent (Teach AI's second setup). The shown setup summary is not changed.</summary>
+    public PlaybackSetup? CheckSetup(bool showIssuesAsSetup, string? dummyOverride)
+    {
+        if (dummyOverride is null) return CheckSetup(showIssuesAsSetup);
+        try
+        {
+            var settings = CurrentSettings();
+            settings.XRayDummy = dummyOverride;
+            return PlaybackPreflight.Check(_owner.Root, FolderUnderChars(_owner.Entry.FolderPath), settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return null; }
+    }
+
     private PlaybackSetup? RefreshSetup(bool showIssuesAsSetup)
     {
         PlaybackSetup setup;
